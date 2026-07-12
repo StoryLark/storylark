@@ -1,0 +1,26 @@
+{
+  "name": "storyreader",
+  "private": true,
+  "version": "0.1.0",
+  "description": "StoryReader — installable PWA for branded story libraries (read + listen + offline + sync)",
+  "workspaces": [
+    "app",
+    "worker",
+    "tools"
+  ],
+  "scripts": {
+    "dev:holdfast": "npm run build -w app -- --mode holdfast && wrangler dev --env holdfast",
+    "dev:gunner": "npm run build -w app -- --mode gunner && wrangler dev --env gunner",
+    "build:holdfast": "npm run build -w app -- --mode holdfast",
+    "build:gunner": "npm run build -w app -- --mode gunner",
+    "deploy:holdfast": "npm run build:holdfast && wrangler deploy --env holdfast",
+    "deploy:gunner": "npm run build:gunner && wrangler deploy --env gunner",
+    "publish:holdfast": "node tools/publish.mjs --brand holdfast",
+    "publish:gunner": "node tools/publish.mjs --brand gunner",
+    "typecheck": "tsc -p app/tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "wrangler": "^4.0.0"
+  }
+}

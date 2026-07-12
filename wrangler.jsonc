@@ -1,0 +1,61 @@
+{
+  // StoryReader — one Worker per brand, selected with --env.
+  // Static assets are served free of Worker invocations; only /api/* runs code.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "storyreader",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "assets": {
+    "directory": "app/dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"],
+    "not_found_handling": "single-page-application"
+  },
+  "observability": { "enabled": true },
+  "env": {
+    "holdfast": {
+      "name": "storyreader-holdfast",
+      "routes": [{ "pattern": "app.holdfastpress.com", "custom_domain": true }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "storyreader-holdfast",
+          "database_id": "db69adad-e1d3-437a-96a3-72b64f9b3445",
+          "migrations_dir": "worker/migrations"
+        }
+      ],
+      "r2_buckets": [
+        { "binding": "CONTENT", "bucket_name": "storyreader-holdfast-content" }
+      ],
+      "vars": {
+        "BRAND": "holdfast",
+        "APP_ORIGIN": "https://app.holdfastpress.com",
+        "CONTENT_ORIGIN": "https://content.holdfastpress.com",
+        "MAIL_FROM": "StoryReader <noreply@holdfastpress.com>",
+        "APP_NAME": "StoryReader — Holdfast Press"
+      }
+    },
+    "gunner": {
+      "name": "storyreader-gunner",
+      "routes": [{ "pattern": "app.gunnerthelab.com", "custom_domain": true }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "storyreader-gunner",
+          "database_id": "35a6c982-8ecb-417d-8cb9-3ff1dbfa1cc7",
+          "migrations_dir": "worker/migrations"
+        }
+      ],
+      "r2_buckets": [
+        { "binding": "CONTENT", "bucket_name": "storyreader-gunner-content" }
+      ],
+      "vars": {
+        "BRAND": "gunner",
+        "APP_ORIGIN": "https://app.gunnerthelab.com",
+        "CONTENT_ORIGIN": "https://content.gunnerthelab.com",
+        "MAIL_FROM": "StoryReader <noreply@gunnerthelab.com>",
+        "APP_NAME": "StoryReader — Gunner the Lab"
+      }
+    }
+  }
+}

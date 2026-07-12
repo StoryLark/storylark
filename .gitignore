@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.local
+.env
+.env.*
+tools/.state/
+tools/.work/
+*.mp3
+!brands/**/*.mp3
+.DS_Store
+Thumbs.db
+
+# stray literal folder from unexpanded hook variable
+{{REPO_ROOT}}/
+
+
+# Claude Code local settings (logs and machine-local overrides only)
+.claude/logs/
+.claude/settings.local.json
