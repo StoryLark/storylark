@@ -6,8 +6,8 @@
   "tagline": "Read it. Hear it. Take it anywhere.",
   "appOrigin": "https://app.storylark.dev",
   "contentOrigin": "https://content.storylark.dev",
-  "themeColor": "#FFFFFF",
-  "backgroundColor": "#FFFFFF",
+  "themeColor": "#FBF8F2",
+  "backgroundColor": "#FBF8F2",
   "defaultTheme": "light",
   "author": "StoryLark",
   "layout": "flat",
@@ -20,7 +20,7 @@
     "Collection": null
   },
   "tts": {
-    "voice": "en-US-AndrewMultilingualNeural",
+    "voice": "en-US-Ava:DragonHDOmniLatestNeural",
     "rate": "0%",
     "outputFormat": "Audio48Khz96KBitRateMonoMp3"
   },
