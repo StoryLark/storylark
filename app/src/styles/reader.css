@@ -1,0 +1,234 @@
+/* ---- Reader screen ---- */
+
+.reader-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--rule);
+  padding: 0.5rem 0;
+}
+
+.reader-heading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+
+.reader-label {
+  font-family: var(--font-headers);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.reader-title {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60vw;
+}
+
+.mode-toggle {
+  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.mode-toggle.active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
+.chapter-setting {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  text-align: center;
+  margin: 1rem 0 0;
+}
+
+.chapter-body {
+  font-size: calc(1.05rem * var(--reader-font-scale, 1));
+  line-height: var(--reader-line-height, 1.7);
+  padding: 1.5rem 0 6rem;
+}
+
+.para {
+  margin: 0;
+  text-indent: 1.4em;
+}
+
+.para-first {
+  text-indent: 0;
+}
+
+.scene-break {
+  text-align: center;
+  color: var(--text-faint);
+  letter-spacing: 0.5em;
+  margin: 1.8em 0;
+  user-select: none;
+}
+
+.display-beat {
+  text-align: center;
+  font-style: italic;
+  color: var(--text-muted);
+  margin: 1.6em 0;
+}
+
+.end-marker {
+  text-align: center;
+  font-style: italic;
+  color: var(--text-faint);
+  margin-top: 3em;
+}
+
+/* Inline story art — fits the reader column, never narrated. */
+.story-figure {
+  margin: 1.8em 0;
+  text-align: center;
+}
+
+.story-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 12px;
+}
+
+.story-figcaption {
+  margin: 0.6em auto 0;
+  max-width: 90%;
+  font-family: var(--font-mono);
+  font-size: 0.72em;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* Phone/text-message UI — always dark, mono, regardless of theme. */
+.message-block {
+  background: #14161c;
+  border: 1px solid #2a2f3a;
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  margin: 1.4em 0;
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  line-height: 1.6;
+  color: #c9ccd1;
+}
+
+.message {
+  margin: 0.35em 0;
+}
+
+.message-meta {
+  color: #7a8fa8;
+  font-weight: 600;
+}
+
+/* ---- Read-along highlight ---- */
+
+.ra-word {
+  border-radius: 3px;
+}
+
+.ra-word.word-active {
+  background: var(--highlight-word);
+}
+
+.block-active {
+  border-left: 2px solid var(--highlight-block);
+  padding-left: 0.6rem;
+  margin-left: -0.6rem;
+}
+
+/* ---- Chapter nav + player ---- */
+
+.chapter-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 0 5rem;
+}
+
+.nav-btn {
+  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  cursor: pointer;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background-color 0.15s ease;
+}
+
+.nav-btn:hover {
+  background: var(--bg-sunken);
+}
+
+.player-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--bg-raised);
+  border-top: 1px solid var(--rule);
+  padding: 0.6rem 1rem calc(0.6rem + env(safe-area-inset-bottom));
+  max-width: 42rem;
+  margin: 0 auto;
+}
+
+.play-btn {
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 50%;
+  width: 2.8rem;
+  height: 2.8rem;
+  cursor: pointer;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.player-track {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-sunken);
+  border-radius: 3px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.player-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.player-time {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}

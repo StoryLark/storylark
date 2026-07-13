@@ -1,0 +1,13 @@
+{
+  "name": "@storylark/worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "@simplewebauthn/server": "^13.3.2",
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260601.0"
+  }
+}

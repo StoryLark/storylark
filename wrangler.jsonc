@@ -1,0 +1,42 @@
+{
+  // StoryLark — one Worker per brand, selected with --env.
+  // Static assets are served free of Worker invocations; only /api/* runs code.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "storylark",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "assets": {
+    "directory": "app/dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"],
+    "not_found_handling": "single-page-application"
+  },
+  "observability": { "enabled": true },
+  // One env per brand, selected with `--env`. `storylark` is the base build /
+  // default theme (deploys to storylark.dev): copy this block, rename it, and
+  // fill in the brand's own domain, D1 database_id, R2 bucket, and vars.
+  "env": {
+    "storylark": {
+      "name": "storylark",
+      "routes": [{ "pattern": "app.storylark.dev", "custom_domain": true }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "storylark",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "worker/migrations"
+        }
+      ],
+      "r2_buckets": [
+        { "binding": "CONTENT", "bucket_name": "storylark-content" }
+      ],
+      "vars": {
+        "BRAND": "storylark",
+        "APP_ORIGIN": "https://app.storylark.dev",
+        "CONTENT_ORIGIN": "https://content.storylark.dev",
+        "MAIL_FROM": "StoryLark <noreply@storylark.dev>",
+        "APP_NAME": "StoryLark"
+      }
+    }
+  }
+}

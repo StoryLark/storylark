@@ -1,0 +1,22 @@
+{
+  "name": "storylark",
+  "private": true,
+  "version": "0.1.0",
+  "description": "StoryLark — installable PWA for branded story libraries (read + listen + offline + sync)",
+  "workspaces": [
+    "app",
+    "worker",
+    "tools"
+  ],
+  "scripts": {
+    "dev": "npm run build -w app -- --mode storylark && wrangler dev --env storylark",
+    "build": "npm run build -w app -- --mode storylark",
+    "deploy": "npm run build && wrangler deploy --env storylark",
+    "publish": "node tools/publish.mjs --brand storylark",
+    "typecheck": "tsc -p app/tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "wrangler": "^4.0.0"
+  }
+}

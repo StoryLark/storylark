@@ -1,0 +1,474 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  min-height: 100dvh;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+/* Native <select> menus must not fall back to the browser's default white box:
+   in dark themes that white control carries the light inherited text and turns
+   unreadable. Pin them to themed surfaces so they read in every brand/theme.
+   (More specific rules like .np-picker select still override this.) */
+select {
+  background: var(--bg-sunken);
+  color: var(--text);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+}
+
+/* Native form chrome (dropdowns, checkboxes, range sliders) otherwise renders
+   with the browser's default light/blue styling, which clashes hard with a
+   warm cream/brown theme — most visible on the all-native-controls Settings
+   screen. Bring it into the theme with minimal, standard CSS; anything with
+   a more specific class (e.g. .library-sort, .np-picker select) still wins. */
+select {
+  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+}
+
+input[type='checkbox'],
+input[type='range'] {
+  accent-color: var(--accent);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.screen {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 1rem 1.25rem calc(2rem + env(safe-area-inset-bottom));
+}
+
+/* ---- Library ---- */
+
+.app-header {
+  position: relative;
+  text-align: center;
+  padding: 1.5rem 0 1rem;
+}
+
+.app-title {
+  font-family: var(--font-headers);
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  font-size: 1.6rem;
+  margin: 0;
+}
+
+.app-tagline {
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0.35rem 0 0;
+  font-size: 0.95rem;
+}
+
+.settings-link {
+  position: absolute;
+  top: 1.25rem;
+  right: 0;
+}
+
+.new-banner {
+  background: var(--accent);
+  color: var(--bg);
+  text-align: center;
+  padding: 0.5rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  cursor: pointer;
+}
+
+/* ---- App-wide chrome ---- */
+
+/* SW update prompt (see lib/update.ts) — floats above everything, including
+   the tab bar, since it can appear on any screen. Styled as a warm outlined
+   card (paper toast) rather than a full-bleed alert bar, echoing the update
+   toast on the marketing site: bordered, bg-raised, rounded, soft shadow. */
+.update-banner {
+  position: fixed;
+  top: calc(0.75rem + env(safe-area-inset-top));
+  left: 0.75rem;
+  right: 0.75rem;
+  z-index: 40;
+  max-width: 26rem;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  padding: 0.7rem 1rem;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.9rem;
+}
+
+.update-banner-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.group-title {
+  font-family: var(--font-headers);
+  font-weight: 400;
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 0.35rem;
+}
+
+.book-card {
+  display: flex;
+  gap: 1rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.book-cover {
+  width: 92px;
+  height: auto;
+  align-self: flex-start;
+  border-radius: 6px;
+  max-width: 100%;
+}
+
+.book-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.book-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+.book-author {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0.15rem 0 0.75rem;
+}
+
+.chapter-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chapter-row {
+  padding: 0.6rem 0.25rem;
+  border-top: 1px solid var(--rule);
+  cursor: pointer;
+}
+
+.chapter-row:hover {
+  background: var(--bg-sunken);
+}
+
+.chapter-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  align-items: baseline;
+}
+
+.chapter-label {
+  font-family: var(--font-headers);
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.chapter-title {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+}
+
+.chapter-meta {
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+}
+
+.chapter-progress {
+  height: 3px;
+  background: var(--bg-sunken);
+  border-radius: 2px;
+  margin-top: 0.5rem;
+  overflow: hidden;
+}
+
+.chapter-progress-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 3rem 1rem;
+  font-style: italic;
+}
+
+/* ---- Shared controls ---- */
+
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+}
+
+.icon-btn:hover {
+  background: var(--bg-sunken);
+}
+
+.btn {
+  display: inline-block;
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 10px;
+  padding: 0.55rem 1.1rem;
+  cursor: pointer;
+  text-decoration: none;
+  text-align: center;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+.btn:hover {
+  background: var(--accent-strong);
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
+}
+
+.btn-small {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+.btn-google {
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--rule);
+  margin-top: 0.5rem;
+}
+
+/* ---- Settings ---- */
+
+/* Settings typography is pinned to the brand vars (not just inheritance) so
+   each brand's Settings matches its own type used across the rest of the app:
+   headers font for headings, body font for rows/notes, mono for the version. */
+.settings-section {
+  border-top: 1px dashed var(--rule);
+  padding: 1.25rem 0;
+  font-family: var(--font-body);
+}
+
+.settings-section h2 {
+  font-family: var(--font-headers);
+  font-weight: 400;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  margin: 0 0 0.75rem;
+}
+
+.settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.45rem 0;
+}
+
+.settings-note {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.signin-error {
+  color: var(--accent-strong);
+}
+
+.signin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.signin-form input {
+  background: var(--bg-sunken);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  width: 100%;
+}
+
+/* Password field with an inline plain-text show/hide toggle (Create account
+   and Sign in forms). The input keeps the shared .signin-form input look;
+   the wrapper just overlays the toggle button on its right edge. */
+.signin-password-wrap {
+  position: relative;
+  display: flex;
+}
+
+.signin-password-wrap input {
+  padding-right: 3.5rem;
+}
+
+.signin-password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.4rem;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--link);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.35rem 0.5rem;
+}
+
+/* Create account / Sign in toggle above the two auth forms. */
+.account-auth-seg {
+  margin: 0.75rem 0 1rem;
+}
+
+.settings-footer {
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 0.8rem;
+  padding-top: 2rem;
+}
+
+.settings-about-link {
+  font-family: var(--font-headers);
+  letter-spacing: 0.04em;
+}
+
+.settings-version {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  margin: 0.5rem 0 0;
+}
+
+/* ---- Account (first section on Settings, and the one place profile/passkey
+   state lives — a raised card so it reads as distinct from the plain dashed-
+   divider rows below it, not just another settings row group). ---- */
+
+.settings-account-card {
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  background: var(--bg-raised);
+  padding: 1.1rem 1.1rem 1.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.settings-account-card h2 {
+  margin-bottom: 0.6rem;
+}
+
+.account-signout {
+  margin-top: 0.85rem;
+}
+
+.account-passkeys {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--rule);
+}
+
+.account-passkeys-title {
+  font-family: var(--font-headers);
+  font-weight: 400;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 0.5rem;
+}
+
+.account-passkey-nudge {
+  background: var(--bg-sunken);
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
+.account-passkey-nudge .settings-note {
+  margin: 0;
+}
+
+.account-passkey-list {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+}
+
+.account-passkey-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--rule);
+}
+
+.account-passkey-row:first-child {
+  border-top: none;
+}
+
+.account-passkey-meta {
+  display: block;
+  font-size: 0.8rem;
+}

@@ -1,0 +1,46 @@
+/* StoryLark — the default brand theme that ships with the base build. It is the
+   swappable "theme" layer: copy brands/storylark to brands/<your-id> (or, later,
+   install a @storylark/theme-* package), then retune these CSS variables to your
+   brand. Light is the default; the [data-theme="dark"] block mirrors every token
+   for dark mode. --text-muted/-faint and --rule are this app's own list/card
+   chrome tokens. */
+:root {
+  /* Render native controls (select popups, checkboxes, range, scrollbars) light
+     so their default surfaces match the theme instead of flashing dark. */
+  color-scheme: light;
+
+  --bg: #FFFFFF;
+  --bg-raised: #FFFFFF;
+  --bg-sunken: #F4F4F5;
+  --text: #18181B;
+  --text-muted: #52525B;
+  --text-faint: #A1A1AA;
+  --accent: #4F46E5;
+  --accent-strong: #4338CA;
+  --rule: #E4E4E7;
+  --link: #4F46E5;
+
+  --font-display: "Newsreader", Georgia, serif;
+  --font-headers: "Newsreader", Georgia, serif;
+  --font-body: "Newsreader", Georgia, serif;
+  --font-mono: "Inter", system-ui, sans-serif;
+
+  --highlight-word: rgba(79, 70, 229, 0.18);
+  --highlight-block: rgba(79, 70, 229, 0.45);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0B0B0F;
+  --bg-raised: #17171C;
+  --bg-sunken: #060608;
+  --text: #F4F4F5;
+  --text-muted: #C4C4CC;
+  --text-faint: #8A8A93;
+  --accent: #818CF8;
+  --accent-strong: #6366F1;
+  --rule: #27272A;
+  --link: #A5B4FC;
+  --highlight-word: rgba(129, 140, 248, 0.22);
+  --highlight-block: rgba(129, 140, 248, 0.5);
+}
