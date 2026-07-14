@@ -16,7 +16,7 @@ import './styles/ui2.css';
 /**
  * Boots the StoryLark app into `el`. This is the whole client API a site
  * needs: the theme, fonts, and site config arrive through the virtual modules
- * provided by `defineStorylarkConfig` (see @storylark/core/vite).
+ * provided by `defineStorylarkConfig` (see storylark-core/vite).
  */
 export function mount(el: HTMLElement): void {
   document.title = `${BRAND.appName}: ${BRAND.name}`;

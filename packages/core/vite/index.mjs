@@ -1,13 +1,13 @@
-// @storylark/core/vite — the site-facing build preset.
+// storylark-core/vite — the site-facing build preset.
 //
 // A downstream site's whole vite.config.ts is:
 //
-//   import { defineStorylarkConfig } from '@storylark/core/vite';
+//   import { defineStorylarkConfig } from 'storylark-core/vite';
 //   export default defineStorylarkConfig();
 //
 // The preset owns the build mechanics (preact, PWA/service worker, virtual
 // config/theme/fonts modules, manifest + icons) so a `npm update
-// @storylark/core` upgrades the build without touching the site's files.
+// storylark-core` upgrades the build without touching the site's files.
 //
 // Brand selection: the Vite mode IS the brand id (`vite build --mode <id>`,
 // matching brands/<id>/ under the site root). With no brand mode, `storylark`.
@@ -54,7 +54,7 @@ export function defineStorylarkConfig(options = {}) {
         brandAssetsPlugin(brandDir, brand),
         VitePWA({
           strategies: 'injectManifest',
-          // The service worker ships inside @storylark/core and compiles in
+          // The service worker ships inside storylark-core and compiles in
           // its own Vite build — hand it the core source dir plus its own
           // instance of the config plugin (plugin instances must not be shared
           // between the app and SW builds).
@@ -72,7 +72,7 @@ export function defineStorylarkConfig(options = {}) {
       ],
       // Core ships TS/TSX source; keep it out of the dep optimizer so Vite
       // compiles it through the normal pipeline (where preact JSX applies).
-      optimizeDeps: { exclude: ['@storylark/core'] },
+      optimizeDeps: { exclude: ['storylark-core'] },
       build: { outDir: 'dist', emptyOutDir: true, sourcemap: false },
     };
     return options.vite ? mergeConfig(config, options.vite) : config;

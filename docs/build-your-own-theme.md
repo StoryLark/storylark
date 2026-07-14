@@ -80,7 +80,7 @@ Minimum shape:
 `brand.json` names the font families in `fonts` (`display`, `headers`, `body`,
 `mono`), and `theme.css` references those families in the `--font-*` tokens.
 The **font files** are bundled automatically: at build time the
-`@storylark/core` Vite preset turns each family name into the matching
+`storylark-core` Vite preset turns each family name into the matching
 `@fontsource/*` imports (e.g. `Newsreader` → `@fontsource/newsreader`), with
 sensible weights per role (body text gets italics; mono doesn't). Families
 bundled with core today: Newsreader, Inter, Lora, Cinzel, Cormorant Garamond,
@@ -132,7 +132,7 @@ hardcoded "story"/"book"):
 
 Replace the three PNGs in `brands/<your-id>/assets/icons/` (`icon-192.png`,
 `icon-512.png`, `icon-maskable-512.png` — the manifest references exactly these).
-The `@storylark/core` build preset copies the whole `assets/icons/` folder to
+The `storylark-core` build preset copies the whole `assets/icons/` folder to
 `dist/icons/` at build time, so any additional files (favicons, logo) are
 shipped too. To generate
 neutral placeholders in your accent color:
@@ -146,7 +146,7 @@ node packages/pipeline/gen-icons.mjs --brand <your-id>
 Today a theme is a folder you copy and edit in-repo. The direction is to make
 themes **installable packages** so a brand can consume one without vendoring it:
 
-- Official themes: `@storylark/theme-*` (e.g. `@storylark/theme-daybreak`).
+- Official themes: `storylark-theme-*` (e.g. `storylark-theme-daybreak`).
 - Community themes: `storylark-theme-*`.
 
 This packaging/distribution model is **planned**, not available today — for now,

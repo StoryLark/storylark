@@ -1,3 +1,3 @@
-import { mount } from '@storylark/core';
+import { mount } from 'storylark-core';
 
 mount(document.getElementById('app')!);

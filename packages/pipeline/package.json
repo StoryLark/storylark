@@ -1,5 +1,5 @@
 {
-  "name": "@storylark/pipeline",
+  "name": "storylark-pipeline",
   "version": "0.2.0",
   "description": "StoryLark publish pipeline — parse → TTS → stitch → R2/local mirror → manifest → push notify. Site-agnostic: runs from a site repo's root with an injected content parser.",
   "license": "Apache-2.0",

@@ -1,4 +1,4 @@
-// Virtual modules provided by the @storylark/core Vite preset
+// Virtual modules provided by the storylark-core Vite preset
 // (defineStorylarkConfig in ../vite/index.mjs).
 declare module 'virtual:storylark-config' {
   import type { Brand } from './lib/types';

@@ -22,8 +22,8 @@ npm install
 ```
 
 This is an npm **workspaces** repo. A single `npm install` at the root installs
-the `app` site and the `packages/*` (`@storylark/core`, `@storylark/worker`,
-`@storylark/pipeline`) workspaces together, linking the site against the local
+the `app` site and the `packages/*` (`storylark-core`, `storylark-worker`,
+`storylark-pipeline`) workspaces together, linking the site against the local
 packages.
 
 ## The commands (from the root `package.json`)
@@ -51,7 +51,7 @@ After `npm run dev`, open the URL Wrangler prints. The app boots as a branded bu
 ## How the brand "mode" works
 
 The Vite build **mode is the brand id**. The `defineStorylarkConfig` preset
-(from `@storylark/core/vite`, used by `app/vite.config.ts`) reads
+(from `storylark-core/vite`, used by `app/vite.config.ts`) reads
 `--mode <brandId>`, loads `brands/<brandId>/brand.json` + `brands/<brandId>/theme.css`,
 and bakes them into the bundle:
 
@@ -72,11 +72,11 @@ The built-in Vite modes (`development`, `production`, `test`) fall back to the
 
 ```
 brands/             per-brand config: brand.json, theme.css, assets/icons/ (and optional assets/covers/)
-app/                the base SITE — a thin consumer of @storylark/core (index.html, entry.ts, vite.config.ts)
-packages/core/      @storylark/core — the PWA engine (library / reader / player / settings + service worker)
+app/                the base SITE — a thin consumer of storylark-core (index.html, entry.ts, vite.config.ts)
+packages/core/      storylark-core — the PWA engine (library / reader / player / settings + service worker)
                     plus the defineStorylarkConfig Vite preset that builds a site from a brand folder
-packages/worker/    @storylark/worker — Cloudflare Worker: Hono API (/api/*) over D1; SQL migrations
-packages/pipeline/  @storylark/pipeline — publish pipeline (markdown -> chapter JSON + TTS audio + word timings -> R2) + generators
+packages/worker/    storylark-worker — Cloudflare Worker: Hono API (/api/*) over D1; SQL migrations
+packages/pipeline/  storylark-pipeline — publish pipeline (markdown -> chapter JSON + TTS audio + word timings -> R2) + generators
 docs/               these docs
 examples/           demo content + a sample parser (public-domain stories) for trying the pipeline
 ```

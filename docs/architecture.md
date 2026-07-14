@@ -23,16 +23,16 @@ The codebase is an npm-workspaces monorepo publishing three packages:
 
 | Package | Role |
 |---|---|
-| `@storylark/core` | The PWA engine (screens, reader, player, sync, SW) plus the `defineStorylarkConfig` Vite preset. A site imports `mount()` and lets the preset own the build. |
-| `@storylark/worker` | The Hono API Worker. A site's worker entry is one line (`export { default } from '@storylark/worker'`); D1 migrations ship under `./migrations`. |
-| `@storylark/pipeline` | The publish pipeline as a site-agnostic CLI (`storylark-publish`) with an injected, site-owned content parser. |
+| `storylark-core` | The PWA engine (screens, reader, player, sync, SW) plus the `defineStorylarkConfig` Vite preset. A site imports `mount()` and lets the preset own the build. |
+| `storylark-worker` | The Hono API Worker. A site's worker entry is one line (`export { default } from 'storylark-worker'`); D1 migrations ship under `./migrations`. |
+| `storylark-pipeline` | The publish pipeline as a site-agnostic CLI (`storylark-publish`) with an injected, site-owned content parser. |
 
 A downstream site repo is *thin*: `index.html`, a 3-line `entry.ts`, a 5-line
 `vite.config.ts`, a brand folder (theme), content, and wrangler config. The
 in-repo `app/` folder is exactly that shape — the base site consuming the
 packages the same way a deployer would. Theme, fonts, and config reach core
 through virtual modules (`virtual:storylark-config` / `-theme.css` / `-fonts`)
-provided by the preset, which is what makes `npm update @storylark/core`
+provided by the preset, which is what makes `npm update storylark-core`
 incapable of touching a site's theme or presentation. Releases are cut with
 Changesets (see `.changeset/` and the Release workflow).
 

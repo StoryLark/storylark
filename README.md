@@ -29,10 +29,10 @@ by D1 and R2.
 
 ```
 brands/             — per-brand config: brand.json, theme.css, manifest template, icons
-app/                — the base site: a thin consumer of @storylark/core
-packages/core/      — @storylark/core: the PWA engine + the defineStorylarkConfig Vite preset
-packages/worker/    — @storylark/worker: Cloudflare Worker — Hono API (/api/*) + static assets
-packages/pipeline/  — @storylark/pipeline: markdown -> chapter JSON + TTS audio + word timings -> R2
+app/                — the base site: a thin consumer of storylark-core
+packages/core/      — storylark-core: the PWA engine + the defineStorylarkConfig Vite preset
+packages/worker/    — storylark-worker: Cloudflare Worker — Hono API (/api/*) + static assets
+packages/pipeline/  — storylark-pipeline: markdown -> chapter JSON + TTS audio + word timings -> R2
 docs/               — technical docs (API, architecture, auth, data model, PWA/offline, read-along)
 ```
 

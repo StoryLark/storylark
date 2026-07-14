@@ -1,5 +1,5 @@
 {
-  "name": "@storylark/site-base",
+  "name": "storylark-site-base",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@storylark/core": "0.2.0"
+    "storylark-core": "0.2.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

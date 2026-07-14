@@ -10,9 +10,9 @@ export interface StorylarkConfigOptions {
 }
 
 /**
- * The @storylark/core build preset. A site's whole vite.config.ts:
+ * The storylark-core build preset. A site's whole vite.config.ts:
  *
- *   import { defineStorylarkConfig } from '@storylark/core/vite';
+ *   import { defineStorylarkConfig } from 'storylark-core/vite';
  *   export default defineStorylarkConfig();
  */
 export function defineStorylarkConfig(options?: StorylarkConfigOptions): UserConfigFnObject;

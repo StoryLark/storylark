@@ -16,8 +16,8 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
   with 28 open voices — no account, no API key, no per-character billing. Premium cloud voices
   (Azure) remain an optional bring-your-own-key upgrade
 - A live demo at storylark.dev, showcasing both voice tiers
-- The three-layer package model: the engine (`@storylark/core` + its Vite preset), API Worker
-  (`@storylark/worker`), and content pipeline (`@storylark/pipeline`) are separate, versioned
+- The three-layer package model: the engine (`storylark-core` + its Vite preset), API Worker
+  (`storylark-worker`), and content pipeline (`storylark-pipeline`) are separate, versioned
   packages — a branded site is just an entry file, a config, and a theme folder, and pulling in
   engine updates can never touch its theme or layout
 - Exact word-synced narration from the free bundled narrator: timings are force-aligned against
@@ -29,7 +29,7 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
 
 ## Now
 
-- Publishing the `@storylark/*` packages to the public npm registry (release automation is in
+- Publishing the `storylark-*` packages to the public npm registry (release automation is in
   place; first publish pending)
 
 ## Next

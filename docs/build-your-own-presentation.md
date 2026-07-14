@@ -108,7 +108,7 @@ and only `layout`/`nouns` vary it.
 
 The planned distribution model mirrors themes:
 
-- Official presentation templates: `@storylark/template-*`.
+- Official presentation templates: `storylark-template-*`.
 - Community templates: `storylark-template-*`.
 
 Swappable presentation templates and a config-driven shell are **planned**, not

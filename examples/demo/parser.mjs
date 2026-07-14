@@ -17,7 +17,7 @@ import {
   chapterCharLength,
   countWords,
   stabilizeBlockIds,
-} from '@storylark/pipeline/md';
+} from 'storylark-pipeline/md';
 
 const WORDS_PER_MINUTE = 200;
 

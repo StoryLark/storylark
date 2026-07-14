@@ -2,10 +2,10 @@ name: Release
 
 # Changesets release flow: every merge to main refreshes a "Version Packages"
 # PR that accumulates pending changesets; merging THAT PR versions the
-# @storylark/* packages, publishes them to npm, and cuts GitHub Releases.
+# storylark-* packages, publishes them to npm, and cuts GitHub Releases.
 #
 # Requires the NPM_TOKEN repo secret (an npm automation token with publish
-# rights on the @storylark scope). Until that secret exists the publish step
+# rights for the storylark-* packages). Until that secret exists the publish step
 # fails harmlessly and the version PR still works.
 
 on:
