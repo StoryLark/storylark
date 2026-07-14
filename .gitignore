@@ -20,7 +20,8 @@ Thumbs.db
 .claude/
 .codex/
 .mcp.json
-.github/copilot-instructions.md
+.github/
+.wrangler/
 /AGENTS.md
 /CLAUDE.md
 /REPO_INTENT.md
