@@ -1,0 +1,11 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.4/schema.json",
+  "changelog": ["@changesets/changelog-github", { "repo": "StoryLark/storylark" }],
+  "commit": false,
+  "fixed": [],
+  "linked": [["@storylark/core", "@storylark/worker", "@storylark/pipeline"]],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": ["@storylark/site-base"]
+}
