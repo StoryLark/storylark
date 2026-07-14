@@ -3,16 +3,17 @@
 // no account, no key, no per-character billing. Same contract as tts.mjs
 // (Azure): per-block MP3 chunks + word timings, so stitch/publish are shared.
 //
-// Word timings are estimated, not model-reported: the model synthesizes
-// sentence-sized chunks whose durations are exact, and each word inside a
-// sentence gets a slice of that duration proportional to its length. Accurate
-// to well under a sentence — good enough for read-along highlighting until
-// real phoneme alignment lands.
+// Word timings: sentence-chunk durations are exact (from the model), and the
+// per-word split inside each sentence starts as a length-proportional estimate
+// which is then FORCE-ALIGNED against the actual audio with Whisper word
+// timestamps (see align.mjs) — real timings, not estimates. Set
+// STORYLARK_NO_ALIGN=1 to skip alignment and keep the fast estimate.
 
 import { writeFile, unlink } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { blockPlainText } from './lib/md.mjs';
+import { alignWords } from './align.mjs';
 
 const run = promisify(execFile);
 
@@ -60,7 +61,15 @@ export async function synthesizeChapter(chapter, voice, workDir, { onProgress } 
     const file = `${workDir}/chunk-${block.id}.mp3`;
     await encodeMp3(pcm, sampleRate, file, workDir, block.id);
     chunks.push({ blockId: block.id, file });
-    blockTimings.push({ blockId: block.id, words });
+    let finalWords = words;
+    if (!process.env.STORYLARK_NO_ALIGN) {
+      try {
+        finalWords = await alignWords(pcm, sampleRate, text, words);
+      } catch (err) {
+        console.warn(`  align: falling back to estimated timings for block ${block.id}: ${err.message}`);
+      }
+    }
+    blockTimings.push({ blockId: block.id, words: finalWords });
     onProgress?.(block.id, text.length);
   }
 
