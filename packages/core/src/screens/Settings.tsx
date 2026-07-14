@@ -36,6 +36,34 @@ export function Settings(): JSX.Element {
   );
 }
 
+/** Narrator voice choice — only rendered when the library publishes 2+ voices. */
+function NarratorPicker(): JSX.Element | null {
+  const voices = manifest.value?.voices;
+  if (!voices || Object.keys(voices).length < 2) return null;
+  return (
+    <>
+      <label class="settings-row">
+        <span>Narrator</span>
+        <select
+          value={settings.value.narratorVoice}
+          onChange={(e) => void saveSettings({ narratorVoice: (e.target as HTMLSelectElement).value })}
+        >
+          <option value="">Default</option>
+          {Object.entries(voices).map(([id, name]) => (
+            <option key={id} value={id}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p class="settings-note">
+        Who reads to you. Takes effect the next time a {NOUNS.unit} starts playing; downloads
+        keep your chosen narrator available offline.
+      </p>
+    </>
+  );
+}
+
 function PlaybackSection(): JSX.Element {
   const s = settings.value;
   return (
@@ -56,6 +84,7 @@ function PlaybackSection(): JSX.Element {
         How items open when you tap them. You can still pick a different mode per {NOUNS.unit}.
         The app remembers your choice for each one.
       </p>
+      <NarratorPicker />
       <label class="settings-row">
         <span>Read-along highlight</span>
         <select

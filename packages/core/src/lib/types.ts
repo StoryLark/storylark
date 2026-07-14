@@ -47,6 +47,15 @@ export interface LibraryManifest {
   libraryVersion: number;
   generatedAt: string;
   books: BookEntry[];
+  /** Narrator voices available across the library: voice id → display name.
+   *  Absent/single-entry = no in-app voice choice (pre-voices manifests stay valid). */
+  voices?: Record<string, string>;
+}
+
+/** One narrator voice's audio + word timings for a chapter. */
+export interface VoiceTrack {
+  audio: string; // R2 path
+  timings: string; // R2 path
 }
 
 export interface BookEntry {
@@ -77,6 +86,9 @@ export interface ChapterEntry {
   content: string; // R2 path
   audio?: string;
   timings?: string;
+  /** Per-voice tracks (keys match LibraryManifest.voices). `audio`/`timings`
+   *  above remain the library's default voice for older apps. */
+  voices?: Record<string, VoiceTrack>;
   hasAudio: boolean;
   publishedAt?: string;
 }
@@ -150,4 +162,6 @@ export interface Settings {
   autoSync: boolean;
   /** flat: auto-download new units (incl. audio); series: keep the whole collection downloaded. */
   autoDownload: boolean;
+  /** Narrator voice id (from LibraryManifest.voices); '' = the library default. */
+  narratorVoice: string;
 }

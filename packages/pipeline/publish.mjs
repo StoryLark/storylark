@@ -76,6 +76,48 @@ const state = existsSync(stateFile)
   ? JSON.parse(await readFile(stateFile, 'utf8'))
   : { chapters: {}, libraryVersion: 0, charLedger: {} };
 
+// Narrator voices: brand.tts.voice is the default track (chapter `audio`/
+// `timings`); brand.tts.voices lists every voice the library offers — extras
+// publish as per-voice tracks the app's Narrator picker switches between.
+const PRIMARY_VOICE = brand.tts.voice;
+const ALL_VOICES = [...new Set([PRIMARY_VOICE, ...(brand.tts.voices ?? [])])];
+const EXTRA_VOICES = ALL_VOICES.filter((v) => v !== PRIMARY_VOICE);
+
+const KOKORO_NAMES = {
+  af_heart: 'Heart', af_alloy: 'Alloy', af_aoede: 'Aoede', af_bella: 'Bella', af_jessica: 'Jessica',
+  af_kore: 'Kore', af_nicole: 'Nicole', af_nova: 'Nova', af_river: 'River', af_sarah: 'Sarah',
+  af_sky: 'Sky', am_adam: 'Adam', am_echo: 'Echo', am_eric: 'Eric', am_fenrir: 'Fenrir',
+  am_liam: 'Liam', am_michael: 'Michael', am_onyx: 'Onyx', am_puck: 'Puck', am_santa: 'Santa',
+  bf_alice: 'Alice', bf_emma: 'Emma', bf_isabella: 'Isabella', bf_lily: 'Lily',
+  bm_daniel: 'Daniel', bm_fable: 'Fable', bm_george: 'George', bm_lewis: 'Lewis',
+};
+function voiceDisplayName(id) {
+  const name = KOKORO_NAMES[id];
+  if (!name) return id; // Azure ids etc. — shown as-is
+  const accent = id[0] === 'b' ? 'British' : 'American';
+  const gender = id[1] === 'f' ? 'female' : 'male';
+  return `${name} — ${accent}, ${gender}`;
+}
+
+/** Synthesize + stitch one chapter in one voice, working in `dir` (chunks are
+ *  per-dir, so each voice gets its own) → { audioFile, timingsFile, durationMs }. */
+async function synthesizeVoiceTrack(chapter, voice, dir) {
+  await mkdir(dir, { recursive: true });
+  const useKokoro = isKokoroVoice(voice);
+  const { synthesizeChapter } = useKokoro ? await import('./tts-kokoro.mjs') : await import('./tts.mjs');
+  const { chunks, blockTimings } = await synthesizeChapter(chapter, voice, dir, {
+    key: process.env.AZURE_SPEECH_KEY,
+    region: process.env.AZURE_SPEECH_REGION,
+    onProgress: (blockId) => process.stdout.write(`\r  [${voice}] synthesized ${blockId}   `),
+  });
+  process.stdout.write('\n');
+  const audioFile = join(dir, 'audio.mp3');
+  const { timings, durationMs } = await stitchChapter(chunks, blockTimings, dir, audioFile);
+  const timingsFile = join(dir, 'timings.json');
+  await writeFile(timingsFile, JSON.stringify(timings));
+  return { audioFile, timingsFile, durationMs };
+}
+
 const month = new Date().toISOString().slice(0, 7);
 state.charLedger[month] ??= 0;
 
@@ -116,7 +158,16 @@ if (args['dry-run']) {
   }
   process.exit(0);
 }
-if (changed.length === 0 && !args['manifest-only']) {
+const voiceBackfillNeeded =
+  !args['no-audio'] &&
+  EXTRA_VOICES.length > 0 &&
+  plan.some(
+    (p) =>
+      !p.changed &&
+      state.chapters[p.key]?.audio &&
+      EXTRA_VOICES.some((v) => !state.chapters[p.key].voices?.[v])
+  );
+if (changed.length === 0 && !args['manifest-only'] && !voiceBackfillNeeded) {
   console.log('Nothing to publish. (Use --manifest-only to re-upload the manifest after a schema change.)');
   process.exit(0);
 }
@@ -182,6 +233,16 @@ for (const item of args['manifest-only'] ? [] : changed) {
     if (!useKokoro) state.charLedger[month] += charCount;
   }
 
+  // Extra narrator voices — each becomes its own hashed audio+timings track.
+  const voiceTracks = {};
+  if (audioInfo) {
+    for (const voice of EXTRA_VOICES) {
+      console.log(`TTS extra voice ${voice}: ${key}…`);
+      const t = await synthesizeVoiceTrack(chapter, voice, join(chapterDir, voice));
+      voiceTracks[voice] = t;
+    }
+  }
+
   // Upload chapter artifacts (hashed, immutable).
   const base = `books/${book.id}`;
   console.log(`Upload: ${key} → r2://${bucket}/${base}/…`);
@@ -189,15 +250,42 @@ for (const item of args['manifest-only'] ? [] : changed) {
   if (audioInfo) {
     await putAudio(bucket, `${base}/audio/${chapter.id}.${hash}.mp3`, audioInfo.audioFile);
     await putJson(bucket, `${base}/timings/${chapter.id}.${hash}.json`, audioInfo.timingsFile);
+    for (const [voice, t] of Object.entries(voiceTracks)) {
+      await putAudio(bucket, `${base}/audio/${chapter.id}.${hash}.${voice}.mp3`, t.audioFile);
+      await putJson(bucket, `${base}/timings/${chapter.id}.${hash}.${voice}.json`, t.timingsFile);
+    }
   }
 
   state.chapters[key] = {
     hash,
     blocks: chapter.blocks,
     audio: audioInfo ? { durationMs: audioInfo.durationMs, hash } : (wantAudio ? null : prev?.audio ?? null),
+    voices: audioInfo
+      ? Object.fromEntries(Object.entries(voiceTracks).map(([v, t]) => [v, { durationMs: t.durationMs }]))
+      : prev?.voices ?? undefined,
     publishedAt: prev?.publishedAt ?? new Date().toISOString().slice(0, 10),
   };
   await writeFile(stateFile, JSON.stringify(state, null, 2));
+}
+
+// ---- Voice backfill: unchanged chapters missing a newly-added voice. ----
+if (!args['no-audio'] && !args['dry-run'] && !args['manifest-only'] && EXTRA_VOICES.length > 0) {
+  for (const { book, chapter, hash, key, changed } of plan) {
+    if (changed) continue; // handled above
+    const saved = state.chapters[key];
+    if (!saved?.audio) continue; // text-only chapter — nothing to backfill
+    const missing = EXTRA_VOICES.filter((v) => !saved.voices?.[v]);
+    for (const voice of missing) {
+      console.log(`TTS backfill voice ${voice}: ${key}…`);
+      const dir = join(workRoot, book.id, chapter.id, voice);
+      const t = await synthesizeVoiceTrack({ id: chapter.id, blocks: saved.blocks ?? chapter.blocks }, voice, dir);
+      const base = `books/${book.id}`;
+      await putAudio(bucket, `${base}/audio/${chapter.id}.${hash}.${voice}.mp3`, t.audioFile);
+      await putJson(bucket, `${base}/timings/${chapter.id}.${hash}.${voice}.json`, t.timingsFile);
+      saved.voices = { ...(saved.voices ?? {}), [voice]: { durationMs: t.durationMs } };
+      await writeFile(stateFile, JSON.stringify(state, null, 2));
+    }
+  }
 }
 
 // ---- Covers ----
@@ -249,6 +337,11 @@ const manifest = {
   schemaVersion: 1,
   libraryVersion: newVersion,
   generatedAt: new Date().toISOString(),
+  // Narrator choices the app's Settings picker offers (id → display name).
+  voices:
+    EXTRA_VOICES.length > 0
+      ? Object.fromEntries(ALL_VOICES.map((v) => [v, voiceDisplayName(v)]))
+      : undefined,
   books: books.map(({ book, chapters }) => ({
     id: book.id,
     title: book.title,
@@ -266,6 +359,27 @@ const manifest = {
       const saved = state.chapters[`${book.id}/${ch.id}`];
       const hash = saved.hash;
       const hasAudio = !!saved.audio;
+      // Per-voice tracks: the primary voice aliases the default audio/timings;
+      // extras point at their own hashed files. Omitted entirely pre-voices.
+      const publishedVoices = hasAudio ? Object.keys(saved.voices ?? {}) : [];
+      const voices =
+        publishedVoices.length > 0
+          ? {
+              [PRIMARY_VOICE]: {
+                audio: `books/${book.id}/audio/${ch.id}.${saved.audio.hash}.mp3`,
+                timings: `books/${book.id}/timings/${ch.id}.${saved.audio.hash}.json`,
+              },
+              ...Object.fromEntries(
+                publishedVoices.map((v) => [
+                  v,
+                  {
+                    audio: `books/${book.id}/audio/${ch.id}.${saved.audio.hash}.${v}.mp3`,
+                    timings: `books/${book.id}/timings/${ch.id}.${saved.audio.hash}.${v}.json`,
+                  },
+                ])
+              ),
+            }
+          : undefined;
       return {
         id: ch.id,
         title: ch.title,
@@ -278,6 +392,7 @@ const manifest = {
         content: `books/${book.id}/chapters/${ch.id}.${hash}.json`,
         audio: hasAudio ? `books/${book.id}/audio/${ch.id}.${saved.audio.hash}.mp3` : undefined,
         timings: hasAudio ? `books/${book.id}/timings/${ch.id}.${saved.audio.hash}.json` : undefined,
+        voices,
         hasAudio,
         publishedAt: saved.publishedAt,
       };

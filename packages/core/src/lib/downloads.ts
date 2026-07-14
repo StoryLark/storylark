@@ -1,4 +1,5 @@
 import type { ChapterEntry, DownloadRecord } from './types';
+import { chapterTrack } from './player';
 import { contentUrl } from '../brand';
 import { idb } from './db';
 import { signal } from '@preact/signals';
@@ -32,6 +33,12 @@ export async function downloadChapter(bookId: string, chapter: ChapterEntry): Pr
     const urls = [contentUrl(chapter.content)];
     if (chapter.hasAudio && chapter.audio) urls.push(contentUrl(chapter.audio));
     if (chapter.timings) urls.push(contentUrl(chapter.timings));
+    // Also keep the chosen narrator's track offline when it differs from the default.
+    const track = chapterTrack(chapter);
+    if (chapter.hasAudio && track.audio && track.audio !== chapter.audio) {
+      urls.push(contentUrl(track.audio));
+      if (track.timings) urls.push(contentUrl(track.timings));
+    }
 
     let bytes = 0;
     for (const url of urls) {

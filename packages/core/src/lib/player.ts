@@ -15,6 +15,14 @@ import { audioController } from '../reader/AudioController';
 import { speechFallback } from '../reader/SpeechFallback';
 import { setupMediaSession, updatePlaybackState } from './mediasession';
 
+/** Audio + timings for the user's chosen narrator; the chapter's base
+ *  `audio`/`timings` are the library default voice. Applies on next load. */
+export function chapterTrack(chapter: ChapterEntry): { audio?: string; timings?: string } {
+  const v = settings.value.narratorVoice;
+  const t = v ? chapter.voices?.[v] : undefined;
+  return t ?? { audio: chapter.audio, timings: chapter.timings };
+}
+
 export interface NowPlayingItem {
   bookId: string;
   chapterId: string;
@@ -119,8 +127,9 @@ export async function startPlayback(bookId: string, chapterId: string, opts: { a
     const res = await fetch(contentUrl(chapter.content));
     if (!res.ok) throw new Error(`content ${res.status}`);
     content = (await res.json()) as ChapterContent;
-    if (chapter.timings) {
-      const tRes = await fetch(contentUrl(chapter.timings)).catch(() => null);
+    const track = chapterTrack(chapter);
+    if (track.timings) {
+      const tRes = await fetch(contentUrl(track.timings)).catch(() => null);
       if (tRes?.ok) timings = (await tRes.json()) as ChapterTimings;
     }
   } catch {
@@ -133,8 +142,9 @@ export async function startPlayback(bookId: string, chapterId: string, opts: { a
   activeTimings = timings;
   playerLoading.value = false;
 
-  if (chapter.hasAudio && chapter.audio) {
-    audioController.load(contentUrl(chapter.audio), content, timings, attachedContainer, {
+  const audioPath = chapterTrack(chapter).audio;
+  if (chapter.hasAudio && audioPath) {
+    audioController.load(contentUrl(audioPath), content, timings, attachedContainer, {
       onTime: (ms, dur) => {
         playerPositionMs.value = ms;
         if (dur > 0) playerDurationMs.value = dur;
