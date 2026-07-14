@@ -145,13 +145,21 @@ under `covers/cover.<hash>.<ext>`; books with no art fall back to the brand icon
 ## TTS and word timings
 
 Audio is generated **at publish time**, once per chapter revision (not on
-demand):
+demand). The voice named in `brand.json` `tts.voice` picks the provider:
 
-- `tools/tts.mjs` calls **Azure neural TTS** one block at a time, using the voice
-  from `brand.json` `tts.voice`, and collects a **WordBoundary event** per spoken
-  word (character offset + 100 ns audio offset). Requests are spaced to respect
-  the Azure F0 free-tier rate limit (20 req/min) with retry/backoff on transient
-  throttling.
+- **Bundled local voices (the default — free, no account).** Kokoro voice ids
+  (`af_heart`, `bm_fable`, …) run the Apache-licensed **Kokoro-82M** model on
+  your own machine via `tools/tts-kokoro.mjs`. 28 English voices ship with it;
+  the model (~90 MB) downloads on first use and is cached. Word timings are
+  estimated: each sentence's duration is exact, and words inside it are
+  apportioned by length — accurate enough for read-along highlighting.
+  `af_heart` is StoryLark's default narrator.
+- **Azure neural TTS (optional premium tier — bring your own key).**
+  `tools/tts.mjs` calls Azure one block at a time, using voices like
+  `en-US-Ava:DragonHDOmniLatestNeural`, and collects a **WordBoundary event**
+  per spoken word (character offset + 100 ns audio offset). Requests are spaced
+  to respect the Azure F0 free-tier rate limit (20 req/min) with retry/backoff
+  on transient throttling. Requires `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION`.
 - `tools/stitch.mjs` concatenates the per-block MP3 chunks into one chapter file
   (with a short beat of silence for scene breaks) and shifts each block's word
   times by the **measured** (ffprobe) chunk offsets — trailing silence would
@@ -162,7 +170,8 @@ demand):
 
 A **monthly character budget** (hard stop at 450K, under the Azure F0 500K/month
 limit) is tracked in the state file's `charLedger`; a publish that would exceed it
-aborts with guidance to use `--no-audio` or wait for the next month.
+aborts with guidance to use `--no-audio` or wait for the next month. The budget
+applies to Azure voices only — the bundled local voices are unmetered.
 
 Chapters published `--no-audio` (`hasAudio: false` in the manifest) fall back to
 the device's own Web Speech synthesis for Listen mode — always available, lower

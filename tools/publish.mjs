@@ -22,14 +22,18 @@
 //   --manifest-only             regenerate + upload the manifest without re-publishing chapters
 //                               (use after a manifest-schema change, e.g. the UI v2 series metadata)
 //
-// Env: AZURE_SPEECH_KEY, AZURE_SPEECH_REGION (for audio), ADMIN_KEY (for notify).
+// Voices: the brand's tts.voice picks the provider. Kokoro ids (af_heart,
+// bm_fable, …) run the bundled free local model — no account or key needed.
+// Azure ids (en-US-…) need AZURE_SPEECH_KEY / AZURE_SPEECH_REGION.
+//
+// Env: AZURE_SPEECH_KEY, AZURE_SPEECH_REGION (Azure voices only), ADMIN_KEY (for notify).
 
 import { readFile, writeFile, mkdir, cp } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { synthesizeChapter } from './tts.mjs';
+import { isKokoroVoice } from './tts-kokoro.mjs';
 import { stitchChapter } from './stitch.mjs';
 import { putJson, putAudio, putImage } from './r2-upload.mjs';
 import { contentHash } from './lib/md.mjs';
@@ -143,18 +147,24 @@ for (const item of args['manifest-only'] ? [] : changed) {
   let audioInfo = null;
   const wantAudio = !args['no-audio'];
   if (wantAudio) {
-    if (!process.env.AZURE_SPEECH_KEY || !process.env.AZURE_SPEECH_REGION) {
-      console.error('AZURE_SPEECH_KEY / AZURE_SPEECH_REGION not set — rerun with --no-audio for a text-only publish.');
-      process.exit(1);
+    const useKokoro = isKokoroVoice(brand.tts.voice);
+    if (!useKokoro) {
+      // Azure-only guards: subscription env + the F0 monthly character budget.
+      // The bundled Kokoro model is local and free — nothing to guard.
+      if (!process.env.AZURE_SPEECH_KEY || !process.env.AZURE_SPEECH_REGION) {
+        console.error('AZURE_SPEECH_KEY / AZURE_SPEECH_REGION not set — rerun with --no-audio for a text-only publish.');
+        process.exit(1);
+      }
+      if (state.charLedger[month] + chapter.charLength > MONTHLY_CHAR_BUDGET) {
+        console.error(
+          `Char budget: ${state.charLedger[month]} used + ${chapter.charLength} would exceed ${MONTHLY_CHAR_BUDGET} this month. ` +
+            `Skipping audio for ${key} — publish text-only with --no-audio, or wait for next month.`
+        );
+        process.exit(1);
+      }
     }
-    if (state.charLedger[month] + chapter.charLength > MONTHLY_CHAR_BUDGET) {
-      console.error(
-        `Char budget: ${state.charLedger[month]} used + ${chapter.charLength} would exceed ${MONTHLY_CHAR_BUDGET} this month. ` +
-          `Skipping audio for ${key} — publish text-only with --no-audio, or wait for next month.`
-      );
-      process.exit(1);
-    }
-    console.log(`TTS: ${key} (${chapter.charLength} chars, ~${Math.ceil((chapter.blocks.length * 3.1) / 60)} min at F0 pace)…`);
+    console.log(`TTS (${useKokoro ? 'kokoro, local' : 'azure'}): ${key} (${chapter.charLength} chars)…`);
+    const { synthesizeChapter } = useKokoro ? await import('./tts-kokoro.mjs') : await import('./tts.mjs');
     const { chunks, blockTimings, charCount } = await synthesizeChapter(chapter, brand.tts.voice, chapterDir, {
       key: process.env.AZURE_SPEECH_KEY,
       region: process.env.AZURE_SPEECH_REGION,
@@ -166,7 +176,7 @@ for (const item of args['manifest-only'] ? [] : changed) {
     const timingsFile = join(chapterDir, 'timings.json');
     await writeFile(timingsFile, JSON.stringify(timings));
     audioInfo = { audioFile, timingsFile, durationMs };
-    state.charLedger[month] += charCount;
+    if (!useKokoro) state.charLedger[month] += charCount;
   }
 
   // Upload chapter artifacts (hashed, immutable).

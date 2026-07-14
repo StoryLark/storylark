@@ -20,7 +20,7 @@
     "Collection": null
   },
   "tts": {
-    "voice": "en-US-AndrewMultilingualNeural",
+    "voice": "af_heart",
     "rate": "0%",
     "outputFormat": "Audio48Khz96KBitRateMonoMp3"
   },
