@@ -1,0 +1,12 @@
+import { pathToFileURL } from 'node:url';
+import { copyFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const { synthesizeChapter } = await import(pathToFileURL('D:/git/storylark/storylark/tools/tts.mjs').href);
+const [voice, out] = process.argv.slice(2);
+const dir = mkdtempSync(join(tmpdir(),'smp-'));
+const text = 'One dollar and eighty-seven cents. That was all. And sixty cents of it was in pennies, saved one and two at a time by bulldozing the grocer and the vegetable man and the butcher.';
+const chapter = { blocks: [{ id:'b001', type:'paragraph', text }] };
+const { chunks } = await synthesizeChapter(chapter, voice, dir, { key: process.env.AZURE_SPEECH_KEY, region: 'eastus' });
+copyFileSync(chunks[0].file, out);
+console.log('wrote', out);

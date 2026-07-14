@@ -1,0 +1,34 @@
+{
+  "id": "storylark",
+  "name": "Story Library",
+  "appName": "StoryLark",
+  "shortName": "StoryLark",
+  "tagline": "Read it. Hear it. Take it anywhere.",
+  "appOrigin": "https://app.storylark.dev",
+  "contentOrigin": "",
+  "themeColor": "#FFFFFF",
+  "backgroundColor": "#FFFFFF",
+  "defaultTheme": "light",
+  "author": "StoryLark",
+  "layout": "flat",
+  "nouns": {
+    "unit": "story",
+    "unitPlural": "stories",
+    "Unit": "Story",
+    "UnitPlural": "Stories",
+    "collection": null,
+    "Collection": null
+  },
+  "tts": {
+    "voice": "en-US-AndrewMultilingualNeural",
+    "rate": "0%",
+    "outputFormat": "Audio48Khz96KBitRateMonoMp3"
+  },
+  "vapidPublicKey": "",
+  "fonts": {
+    "display": "Newsreader",
+    "headers": "Newsreader",
+    "body": "Newsreader",
+    "mono": "Inter"
+  }
+}

@@ -31,7 +31,7 @@ export async function synthesizeChapter(chapter, voice, workDir, { key, region, 
     charCount += text.length;
 
     const file = `${workDir}/chunk-${block.id}.mp3`;
-    const { audio, words } = await synthesizeBlock(text, voice, { key, region });
+    const { audio, words } = await synthesizeBlockWithRetry(text, voice, { key, region });
     await writeFile(file, Buffer.from(audio));
     chunks.push({ blockId: block.id, file });
     blockTimings.push({ blockId: block.id, words });
@@ -40,6 +40,28 @@ export async function synthesizeChapter(chapter, voice, workDir, { key, region, 
   }
 
   return { chunks, blockTimings, charCount };
+}
+
+// Premium models (Dragon HD / Omni) enforce tighter concurrency and return a
+// transient "ResourceExhausted" (websocket 1013) or drop the socket under load.
+// Retry those with exponential backoff so one throttle doesn't abort a publish.
+const TRANSIENT_RE = /ResourceExhausted|1013|1006|1011|websocket error|timeout|ServiceUnavailable|Throttl|429/i;
+
+async function synthesizeBlockWithRetry(text, voice, cfg, attempts = 5) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await synthesizeBlock(text, voice, cfg);
+    } catch (e) {
+      lastErr = e;
+      const msg = e?.message ?? String(e);
+      if (i === attempts - 1 || !TRANSIENT_RE.test(msg)) throw e;
+      const backoffMs = 3000 * 2 ** i; // 3s, 6s, 12s, 24s
+      process.stdout.write(`\n  transient TTS error (${msg.slice(0, 60)}…) — retry ${i + 1}/${attempts - 1} in ${backoffMs / 1000}s\n`);
+      await sleep(backoffMs);
+    }
+  }
+  throw lastErr;
 }
 
 function synthesizeBlock(text, voice, { key, region }) {

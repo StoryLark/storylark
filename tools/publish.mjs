@@ -15,6 +15,9 @@
 //   --parser <module path>      required — site-owned parser (see contract above)
 //   --book <id>                 only publish this book
 //   --no-audio                  skip TTS (text-only publish; Web Speech fallback covers listen mode)
+//   --local <dir>               mirror the R2 layout into <dir> instead of a remote bucket
+//                               (no Cloudflare account needed — serve <dir> at the brand's
+//                               contentOrigin, e.g. --local app/dist for same-origin dev)
 //   --dry-run                   parse + report, no TTS, no upload
 //   --manifest-only             regenerate + upload the manifest without re-publishing chapters
 //                               (use after a manifest-schema change, e.g. the UI v2 series metadata)
@@ -36,7 +39,7 @@ const MONTHLY_CHAR_BUDGET = 450_000; // hard stop below the F0 500K limit
 
 const args = parseArgs(process.argv.slice(2));
 const brandId = args.brand;
-const USAGE = 'Usage: node tools/publish.mjs --brand <id> --source <path> --parser <module> [--book <id>] [--no-audio] [--dry-run]';
+const USAGE = 'Usage: node tools/publish.mjs --brand <id> --source <path> --parser <module> [--book <id>] [--no-audio] [--local <dir>] [--dry-run]';
 if (!brandId || typeof brandId !== 'string') {
   console.error(USAGE);
   process.exit(1);
@@ -51,6 +54,10 @@ if (!args.parser || typeof args.parser !== 'string') {
 }
 
 const sourceRepo = args.source;
+if (args.local) {
+  process.env.STORYLARK_LOCAL_R2 = resolve(String(args.local));
+  console.log(`Local publish → ${process.env.STORYLARK_LOCAL_R2} (no remote R2).`);
+}
 const brand = JSON.parse(await readFile(join(ROOT, 'brands', brandId, 'brand.json'), 'utf8'));
 const bucket = `${brandId}-content`;
 const stateFile = join(ROOT, 'tools', '.state', `${brandId}.json`);
@@ -274,7 +281,9 @@ console.log(`Manifest v${newVersion} uploaded.`);
 
 // ---- 6. Notify ----
 
-if (process.env.ADMIN_KEY) {
+if (args.local) {
+  console.log('Local publish — skipped remote push notification.');
+} else if (process.env.ADMIN_KEY) {
   const res = await fetch(`${brand.appOrigin}/api/admin/publish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Admin-Key': process.env.ADMIN_KEY },
