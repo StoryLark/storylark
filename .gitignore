@@ -5,8 +5,8 @@ dist/
 *.local
 .env
 .env.*
-tools/.state/
-tools/.work/
+.storylark/state/
+.storylark/work/
 *.mp3
 !brands/**/*.mp3
 .DS_Store

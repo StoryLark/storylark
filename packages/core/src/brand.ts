@@ -1,9 +1,9 @@
+/// <reference path="./virtual.d.ts" />
 import type { Brand, ContentNouns } from './lib/types';
-
-declare const __BRAND__: Brand;
+import config from 'virtual:storylark-config';
 
 /** Brand config baked in at build time from brands/<id>/brand.json. */
-export const BRAND: Brand = __BRAND__;
+export const BRAND: Brand = config;
 
 export function contentUrl(path: string): string {
   return `${BRAND.contentOrigin}/${path.replace(/^\//, '')}`;

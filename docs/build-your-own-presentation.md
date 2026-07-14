@@ -9,7 +9,7 @@ live in the [theme & template gallery](https://gallery.storylark.dev/templates.h
 
 ## What ships today
 
-The app is a fixed-shell PWA (`app/src/`) with these screens and one persistent
+The app is a fixed-shell PWA (`packages/core/src/`) with these screens and one persistent
 tab bar:
 
 ```
@@ -22,8 +22,8 @@ Settings    account, typography, theme, read-along mode, downloads
 About       app version, changelog, roadmap
 ```
 
-The tab bar (`app/src/components/TabBar.tsx`) is fixed: **Home · Library · Now
-Playing · Settings**. The routes are defined in `app/src/router.ts`
+The tab bar (`packages/core/src/components/TabBar.tsx`) is fixed: **Home · Library · Now
+Playing · Settings**. The routes are defined in `packages/core/src/router.ts`
 (`/`, `/library`, `/library/<bookId>`, `/read/<bookId>/<chapterId>`,
 `/now-playing`, `/settings`, `/about`). This structure is not currently
 config-driven — changing nav arrangement or screen composition means editing the
@@ -48,14 +48,14 @@ Two fields drive presentation without touching code:
   series). Manifest entries carry `series`, `seriesOrder`, `bookOrder`, etc.
 
 The `layout` value also changes an auto-download default (see the `autoDownload`
-setting in `app/src/lib/types.ts`): flat auto-downloads new units; series keeps a
+setting in `packages/core/src/lib/types.ts`): flat auto-downloads new units; series keeps a
 whole collection downloaded.
 
 ### `nouns` — what a "unit" and "collection" are called
 
 Every user-visible content word is pulled from `brand.json` `nouns` — the app
 never hardcodes "story", "chapter", or "book". Consumed via
-`app/src/brand.ts` (`NOUNS`, `countUnits()`).
+`packages/core/src/brand.ts` (`NOUNS`, `countUnits()`).
 
 ```json
 "nouns": {
@@ -89,7 +89,7 @@ Example for a chaptered-book library:
 
 The manifest and chapter schema the presentation renders is produced by the
 publish pipeline. Blocks the reader knows how to render (from
-`app/src/lib/types.ts` / `BlockRenderer`):
+`packages/core/src/lib/types.ts` / `BlockRenderer`):
 
 `paragraph` (with `em`/`strong` spans) · `scene-break` · `display-beat` ·
 `message-block` (speaker/time/text) · `image` · `end-marker`.

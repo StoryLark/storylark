@@ -27,7 +27,7 @@ tap → focus or open the app at /
 
 ## Keys
 
-Per-brand VAPID P-256 keypair (`tools/gen-vapid.mjs`): public key baked into the app
+Per-brand VAPID P-256 keypair (`packages/pipeline/gen-vapid.mjs`): public key baked into the app
 via `brand.json`, private key = Worker secret. Rotating keys = new keypair + redeploy
 + users re-toggle notifications (old subscriptions die off via the strike rule).
 

@@ -1,12 +1,12 @@
 // Demo content parser for the StoryLark publish pipeline.
 //
 // The pipeline is brand-neutral; each site owns its own parser and injects it
-// with --parser (see tools/publish.mjs). This one reads the plain-markdown
+// with --parser (see packages/pipeline/publish.mjs). This one reads the plain-markdown
 // public-domain stories under examples/demo/books/ — one file per story, each
 // story a single "full" chapter — and turns them into the pipeline's canonical
 // { books: [{ book, chapters }] } shape using the shared markdown helpers.
 //
-//   node tools/publish.mjs --brand storylark \
+//   node packages/pipeline/publish.mjs --brand storylark \
 //     --source examples/demo --parser examples/demo/parser.mjs --no-audio --local app/dist
 
 import { readdir, readFile } from 'node:fs/promises';
@@ -17,7 +17,7 @@ import {
   chapterCharLength,
   countWords,
   stabilizeBlockIds,
-} from '../../tools/lib/md.mjs';
+} from '@storylark/pipeline/md';
 
 const WORDS_PER_MINUTE = 200;
 

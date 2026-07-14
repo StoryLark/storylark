@@ -43,7 +43,7 @@ Drop in your own artwork, or generate neutral placeholder icons in your brand
 colors:
 
 ```
-node tools/gen-icons.mjs --brand <your-id>
+node packages/pipeline/gen-icons.mjs --brand <your-id>
 ```
 
 (The base brand also carries `favicon.svg`, `favicon-32.png`, `favicon-180.png`,
@@ -64,7 +64,7 @@ and a `logo.svg` — supply your own equivalents if your HTML references them.)
         "binding": "DB",
         "database_name": "<your-id>",
         "database_id": "<your-d1-database-id>",
-        "migrations_dir": "worker/migrations"
+        "migrations_dir": "packages/worker/migrations"
       }
     ],
     "r2_buckets": [
@@ -89,7 +89,7 @@ The Worker serves `app/dist` as static assets and runs code only for `/api/*`
 Authenticate once (`npx wrangler login`), then create the per-brand resources.
 
 **D1 database** — create it, copy the returned `database_id` into your env's
-`database_id`, then apply the migrations in `worker/migrations/`:
+`database_id`, then apply the migrations in `packages/worker/migrations/`:
 
 ```
 npx wrangler d1 create <your-id>
@@ -124,7 +124,7 @@ npx wrangler secret put GOOGLE_CLIENT_SECRET --env <your-id>
 
 | Secret | Needed for | Notes |
 |---|---|---|
-| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Web push | Generate with `node tools/gen-vapid.mjs`. Put the **public** key in `brand.json` `vapidPublicKey` *and* the Worker secret; the **private** key is Worker-only. See [`push.md`](push.md). |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Web push | Generate with `node packages/pipeline/gen-vapid.mjs`. Put the **public** key in `brand.json` `vapidPublicKey` *and* the Worker secret; the **private** key is Worker-only. See [`push.md`](push.md). |
 | `ADMIN_KEY` | `POST /api/admin/publish` | The publish pipeline sends this as `X-Admin-Key` to fire push notifications. Without it, publishing still works — it just skips the notify step. |
 | `RESEND_API_KEY` | Magic-link email | Only if you enable the (currently dormant) magic-link path. See [`auth.md`](auth.md). |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in | Only if you enable the (currently dormant) Google path. |
@@ -147,7 +147,7 @@ Your site boots as an empty shelf until you publish. Point the pipeline at your
 content source and a parser you own:
 
 ```
-node tools/publish.mjs --brand <your-id> \
+node packages/pipeline/publish.mjs --brand <your-id> \
   --source <path-to-your-content> \
   --parser <path-to-your-parser.mjs>
 ```

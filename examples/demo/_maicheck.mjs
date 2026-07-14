@@ -2,7 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { copyFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-const { synthesizeChapter } = await import(pathToFileURL('D:/git/storylark/storylark/tools/tts.mjs').href);
+const { synthesizeChapter } = await import(pathToFileURL('D:/git/storylark/storylark/packages/pipeline/tts.mjs').href);
 const [voice, out] = process.argv.slice(2);
 const dir = mkdtempSync(join(tmpdir(),'mai-'));
 const text = 'One dollar and eighty-seven cents. That was all. And sixty cents of it was in pennies, saved one and two at a time by bulldozing the grocer and the vegetable man and the butcher.';

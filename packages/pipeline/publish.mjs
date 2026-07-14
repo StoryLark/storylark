@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // StoryLark publish pipeline.
 //
-//   node tools/publish.mjs --brand <id> --source <repo path> --parser ./path/to/parser.mjs
+//   node packages/pipeline/publish.mjs --brand <id> --source <repo path> --parser ./path/to/parser.mjs
 //
 // The content parser is site-owned and injected with --parser: an ESM module
 // whose default (or named `parse`) export is
@@ -38,12 +38,15 @@ import { stitchChapter } from './stitch.mjs';
 import { putJson, putAudio, putImage } from './r2-upload.mjs';
 import { contentHash } from './lib/md.mjs';
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+// The pipeline is site-agnostic: it runs from a site repo's root (cwd), which
+// owns brands/, content, and publish state. Nothing resolves relative to this
+// package's own location.
+const ROOT = process.cwd();
 const MONTHLY_CHAR_BUDGET = 450_000; // hard stop below the F0 500K limit
 
 const args = parseArgs(process.argv.slice(2));
 const brandId = args.brand;
-const USAGE = 'Usage: node tools/publish.mjs --brand <id> --source <path> --parser <module> [--book <id>] [--no-audio] [--local <dir>] [--dry-run]';
+const USAGE = 'Usage: node packages/pipeline/publish.mjs --brand <id> --source <path> --parser <module> [--book <id>] [--no-audio] [--local <dir>] [--dry-run]';
 if (!brandId || typeof brandId !== 'string') {
   console.error(USAGE);
   process.exit(1);
@@ -64,8 +67,8 @@ if (args.local) {
 }
 const brand = JSON.parse(await readFile(join(ROOT, 'brands', brandId, 'brand.json'), 'utf8'));
 const bucket = `${brandId}-content`;
-const stateFile = join(ROOT, 'tools', '.state', `${brandId}.json`);
-const workRoot = join(ROOT, 'tools', '.work', brandId);
+const stateFile = join(ROOT, '.storylark', 'state', `${brandId}.json`);
+const workRoot = join(ROOT, '.storylark', 'work', brandId);
 await mkdir(dirname(stateFile), { recursive: true });
 await mkdir(workRoot, { recursive: true });
 

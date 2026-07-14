@@ -1,11 +1,12 @@
 /// <reference lib="webworker" />
+/// <reference path="./virtual.d.ts" />
 declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: Array<{ url: string; revision: string | null }> };
 
 import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
 
-declare const __BRAND__: { contentOrigin: string; appName: string; name: string };
+import BRAND from 'virtual:storylark-config';
 
-const CONTENT_ORIGIN = __BRAND__.contentOrigin;
+const CONTENT_ORIGIN = BRAND.contentOrigin;
 const DOWNLOAD_CACHE = 'sr-downloads';
 const RUNTIME_CACHE = 'sr-runtime';
 
@@ -101,7 +102,7 @@ self.addEventListener('push', (event) => {
 });
 
 async function handlePush(): Promise<void> {
-  let title = `${__BRAND__.appName}: ${__BRAND__.name}`;
+  let title = `${BRAND.appName}: ${BRAND.name}`;
   let body = 'New content is available in the library.';
   try {
     const res = await fetch(`${CONTENT_ORIGIN}/manifest.json`, { cache: 'no-cache' });

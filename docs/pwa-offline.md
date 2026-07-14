@@ -1,6 +1,6 @@
 # PWA & Offline
 
-## Cache tiers (service worker `app/src/sw.ts`)
+## Cache tiers (service worker `packages/core/src/sw.ts`)
 
 | Cache | Filled by | Strategy |
 |---|---|---|

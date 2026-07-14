@@ -11,7 +11,7 @@ by D1 and R2.
 > **Status: preview (0.x).** The engine boots and builds today under a neutral
 > StoryLark base brand, but ships without bundled content (bring your own stories
 > through the pipeline). APIs and structure will change before 1.0. See
-> [`docs/ROADMAP.md`](docs/ROADMAP.md) for the roadmap.
+> [`packages/core/ROADMAP.md`](packages/core/ROADMAP.md) for the roadmap.
 
 ## Features
 
@@ -28,11 +28,12 @@ by D1 and R2.
 ## Layout
 
 ```
-brands/     — per-brand config: brand.json, theme.css, manifest template, icons
-app/        — Vite + Preact PWA (library / reader / settings)
-worker/     — Cloudflare Worker: Hono API (/api/*) + static assets
-tools/      — publish pipeline: markdown -> chapter JSON + TTS audio + word timings -> R2
-docs/       — technical docs (API, architecture, auth, data model, PWA/offline, read-along)
+brands/             — per-brand config: brand.json, theme.css, manifest template, icons
+app/                — the base site: a thin consumer of @storylark/core
+packages/core/      — @storylark/core: the PWA engine + the defineStorylarkConfig Vite preset
+packages/worker/    — @storylark/worker: Cloudflare Worker — Hono API (/api/*) + static assets
+packages/pipeline/  — @storylark/pipeline: markdown -> chapter JSON + TTS audio + word timings -> R2
+docs/               — technical docs (API, architecture, auth, data model, PWA/offline, read-along)
 ```
 
 ## Quick start
@@ -51,7 +52,7 @@ pipeline turns markdown into chapter JSON + narrated audio + word timings and up
 them to R2:
 
 ```
-npm run publish      # node tools/publish.mjs --brand storylark
+npm run publish      # node packages/pipeline/publish.mjs --brand storylark
 ```
 
 ## Build your own branded app
@@ -62,7 +63,7 @@ StoryLark is designed to be deployed once per brand from the same codebase:
    for the visual tokens, plus manifest + icons).
 2. Provision the per-brand Cloudflare resources (D1 database, R2 bucket, secrets, custom
    domains) and point the brand's `wrangler` env at them.
-3. Publish your stories through `tools/publish.mjs` and deploy the Worker.
+3. Publish your stories through `packages/pipeline/publish.mjs` and deploy the Worker.
 
 See [`docs/`](docs/) for the API, data model, auth, and read-along details. The
 [`brands/storylark/`](brands/storylark/) base brand is the reference to copy when

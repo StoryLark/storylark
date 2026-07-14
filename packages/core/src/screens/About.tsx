@@ -4,8 +4,8 @@ import { APP_VERSION } from '../version';
 import { navigate } from '../router';
 import { manifest } from '../lib/state';
 // Single source of truth: the About screen renders the repo's own docs.
-import changelogMd from '../../../docs/CHANGELOG.md?raw';
-import roadmapMd from '../../../docs/ROADMAP.md?raw';
+import changelogMd from '../../CHANGELOG.md?raw';
+import roadmapMd from '../../ROADMAP.md?raw';
 
 /**
  * The brand's marketing install-guide page. Brand config carries app/content

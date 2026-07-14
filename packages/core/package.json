@@ -1,0 +1,44 @@
+{
+  "name": "@storylark/core",
+  "version": "0.1.0",
+  "description": "StoryLark engine — installable read-along PWA (library, reader, player, offline, sync) plus the defineStorylarkConfig Vite preset that builds a branded site from a theme folder.",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/StoryLark/storylark.git", "directory": "packages/core" },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./vite": {
+      "types": "./vite/index.d.ts",
+      "default": "./vite/index.mjs"
+    },
+    "./sw": "./src/sw.ts"
+  },
+  "files": [
+    "src/",
+    "vite/",
+    "CHANGELOG.md",
+    "ROADMAP.md"
+  ],
+  "dependencies": {
+    "@fontsource/cinzel": "^5.1.0",
+    "@fontsource/cormorant-garamond": "^5.1.0",
+    "@fontsource/ibm-plex-mono": "^5.1.0",
+    "@fontsource/inter": "^5.1.0",
+    "@fontsource/lora": "^5.1.0",
+    "@fontsource/newsreader": "^5.1.0",
+    "@preact/preset-vite": "^2.9.0",
+    "@preact/signals": "^1.3.0",
+    "@simplewebauthn/browser": "^13.3.0",
+    "preact": "^10.25.0",
+    "vite-plugin-pwa": "^0.21.0",
+    "workbox-precaching": "^7.3.0"
+  },
+  "peerDependencies": {
+    "vite": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

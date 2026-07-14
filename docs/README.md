@@ -33,7 +33,7 @@ Cloudflare Worker over D1 and R2.
 ## Content
 
 - **[Content Pipeline](content-pipeline.md)** — publish stories/chapters:
-  source → `tools/publish.mjs` → chapter JSON + neural TTS MP3 + word timings →
+  source → `packages/pipeline/publish.mjs` → chapter JSON + neural TTS MP3 + word timings →
   R2 → manifest. The parser contract, flags, incremental hashing, and local mode.
 
 ## Reference (design docs)

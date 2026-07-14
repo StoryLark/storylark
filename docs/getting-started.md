@@ -22,7 +22,9 @@ npm install
 ```
 
 This is an npm **workspaces** repo. A single `npm install` at the root installs
-the `app`, `worker`, and `tools` workspaces together.
+the `app` site and the `packages/*` (`@storylark/core`, `@storylark/worker`,
+`@storylark/pipeline`) workspaces together, linking the site against the local
+packages.
 
 ## The commands (from the root `package.json`)
 
@@ -31,11 +33,11 @@ the `app`, `worker`, and `tools` workspaces together.
 | `npm run dev` | `npm run build -w app -- --mode storylark && wrangler dev --env storylark` | Builds the PWA for the `storylark` brand, then serves it (static assets + `/api/*`) through the Worker on a local port. |
 | `npm run build` | `npm run build -w app -- --mode storylark` | Production build of the app into `app/dist`. |
 | `npm run deploy` | `npm run build && wrangler deploy --env storylark` | Build, then deploy the Worker + assets to Cloudflare. See [`deploy-your-own.md`](deploy-your-own.md). |
-| `npm run publish` | `node tools/publish.mjs --brand storylark` | Publish content to R2. **This script needs extra flags** — see the note below and [`content-pipeline.md`](content-pipeline.md). |
-| `npm run typecheck` | `tsc -p app/tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit` | Type-checks the app and the Worker. |
+| `npm run publish` | `node packages/pipeline/publish.mjs --brand storylark` | Publish content to R2. **This script needs extra flags** — see the note below and [`content-pipeline.md`](content-pipeline.md). |
+| `npm run typecheck` | `tsc` over the site, core, and worker tsconfigs | Type-checks the site, the engine, and the Worker. |
 
 > **Note on `npm run publish`:** the root script passes only `--brand storylark`,
-> but `tools/publish.mjs` *requires* `--source <path>` and `--parser <module>` as
+> but `packages/pipeline/publish.mjs` *requires* `--source <path>` and `--parser <module>` as
 > well and will exit with a usage message otherwise. Treat the npm script as a
 > shorthand and pass the remaining flags after `--`, e.g.
 > `npm run publish -- --source examples/demo --parser examples/demo/parser.mjs --no-audio --local app/dist`.
@@ -48,14 +50,17 @@ After `npm run dev`, open the URL Wrangler prints. The app boots as a branded bu
 
 ## How the brand "mode" works
 
-The Vite build **mode is the brand id**. `app/vite.config.ts` reads
+The Vite build **mode is the brand id**. The `defineStorylarkConfig` preset
+(from `@storylark/core/vite`, used by `app/vite.config.ts`) reads
 `--mode <brandId>`, loads `brands/<brandId>/brand.json` + `brands/<brandId>/theme.css`,
 and bakes them into the bundle:
 
-- `brand.json` is injected as the `__BRAND__` define and read at runtime through
-  `app/src/brand.ts` (`BRAND`, `NOUNS`, `contentUrl()`).
-- `theme.css` is served as the virtual module `virtual:brand-theme.css`
-  (imported in `app/src/main.tsx`).
+- `brand.json` is served as the virtual module `virtual:storylark-config` and
+  read at runtime through `packages/core/src/brand.ts` (`BRAND`, `NOUNS`,
+  `contentUrl()`) — the service worker consumes the same module.
+- `theme.css` is served as `virtual:storylark-theme.css`, and the brand's font
+  families become `@fontsource` imports via `virtual:storylark-fonts` (both
+  imported in `packages/core/src/mount.tsx`).
 - `manifest.webmanifest` and the brand icons are generated / copied into
   `app/dist` at build time.
 
@@ -66,20 +71,22 @@ The built-in Vite modes (`development`, `production`, `test`) fall back to the
 ## Project layout
 
 ```
-brands/     per-brand config: brand.json, theme.css, assets/icons/ (and optional assets/covers/)
-app/        Vite + Preact PWA — library / reader / player / settings + service worker
-worker/     Cloudflare Worker: Hono API (/api/*) over D1, plus static-asset serving; SQL migrations
-tools/      publish pipeline (markdown -> chapter JSON + TTS audio + word timings -> R2) + generators
-docs/       these docs
-examples/   demo content + a sample parser (public-domain stories) for trying the pipeline
+brands/             per-brand config: brand.json, theme.css, assets/icons/ (and optional assets/covers/)
+app/                the base SITE — a thin consumer of @storylark/core (index.html, entry.ts, vite.config.ts)
+packages/core/      @storylark/core — the PWA engine (library / reader / player / settings + service worker)
+                    plus the defineStorylarkConfig Vite preset that builds a site from a brand folder
+packages/worker/    @storylark/worker — Cloudflare Worker: Hono API (/api/*) over D1; SQL migrations
+packages/pipeline/  @storylark/pipeline — publish pipeline (markdown -> chapter JSON + TTS audio + word timings -> R2) + generators
+docs/               these docs
+examples/           demo content + a sample parser (public-domain stories) for trying the pipeline
 ```
 
-Inside `app/src/`:
+Inside `packages/core/src/`:
 
 - `screens/` — Home, Library, Book, Reader, NowPlaying, Settings, About
 - `reader/` — read-along engine (AudioController, Highlighter, BlockRenderer, SpeechFallback)
 - `lib/` — API client, IndexedDB, downloads, sync, push, player state
-- `router.ts`, `brand.ts`, `sw.ts` — routing, baked-in brand, service worker
+- `router.ts`, `brand.ts`, `sw.ts`, `mount.tsx` — routing, baked-in brand, service worker, the `mount()` entry
 
 ## Next steps
 

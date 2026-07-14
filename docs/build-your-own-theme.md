@@ -78,22 +78,18 @@ Minimum shape:
 ## Fonts
 
 `brand.json` names the font families in `fonts` (`display`, `headers`, `body`,
-`mono`), and `theme.css` references those families in the `--font-*` tokens. But
-the **font files** are imported in code, in `app/src/styles/fonts.ts`, which
-ships the base brand's Newsreader + Inter via `@fontsource/*`:
+`mono`), and `theme.css` references those families in the `--font-*` tokens.
+The **font files** are bundled automatically: at build time the
+`@storylark/core` Vite preset turns each family name into the matching
+`@fontsource/*` imports (e.g. `Newsreader` → `@fontsource/newsreader`), with
+sensible weights per role (body text gets italics; mono doesn't). Families
+bundled with core today: Newsreader, Inter, Lora, Cinzel, Cormorant Garamond,
+IBM Plex Mono.
 
-```ts
-import '@fontsource/newsreader/400.css';
-// ...
-import '@fontsource/inter/400.css';
-```
-
-To ship different typefaces: install the `@fontsource/*` package(s) (or add
-self-hosted `@font-face` CSS), swap the imports in `fonts.ts`, and update the
-family names in both `brand.json` `fonts` and the `--font-*` tokens in
-`theme.css`. Keep fonts self-hosted so the offline app shell works without a
-network. (Today `fonts.ts` is shared across brands; per-brand font bundling is a
-manual edit, not yet config-driven.)
+To ship a typeface outside that set, add your own self-hosted `@font-face` CSS
+to `theme.css` and reference the family in the `--font-*` tokens — unknown
+family names simply produce no `@fontsource` import. Keep fonts self-hosted so
+the offline app shell works without a network.
 
 ## `brand.json` — fields
 
@@ -113,7 +109,7 @@ manual edit, not yet config-driven.)
 | `layout` | `"flat"` \| `"series"` | Library shape — see the presentation guide. |
 | `nouns` | object | UI content nouns — see below and the presentation guide. |
 | `tts` | object | `{ voice, rate, outputFormat }` for Azure Speech at publish time. `voice` is an Azure neural voice id; `outputFormat` an Azure output-format enum. |
-| `vapidPublicKey` | string | Web-push VAPID **public** key (base64url). Empty disables the push toggle. Generate with `tools/gen-vapid.mjs`. |
+| `vapidPublicKey` | string | Web-push VAPID **public** key (base64url). Empty disables the push toggle. Generate with `packages/pipeline/gen-vapid.mjs`. |
 | `fonts` | object | `{ display, headers, body, mono }` family names referenced by `theme.css`. |
 
 The `nouns` object (every user-visible content word comes from here — no
@@ -136,12 +132,13 @@ hardcoded "story"/"book"):
 
 Replace the three PNGs in `brands/<your-id>/assets/icons/` (`icon-192.png`,
 `icon-512.png`, `icon-maskable-512.png` — the manifest references exactly these).
-`app/vite.config.ts` copies the whole `assets/icons/` folder to `dist/icons/` at
-build time, so any additional files (favicons, logo) are shipped too. To generate
+The `@storylark/core` build preset copies the whole `assets/icons/` folder to
+`dist/icons/` at build time, so any additional files (favicons, logo) are
+shipped too. To generate
 neutral placeholders in your accent color:
 
 ```
-node tools/gen-icons.mjs --brand <your-id>
+node packages/pipeline/gen-icons.mjs --brand <your-id>
 ```
 
 ## Publishing themes (naming convention — planned)

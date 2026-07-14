@@ -60,7 +60,7 @@ place, so it's unauthenticated by definition.
 
 | Method & path | Auth | Behavior |
 |---|---|---|
-| `POST /api/admin/publish` | `X-Admin-Key` header | `{version}` → updates `library_state`, fans out **payload-less** VAPID pushes in batches of 50 (`ctx.waitUntil`). 404/410 endpoints deleted; 5 consecutive failures deletes. Called by `tools/publish.mjs` as its final step. |
+| `POST /api/admin/publish` | `X-Admin-Key` header | `{version}` → updates `library_state`, fans out **payload-less** VAPID pushes in batches of 50 (`ctx.waitUntil`). 404/410 endpoints deleted; 5 consecutive failures deletes. Called by `packages/pipeline/publish.mjs` as its final step. |
 
 ## Error shape
 
@@ -69,4 +69,4 @@ Errors return `{"error":"<slug>"}` with a fitting status: `unauthorized` 401, `m
 ## What the API does NOT serve
 
 Story content. Chapters, audio, timings, covers, and the manifest come from the
-content domain (R2 custom domain) — produced by the publish pipeline in `tools/`.
+content domain (R2 custom domain) — produced by the publish pipeline in `packages/pipeline/`.

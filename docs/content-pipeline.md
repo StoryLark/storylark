@@ -1,6 +1,6 @@
 # Content Pipeline
 
-The publish pipeline (`tools/publish.mjs`) turns your source content into
+The publish pipeline (`packages/pipeline/publish.mjs`) turns your source content into
 everything the app reads: chapter JSON, narrated MP3 audio, per-word timing
 files, cover images, and a library manifest — uploaded to the brand's R2 bucket.
 It is **brand-neutral**: your site owns the parser that reads *your* content
@@ -11,7 +11,7 @@ notify.
 your source (markdown, etc.)
    │  --parser <your-module.mjs>            (site-owned; produces canonical shape)
    ▼
-tools/publish.mjs
+packages/pipeline/publish.mjs
    ├─ diff by content hash (only changed chapters proceed)
    ├─ chapter JSON                          books/<id>/chapters/<ch>.<hash>.json
    ├─ Azure neural TTS per block → stitch   books/<id>/audio/<ch>.<hash>.mp3
@@ -24,7 +24,7 @@ tools/publish.mjs
 ## Command
 
 ```
-node tools/publish.mjs --brand <id> --source <path> --parser <module> [flags]
+node packages/pipeline/publish.mjs --brand <id> --source <path> --parser <module> [flags]
 ```
 
 The three required flags:
@@ -57,7 +57,7 @@ The three required flags:
 | `ADMIN_KEY` | Push notify | Sent as `X-Admin-Key` to `POST /api/admin/publish` as the final step. If unset, notify is skipped (publish still succeeds). Always skipped in `--local` mode. |
 
 `ffmpeg` and `ffprobe` must be on `PATH` for the audio stitch step
-(`tools/stitch.mjs`).
+(`packages/pipeline/stitch.mjs`).
 
 ## The parser contract
 
@@ -89,7 +89,7 @@ export async function parse(sourceRepo, previousChapters, siteOrigin) {
 
 `blocks` are StoryLark content blocks (`paragraph` with `em`/`strong` spans,
 `scene-break`, `display-beat`, `message-block`, `image`, `end-marker`). You don't
-have to build these by hand: `tools/lib/md.mjs` exports helpers the bundled
+have to build these by hand: `packages/pipeline/lib/md.mjs` exports helpers the bundled
 parser uses —
 
 - `readFrontmatter(source)` — flat `key: value` frontmatter.
@@ -114,7 +114,7 @@ public-domain markdown stories in `examples/demo/books/` — the fastest way to 
 the pipeline end to end:
 
 ```
-node tools/publish.mjs --brand storylark \
+node packages/pipeline/publish.mjs --brand storylark \
   --source examples/demo --parser examples/demo/parser.mjs \
   --no-audio --local app/dist
 ```
@@ -122,7 +122,7 @@ node tools/publish.mjs --brand storylark \
 ## Incremental, content-hash publishing
 
 Every chapter is hashed (`contentHash({ blocks, title })`, first 8 hex chars).
-The pipeline keeps a per-brand state file at `tools/.state/<brand>.json`
+The pipeline keeps a per-brand state file at `.storylark/state/<brand>.json`
 recording each chapter's last hash, audio info, and publish date. On each run it:
 
 1. Parses everything and computes each chapter's current hash.
@@ -149,18 +149,18 @@ demand). The voice named in `brand.json` `tts.voice` picks the provider:
 
 - **Bundled local voices (the default — free, no account).** Kokoro voice ids
   (`af_heart`, `bm_fable`, …) run the Apache-licensed **Kokoro-82M** model on
-  your own machine via `tools/tts-kokoro.mjs`. 28 English voices ship with it;
+  your own machine via `packages/pipeline/tts-kokoro.mjs`. 28 English voices ship with it;
   the model (~90 MB) downloads on first use and is cached. Word timings are
   estimated: each sentence's duration is exact, and words inside it are
   apportioned by length — accurate enough for read-along highlighting.
   `af_heart` is StoryLark's default narrator.
 - **Azure neural TTS (optional premium tier — bring your own key).**
-  `tools/tts.mjs` calls Azure one block at a time, using voices like
+  `packages/pipeline/tts.mjs` calls Azure one block at a time, using voices like
   `en-US-Ava:DragonHDOmniLatestNeural`, and collects a **WordBoundary event**
   per spoken word (character offset + 100 ns audio offset). Requests are spaced
   to respect the Azure F0 free-tier rate limit (20 req/min) with retry/backoff
   on transient throttling. Requires `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION`.
-- `tools/stitch.mjs` concatenates the per-block MP3 chunks into one chapter file
+- `packages/pipeline/stitch.mjs` concatenates the per-block MP3 chunks into one chapter file
   (with a short beat of silence for scene breaks) and shifts each block's word
   times by the **measured** (ffprobe) chunk offsets — trailing silence would
   otherwise drift a naive sum.
@@ -190,5 +190,5 @@ books/<bookId>/
 
 The bucket is named `<brand>-content`; an R2 custom domain serves the bucket root
 at the brand's `contentOrigin`, which is exactly what the app fetches from
-(`app/src/brand.ts` `contentUrl()`). More on the storage/caching model in
+(`packages/core/src/brand.ts` `contentUrl()`). More on the storage/caching model in
 [`data-model.md`](data-model.md).

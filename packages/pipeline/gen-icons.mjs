@@ -1,6 +1,6 @@
 // Renders neutral placeholder PWA icons for a brand: a simple ring mark in the
 // brand's colours, at all three sizes (192, 512, maskable-512).
-//   node tools/gen-icons.mjs --brand storylark
+//   node packages/pipeline/gen-icons.mjs --brand storylark
 // A brand with its own artwork drops its finished PNGs into
 // brands/<id>/assets/icons/ and skips this generator.
 
@@ -9,7 +9,7 @@ import { mkdir } from 'node:fs/promises';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = process.cwd();
 const brand = process.argv.includes('--brand') ? process.argv[process.argv.indexOf('--brand') + 1] : 'storylark';
 
 // A nearly-closed ring: a circle with a deliberate gap at the top.

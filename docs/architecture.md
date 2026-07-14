@@ -13,7 +13,7 @@
    │ native Range support)              │
    └────────────────────────────────────┘
 
-   publish (dev box / Actions): tools/publish.mjs
+   publish (dev box / Actions): packages/pipeline/publish.mjs
      markdown → blocks → Azure TTS (F0) → ffmpeg stitch → R2 → POST /api/admin/publish → web push
 ```
 
@@ -34,7 +34,7 @@
 | Worker CPU | 10 ms | JSON + D1 queries only |
 | D1 | 5M reads / 100k writes /day | progress writes debounced 30 s |
 | R2 | 10 GB, zero egress | ~0.7 MB/min audio; monitor at scale |
-| Azure Speech F0 | 500K chars/month | ledger in tools/.state, hard stop at 450K |
+| Azure Speech F0 | 500K chars/month | ledger in .storylark/state, hard stop at 450K |
 | Resend | 100 emails/day | magic links only |
 
 Per-topic details live in the sibling docs.

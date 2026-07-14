@@ -9,7 +9,7 @@ each block's times by its measured position in the stitched chapter MP3 (ffprobe
 measures real chunk durations — trailing silence would drift a naive sum), and ships
 the result as the chapter's timings JSON. Verified accuracy: ~24 ms drift per minute.
 
-## How the highlighter works (app/src/reader/)
+## How the highlighter works (packages/core/src/reader/)
 
 - A `requestAnimationFrame` loop reads `audio.currentTime` while playing
   (`timeupdate` only fires ~4 Hz — too coarse for word highlighting).
@@ -37,4 +37,4 @@ It's the budget narrator: always available, never as good as the real one.
 
 Chapter title, book, and cover appear on the lock screen / headphone controls with
 play/pause, ±15/30 s skip, and previous/next chapter — wired through the Media
-Session API in `app/src/lib/mediasession.ts`.
+Session API in `packages/core/src/lib/mediasession.ts`.

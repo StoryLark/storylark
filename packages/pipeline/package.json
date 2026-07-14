@@ -1,0 +1,34 @@
+{
+  "name": "@storylark/pipeline",
+  "version": "0.1.0",
+  "description": "StoryLark publish pipeline — parse → TTS → stitch → R2/local mirror → manifest → push notify. Site-agnostic: runs from a site repo's root with an injected content parser.",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/StoryLark/storylark.git", "directory": "packages/pipeline" },
+  "type": "module",
+  "bin": {
+    "storylark-publish": "publish.mjs",
+    "storylark-gen-icons": "gen-icons.mjs",
+    "storylark-gen-vapid": "gen-vapid.mjs"
+  },
+  "exports": {
+    "./md": "./lib/md.mjs",
+    "./tts": "./tts.mjs",
+    "./tts-kokoro": "./tts-kokoro.mjs",
+    "./stitch": "./stitch.mjs"
+  },
+  "files": [
+    "publish.mjs",
+    "gen-icons.mjs",
+    "gen-vapid.mjs",
+    "r2-upload.mjs",
+    "stitch.mjs",
+    "tts.mjs",
+    "tts-kokoro.mjs",
+    "lib/"
+  ],
+  "dependencies": {
+    "kokoro-js": "^1.2.1",
+    "microsoft-cognitiveservices-speech-sdk": "^1.42.0",
+    "sharp": "^0.34.5"
+  }
+}

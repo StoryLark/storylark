@@ -3,7 +3,7 @@
   // Static assets are served free of Worker invocations; only /api/* runs code.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "storylark",
-  "main": "worker/src/index.ts",
+  "main": "packages/worker/src/index.ts",
   "compatibility_date": "2026-06-01",
   "assets": {
     "directory": "app/dist",
@@ -24,7 +24,7 @@
           "binding": "DB",
           "database_name": "storylark",
           "database_id": "00000000-0000-0000-0000-000000000000",
-          "migrations_dir": "worker/migrations"
+          "migrations_dir": "packages/worker/migrations"
         }
       ],
       "r2_buckets": [

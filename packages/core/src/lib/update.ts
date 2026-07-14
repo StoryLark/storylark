@@ -11,7 +11,7 @@ const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
 let updateSW: ((reloadPage?: boolean) => Promise<void>) | null = null;
 
-/** Registers the service worker and wires up the "new version" prompt. Call once, from main.tsx. */
+/** Registers the service worker and wires up the "new version" prompt. Call once, from mount(). */
 export function initServiceWorker(): void {
   if (!('serviceWorker' in navigator) || import.meta.env.DEV) return;
 
