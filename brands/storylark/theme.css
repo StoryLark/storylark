@@ -14,7 +14,7 @@
   color-scheme: light;
 
   --bg: #FBF8F2;          /* warm paper */
-  --bg-raised: #FFFFFF;
+  --bg-raised: #FFFDF7;   /* raised card — warm off-white, never stark #fff */
   --bg-sunken: #F1EADD;
   --text: #232020;        /* warm ink */
   --text-muted: #635C54;

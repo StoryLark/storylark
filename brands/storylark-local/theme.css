@@ -4,43 +4,49 @@
    brand. Light is the default; the [data-theme="dark"] block mirrors every token
    for dark mode. --text-muted/-faint and --rule are this app's own list/card
    chrome tokens. */
+/* StoryLark "Daybreak" — the default identity. Modern yet literary: warm paper
+   instead of stark white, a dawn palette (deep teal as the interactive accent,
+   a warm gold "birdsong" read-along highlight), and a reading serif. This is
+   StoryLark's own face; brand themes in the gallery retune these same tokens. */
 :root {
   /* Render native controls (select popups, checkboxes, range, scrollbars) light
      so their default surfaces match the theme instead of flashing dark. */
   color-scheme: light;
 
-  --bg: #FFFFFF;
-  --bg-raised: #FFFFFF;
-  --bg-sunken: #F4F4F5;
-  --text: #18181B;
-  --text-muted: #52525B;
-  --text-faint: #A1A1AA;
-  --accent: #4F46E5;
-  --accent-strong: #4338CA;
-  --rule: #E4E4E7;
-  --link: #4F46E5;
+  --bg: #FBF8F2;          /* warm paper */
+  --bg-raised: #FFFDF7;   /* raised card — warm off-white, never stark #fff */
+  --bg-sunken: #F1EADD;
+  --text: #232020;        /* warm ink */
+  --text-muted: #635C54;
+  --text-faint: #A69D8F;
+  --accent: #0E7C7B;      /* dawn teal — interactive */
+  --accent-strong: #0A5F5E;
+  --rule: #E6DFD2;
+  --link: #0E7C7B;
 
   --font-display: "Newsreader", Georgia, serif;
   --font-headers: "Newsreader", Georgia, serif;
   --font-body: "Newsreader", Georgia, serif;
   --font-mono: "Inter", system-ui, sans-serif;
 
-  --highlight-word: rgba(79, 70, 229, 0.18);
-  --highlight-block: rgba(79, 70, 229, 0.45);
+  /* Gold "birdsong" — the read-along highlight is deliberately warm, not the
+     teal accent, so the sung word glows against the cool interactive chrome. */
+  --highlight-word: rgba(224, 164, 35, 0.22);
+  --highlight-block: rgba(224, 164, 35, 0.5);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0B0B0F;
-  --bg-raised: #17171C;
-  --bg-sunken: #060608;
-  --text: #F4F4F5;
-  --text-muted: #C4C4CC;
-  --text-faint: #8A8A93;
-  --accent: #818CF8;
-  --accent-strong: #6366F1;
-  --rule: #27272A;
-  --link: #A5B4FC;
-  --highlight-word: rgba(129, 140, 248, 0.22);
-  --highlight-block: rgba(129, 140, 248, 0.5);
+  --bg: #14171A;          /* deep dusk */
+  --bg-raised: #1D2226;
+  --bg-sunken: #0E1113;
+  --text: #F1ECE3;        /* warm off-white */
+  --text-muted: #B8B0A4;
+  --text-faint: #837C71;
+  --accent: #35B7B4;      /* dusk teal, brighter for contrast */
+  --accent-strong: #57C9C6;
+  --rule: #2C3237;
+  --link: #57C9C6;
+  --highlight-word: rgba(240, 190, 80, 0.25);
+  --highlight-block: rgba(240, 190, 80, 0.5);
 }
