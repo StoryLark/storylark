@@ -1,0 +1,45 @@
+name: Release
+
+# Changesets release flow: every merge to main refreshes a "Version Packages"
+# PR that accumulates pending changesets; merging THAT PR versions the
+# @storylark/* packages, publishes them to npm, and cuts GitHub Releases.
+#
+# Requires the NPM_TOKEN repo secret (an npm automation token with publish
+# rights on the @storylark scope). Until that secret exists the publish step
+# fails harmlessly and the version PR still works.
+
+on:
+  push:
+    branches: [main]
+
+concurrency: release-${{ github.ref }}
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Version or publish
+        uses: changesets/action@v1
+        with:
+          publish: npx changeset publish
+          title: 'chore(release): version packages'
+          commit: 'chore(release): version packages'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # setup-node's registry-url writes an .npmrc that reads this on publish.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
