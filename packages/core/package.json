@@ -21,6 +21,7 @@
     "src/",
     "vite/",
     "CHANGELOG.md",
+    "RELEASE-NOTES.md",
     "ROADMAP.md"
   ],
   "dependencies": {

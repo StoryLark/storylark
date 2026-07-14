@@ -26,27 +26,31 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
   community submission process
 - Demo hardening: version banner, release-tracking redeploys, and links across the StoryLark
   sites
+- The `storylark-*` packages published to the public npm registry, with automated releases
+  on every merge (Changesets)
+- The live demo consumes the published packages exactly like any deployer would — proving
+  the update model end to end
+- **Multiple narrator voices** — a library can publish more than one narrator; a picker in
+  Settings switches between them, synced across devices and available offline
 
 ## Now
 
-- Publishing the `storylark-*` packages to the public npm registry (release automation is in
-  place; first publish pending)
+- Rolling out a second narrator voice on the live demo, and closing out the rest of the M7
+  feature list below
 
 ## Next
 
-- Full documentation: getting started, deploy your own, build your own theme, build your own
-  presentation template, content pipeline, API reference
-- Downstream sites consume pinned package versions with opt-in automatic updates (Renovate)
+- Screen-awake during read-along (Wake Lock)
+- "Listen to anything" — paste text, or bring a PDF, URL, or document, with on-device voices
+- On-device voice & language picker for imported content
+- Social sign-in (Apple, Google, Microsoft)
+- iOS background audio for driving — a research spike
+- Opt-in automatic updates for downstream sites (Renovate)
 
 ## Later
 
-Feature roadmap, built on the refactored engine — each ships behind a config flag:
-
-- Screen-awake during read-along (Wake Lock)
-- "Listen to anything" — paste text, or bring a PDF, URL, or document, with on-device voices
-- Multiple narrator voices and languages
-- Social sign-in (Apple, Google, Microsoft)
-- iOS background audio for driving — a research spike
-
-Also planned: rate-limiting on sign-in and account creation, and preferences (default playback
-mode, theme, text size) that follow your account across devices.
+Hardening toward 1.0: an automated test suite and CI quality gate, a full device/browser QA
+pass, an accessibility audit, rate-limiting across every auth endpoint, complete API
+documentation, and a final API-stability review that freezes the config, theme, and manifest
+contracts for 1.0.0. A `create-storylark` scaffolder (`npm create storylark`) is planned as a
+1.1 convenience layer once the contracts are frozen.

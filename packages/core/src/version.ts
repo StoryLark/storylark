@@ -1,6 +1,8 @@
 /**
- * App version — the single source of truth, shown in Settings and About.
- * Keep in sync with the root package.json "version" when releasing;
- * add a matching entry to docs/CHANGELOG.md.
+ * App version — shown in Settings and About. This is the app's own release
+ * counter, bumped by hand for each user-visible release; it is independent of
+ * the npm semver on the individual storylark-* packages (core/worker/pipeline
+ * version separately via Changesets and won't generally match this number or
+ * each other). Add a matching entry to RELEASE-NOTES.md when bumping.
  */
-export const APP_VERSION = '0.3.0';
+export const APP_VERSION = '0.4.0';

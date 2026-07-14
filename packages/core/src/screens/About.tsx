@@ -4,7 +4,7 @@ import { APP_VERSION } from '../version';
 import { navigate } from '../router';
 import { manifest } from '../lib/state';
 // Single source of truth: the About screen renders the repo's own docs.
-import changelogMd from '../../CHANGELOG.md?raw';
+import changelogMd from '../../RELEASE-NOTES.md?raw';
 import roadmapMd from '../../ROADMAP.md?raw';
 
 /**
