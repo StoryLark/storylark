@@ -4,7 +4,8 @@ Where a [theme](build-your-own-theme.md) changes how the app *looks* (colors,
 fonts, icons), the **presentation layer** is how it's *structured*: how the
 library is organized, what content units are called, and how the reader and
 player screens are composed. This page covers what's configurable today via
-`brand.json` and the direction for the future.
+`brand.json` and the direction for the future. Example presentation templates
+live in the [theme & template gallery](https://gallery.storylark.dev/templates.html).
 
 ## What ships today
 
@@ -112,4 +113,7 @@ The planned distribution model mirrors themes:
 
 Swappable presentation templates and a config-driven shell are **planned**, not
 available today. What you can rely on now is `layout` and `nouns`; deeper changes
-require editing the app components.
+require editing the app components. Browse existing arrangements in the
+[gallery](https://gallery.storylark.dev/templates.html), and see the
+[submission guide](https://github.com/StoryLark/gallery/blob/main/CONTRIBUTING.md)
+to share your own.

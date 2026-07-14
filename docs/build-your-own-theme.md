@@ -2,7 +2,10 @@
 
 A **theme** in StoryLark is the *branding* layer: colors, fonts, and icons. It
 does **not** change the app's structure or UX — that's the presentation layer
-(see [`build-your-own-presentation.md`](build-your-own-presentation.md)). A theme
+(see [`build-your-own-presentation.md`](build-your-own-presentation.md)). Before
+building from scratch, browse the ready-made themes in the
+[theme & template gallery](https://gallery.storylark.dev/themes.html) — each is a
+downloadable brand folder you can drop in and retune. A theme
 lives entirely in one brand folder:
 
 ```
@@ -150,4 +153,9 @@ themes **installable packages** so a brand can consume one without vendoring it:
 - Community themes: `storylark-theme-*`.
 
 This packaging/distribution model is **planned**, not available today — for now,
-copy `brands/storylark/` and retune it.
+copy `brands/storylark/` and retune it, or start from a theme in the
+[gallery](https://gallery.storylark.dev/themes.html).
+
+Built something worth sharing? The gallery indexes community themes — see the
+[submission guide](https://github.com/StoryLark/gallery/blob/main/CONTRIBUTING.md)
+to get yours listed.
