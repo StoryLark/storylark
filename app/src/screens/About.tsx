@@ -109,6 +109,20 @@ export function About(): JSX.Element {
         <p class="settings-version">
           {BRAND.appName} · {BRAND.name} · v{APP_VERSION} · preview
         </p>
+        <p class="settings-version">
+          Powered by{' '}
+          <a href="https://storylark.org" target="_blank" rel="noopener">
+            StoryLark
+          </a>{' '}
+          — free, open-source read-along storybooks ·{' '}
+          <a href="https://storylark.org/docs" target="_blank" rel="noopener">
+            docs
+          </a>{' '}
+          ·{' '}
+          <a href="https://github.com/StoryLark/storylark" target="_blank" rel="noopener">
+            source
+          </a>
+        </p>
       </footer>
     </div>
   );
