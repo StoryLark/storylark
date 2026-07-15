@@ -4,7 +4,7 @@ import { user, settings, saveSettings, manifest, pullPreferences } from '../lib/
 import type { ConsumptionMode, DownloadRecord } from '../lib/types';
 import { api, ApiError, type AuthUser, type PasskeySummary } from '../lib/api';
 import { BRAND, NOUNS } from '../brand';
-import { APP_VERSION } from '../version';
+import { BUILD } from '../version';
 import { navigate } from '../router';
 import { pushSupported, needsInstallForPush, currentSubscription, subscribe, unsubscribe } from '../lib/push';
 import { downloadStates, removeDownload, getDownloadRecords } from '../lib/downloads';
@@ -29,7 +29,7 @@ export function Settings(): JSX.Element {
           About {BRAND.appName} →
         </button>
         <p class="settings-version">
-          {BRAND.appName} · {BRAND.name} · v{APP_VERSION} · preview
+          {BRAND.appName} · {BRAND.name} · v{BUILD.coreVersion} ({BUILD.commit}) · preview
         </p>
       </footer>
     </div>

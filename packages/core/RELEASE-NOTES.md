@@ -1,17 +1,21 @@
 <!-- Curated, human-facing release notes — rendered on the in-app About screen and on
      storylark.org. Update by hand each release; keep the format to ## version headings,
      short paragraphs, and - bullets only (HTML comments are not rendered). This is
-     separate from CHANGELOG.md, which Changesets owns and auto-generates. -->
+     separate from CHANGELOG.md, which Changesets owns and auto-generates.
+     Headings MUST be storylark-core npm versions — that is the version the app shows
+     on screen (About → Version & build), so every entry here names a real release. -->
 
 # Release notes
 
 ## 0.4.0 (preview)
 
-Narrator voice picker.
+Narrator voice picker, and a build identity you can trust.
 
 - Libraries can now publish more than one narrator: a "Narrator" picker appears in Settings whenever a library offers 2+ voices
 - Your chosen narrator syncs across devices and stays available offline in your downloads
 - The demo at storylark.dev now offers two voices — Heart and George — with exact word-synced timings for both
+- New Version & build section on this screen: release version, build commit, and build time — the version shown is the actual storylark-core release, so you can always tell exactly what your device is running
+- These release notes are now keyed to that same version number, one entry per release
 
 ## 0.3.0 (preview)
 

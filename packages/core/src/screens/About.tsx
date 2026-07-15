@@ -1,6 +1,6 @@
 import type { JSX } from 'preact';
 import { BRAND, NOUNS, countUnits } from '../brand';
-import { APP_VERSION } from '../version';
+import { BUILD } from '../version';
 import { navigate } from '../router';
 import { manifest } from '../lib/state';
 // Single source of truth: the About screen renders the repo's own docs.
@@ -35,7 +35,9 @@ export function About(): JSX.Element {
         <p class="about-brand">
           {BRAND.name} · by {BRAND.author}
         </p>
-        <p class="about-version">Version {APP_VERSION}</p>
+        <p class="about-version">
+          Version {BUILD.coreVersion} · build {BUILD.commit}
+        </p>
         {units > 0 && <p class="about-count">{countUnits(units)} in the library</p>}
       </div>
 
@@ -96,6 +98,26 @@ export function About(): JSX.Element {
       </section>
 
       <section class="settings-section">
+        <h2>Version &amp; build</h2>
+        <ul class="about-list">
+          {Object.entries(BUILD.versions).map(([pkg, ver]) => (
+            <li key={pkg}>
+              <strong>{pkg}.</strong> v{ver}
+              {pkg === 'storylark-core' &&
+                ' — the app you are using; this number matches the npm release and the "What\'s new" heading below that describes it'}
+            </li>
+          ))}
+          <li>
+            <strong>Solution build.</strong> commit <code>{BUILD.commit}</code>, built{' '}
+            {new Date(BUILD.builtAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+          </li>
+          <li>
+            <strong>Library.</strong> {BRAND.name} (brand <code>{BUILD.brandId}</code>)
+          </li>
+        </ul>
+      </section>
+
+      <section class="settings-section">
         <h2>What's new</h2>
         <Markdown text={changelogMd} />
       </section>
@@ -107,7 +129,7 @@ export function About(): JSX.Element {
 
       <footer class="settings-footer">
         <p class="settings-version">
-          {BRAND.appName} · {BRAND.name} · v{APP_VERSION} · preview
+          {BRAND.appName} · {BRAND.name} · v{BUILD.coreVersion} ({BUILD.commit}) · preview
         </p>
         <p class="settings-version">
           Powered by{' '}

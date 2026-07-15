@@ -21,6 +21,7 @@ import { readFileSync, cpSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { execSync } from 'node:child_process';
 import { mergeConfig } from 'vite';
 
 const CORE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -49,6 +50,7 @@ export function defineStorylarkConfig(options = {}) {
       plugins: [
         preact(),
         configModulePlugin(brand),
+        buildInfoPlugin(resolveBuildInfo(siteRoot, brandId)),
         fontsModulePlugin(brand),
         themePlugin(themeCss),
         brandAssetsPlugin(brandDir, brand),
@@ -76,6 +78,58 @@ export function defineStorylarkConfig(options = {}) {
       build: { outDir: 'dist', emptyOutDir: true, sourcemap: false },
     };
     return options.vite ? mergeConfig(config, options.vite) : config;
+  };
+}
+
+/**
+ * Build identity, captured once per build. The app version IS storylark-core's
+ * npm version — the same number Changesets stamps on CHANGELOG.md and the one
+ * RELEASE-NOTES.md headings use — so the version on screen always names an
+ * actual release. The commit is the consuming site's git SHA (CI env first,
+ * local git as fallback), which pins exactly which site build is deployed.
+ */
+function resolveBuildInfo(siteRoot, brandId) {
+  const corePkg = JSON.parse(readFileSync(resolve(CORE_DIR, 'package.json'), 'utf8'));
+  let commit = process.env.GITHUB_SHA ?? process.env.CF_PAGES_COMMIT_SHA ?? '';
+  if (!commit) {
+    try {
+      commit = execSync('git rev-parse HEAD', { cwd: siteRoot, stdio: ['ignore', 'pipe', 'ignore'] })
+        .toString()
+        .trim();
+    } catch {
+      // not a git checkout (e.g. a tarball build) — leave blank
+    }
+  }
+  // Companion package versions, when installed next to the site (always true in
+  // the engine monorepo; thin npm sites usually only carry core — omit there).
+  const requireFromSite = createRequire(resolve(siteRoot, 'package.json'));
+  const versions = { 'storylark-core': corePkg.version };
+  for (const pkg of ['storylark-worker', 'storylark-pipeline']) {
+    try {
+      versions[pkg] = JSON.parse(readFileSync(requireFromSite.resolve(`${pkg}/package.json`), 'utf8')).version;
+    } catch {
+      // not installed for this site — leave it out rather than guess
+    }
+  }
+  return {
+    coreVersion: corePkg.version,
+    versions,
+    commit: commit ? commit.slice(0, 7) : 'local',
+    builtAt: new Date().toISOString(),
+    brandId,
+  };
+}
+
+/** Serves the build identity as `virtual:storylark-build`. */
+function buildInfoPlugin(info) {
+  return {
+    name: 'storylark-build-module',
+    resolveId(id) {
+      if (id === 'virtual:storylark-build') return '\0storylark-build';
+    },
+    load(id) {
+      if (id === '\0storylark-build') return `export default ${JSON.stringify(info)};`;
+    },
   };
 }
 

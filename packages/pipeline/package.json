@@ -19,7 +19,8 @@
     "./tts": "./tts.mjs",
     "./tts-kokoro": "./tts-kokoro.mjs",
     "./align": "./align.mjs",
-    "./stitch": "./stitch.mjs"
+    "./stitch": "./stitch.mjs",
+    "./package.json": "./package.json"
   },
   "files": [
     "publish.mjs",
