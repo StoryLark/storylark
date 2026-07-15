@@ -43,6 +43,8 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
 - Screen-awake during read-along (Wake Lock)
 - "Listen to anything" — paste text, or bring a PDF, URL, or document, with on-device voices
 - On-device voice & language picker for imported content
+- Voice previews — hear a short sample sentence of each narrator right in Settings before
+  you pick one
 - Social sign-in (Apple, Google, Microsoft)
 - iOS background audio for driving — a research spike
 - Opt-in automatic updates for downstream sites (Renovate)
