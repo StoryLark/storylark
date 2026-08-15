@@ -45,6 +45,10 @@ const env = {
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID ?? '',
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ?? '',
   ADMIN_KEY: process.env.ADMIN_KEY ?? '',
+  // Self-update + admin-portal story upload (AB#7403/AB#7404) — optional,
+  // both features degrade to 501 without these.
+  GITHUB_REPO: process.env.GITHUB_REPO ?? '',
+  GITHUB_DEPLOY_TOKEN: process.env.GITHUB_DEPLOY_TOKEN ?? '',
 };
 
 // Cloudflare's ExecutionContext.waitUntil() keeps the isolate alive after

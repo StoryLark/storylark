@@ -128,6 +128,7 @@ npx wrangler secret put GOOGLE_CLIENT_SECRET --env <your-id>
 | `ADMIN_KEY` | `POST /api/admin/publish` | The publish pipeline sends this as `X-Admin-Key` to fire push notifications. Without it, publishing still works — it just skips the notify step. |
 | `RESEND_API_KEY` | Magic-link email | Only if you enable the (currently dormant) magic-link path. See [`auth.md`](auth.md). |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in | Only if you enable the (currently dormant) Google path. |
+| `GITHUB_REPO` / `GITHUB_DEPLOY_TOKEN` | Self-update + admin-portal story upload | `GITHUB_REPO` is `owner/repo` for your site's own repo; `GITHUB_DEPLOY_TOKEN` is a fine-grained PAT with Actions:write + Contents:write on just that repo. Without these, `/admin` shows update status read-only and story upload is disabled — see [`updating.md`](updating.md) and [`admin-guide.md`](admin-guide.md). |
 
 Password + passkey sign-in need **no** secrets.
 

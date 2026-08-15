@@ -1,0 +1,45 @@
+name: Publish content
+
+# Triggered by the admin portal's story upload (POST
+# /api/admin/publish-story commits the markdown via the GitHub Contents API,
+# then dispatches this workflow) or manually. Runs the real, unchanged
+# packages/pipeline/publish.mjs — the same one the CLI uses — so there is
+# never a second, drifting copy of the manifest/TTS/hashing logic.
+#
+# Set the STORYLARK_PLATFORM repo variable (set automatically by
+# platforms/wizard.mjs) so this picks the right --storage driver. TTS needs
+# AZURE_SPEECH_KEY/AZURE_SPEECH_REGION secrets, or omit them to publish
+# text-only (--no-audio) — the admin portal shows narration status honestly
+# either way.
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [publish-story]
+
+concurrency: publish-content
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Publish
+        env:
+          AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          AZURE_SPEECH_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+          ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+        run: |
+          STORAGE_FLAG=""
+          if [ "${{ vars.STORYLARK_PLATFORM }}" = "azure" ]; then STORAGE_FLAG="--storage azure-blob"; fi
+          AUDIO_FLAG="--no-audio"
+          if [ -n "$AZURE_SPEECH_KEY" ]; then AUDIO_FLAG=""; fi
+          node node_modules/storylark-pipeline/publish.mjs --brand __BRAND_ID__ --source content $STORAGE_FLAG $AUDIO_FLAG
+        # Cloudflare deploys need CLOUDFLARE_API_TOKEN/ACCOUNT_ID as repo
+        # secrets for `wrangler r2 object put` (used internally by the R2
+        # storage driver) to authenticate non-interactively in CI.

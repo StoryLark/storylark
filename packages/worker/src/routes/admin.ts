@@ -147,6 +147,132 @@ async function fanOut(
   }
 }
 
+/**
+ * Admin portal status view: engine identity, library size (from the public
+ * manifest — books/chapters live in storage, not D1), and push subscriber
+ * count (D1). Best-effort: a manifest fetch failure doesn't fail the whole
+ * status response, it just reports null counts.
+ */
+admin.get('/status', async (c) => {
+  if (!requireAdminKey(c)) return c.json({ error: 'unauthorized' }, 401);
+
+  let bookCount: number | null = null;
+  let chapterCount: number | null = null;
+  try {
+    const res = await fetch(`${c.env.CONTENT_ORIGIN}/manifest.json`);
+    if (res.ok) {
+      const manifest = (await res.json()) as { books?: { chapters?: unknown[] }[] };
+      bookCount = manifest.books?.length ?? 0;
+      chapterCount = manifest.books?.reduce((n, b) => n + (b.chapters?.length ?? 0), 0) ?? 0;
+    }
+  } catch {
+    // manifest unreachable — leave counts null rather than fail the request
+  }
+
+  let pushSubscriptions: number | null = null;
+  try {
+    const subs = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').first<{ n: number }>();
+    pushSubscriptions = subs?.n ?? 0;
+  } catch {
+    // database unreachable — leave null rather than fail the whole status view
+  }
+
+  return c.json({
+    brand: c.env.BRAND,
+    appName: c.env.APP_NAME,
+    engineVersion: workerPkg.version,
+    bookCount,
+    chapterCount,
+    pushSubscriptions,
+  });
+});
+
+/**
+ * Admin portal story upload, text-only single-chapter shorthand (the
+ * "<book-id>.md" convention in docs/authoring-stories.md). Deliberately does
+ * NOT reimplement publish.mjs's manifest/TTS/hashing logic inside the
+ * Worker — that would drift from the canonical CLI path. Instead: commit
+ * the markdown via the GitHub Contents API, then dispatch publish.yml,
+ * which runs the real, unchanged pipeline. Narration status is whatever
+ * that workflow's AZURE_SPEECH_KEY secret allows — reported honestly to the
+ * caller, never implied to already exist.
+ */
+admin.post('/publish-story', async (c) => {
+  if (!requireAdminKey(c)) return c.json({ error: 'unauthorized' }, 401);
+  if (!c.env.GITHUB_REPO || !c.env.GITHUB_DEPLOY_TOKEN) {
+    return c.json(
+      { error: 'not_configured', message: 'Story upload needs GITHUB_REPO and GITHUB_DEPLOY_TOKEN secrets. See docs/admin-guide.md.' },
+      501
+    );
+  }
+
+  const body = await c.req.json<{ bookId?: string; title?: string; author?: string; description?: string; markdown?: string }>();
+  if (!body.bookId || !/^[a-z0-9-]{2,64}$/.test(body.bookId)) {
+    return c.json({ error: 'invalid_book_id', message: 'bookId must be 2-64 lowercase letters, digits, or hyphens.' }, 400);
+  }
+  if (!body.title || !body.markdown) {
+    return c.json({ error: 'missing_fields', message: 'title and markdown are required.' }, 400);
+  }
+
+  const frontmatter = [
+    '---',
+    `title: ${body.title}`,
+    body.author ? `author: ${body.author}` : null,
+    body.description ? `description: ${body.description}` : null,
+    'label: Read',
+    '---',
+    '',
+  ]
+    .filter((line) => line !== null)
+    .join('\n');
+  const fileContent = frontmatter + body.markdown;
+  const path = `content/books/${body.bookId}.md`;
+
+  const ghHeaders = {
+    Authorization: `Bearer ${c.env.GITHUB_DEPLOY_TOKEN}`,
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'storylark-admin-portal',
+  };
+
+  // GitHub's Contents API needs the existing file's blob sha to update it;
+  // a 404 here correctly means "creating a new story."
+  let sha: string | undefined;
+  const existing = await fetch(`https://api.github.com/repos/${c.env.GITHUB_REPO}/contents/${path}`, { headers: ghHeaders });
+  if (existing.ok) sha = ((await existing.json()) as { sha: string }).sha;
+
+  const commitRes = await fetch(`https://api.github.com/repos/${c.env.GITHUB_REPO}/contents/${path}`, {
+    method: 'PUT',
+    headers: { ...ghHeaders, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message: `content: publish "${body.title}" via admin portal`,
+      content: btoa(unescape(encodeURIComponent(fileContent))),
+      sha,
+    }),
+  });
+  if (!commitRes.ok) {
+    return c.json({ error: 'commit_failed', status: commitRes.status, detail: await commitRes.text() }, 502);
+  }
+
+  const dispatchRes = await fetch(`https://api.github.com/repos/${c.env.GITHUB_REPO}/actions/workflows/publish.yml/dispatches`, {
+    method: 'POST',
+    headers: { ...ghHeaders, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ref: 'main' }),
+  });
+  if (!dispatchRes.ok) {
+    return c.json(
+      { ok: true, committed: true, published: false, message: 'Story committed but publishing failed to start — check the repo\'s Actions tab.' },
+      207
+    );
+  }
+
+  return c.json({
+    ok: true,
+    committed: true,
+    published: true,
+    message: 'Story committed and publishing started — check back in a few minutes. Narration depends on whether TTS credentials are configured in the repo.',
+  });
+});
+
 async function bumpFailure(db: Database, endpoint: string, current: number): Promise<void> {
   if (current + 1 >= 5) {
     await db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').bind(endpoint).run();
