@@ -22,6 +22,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { app as workerApp } from 'storylark-worker';
 import { postgresDatabase } from 'storylark-worker/db/postgres';
+import { checkForUpdateAndNotify } from 'storylark-worker/lib/update-check';
 
 const required = ['DATABASE_URL', 'BRAND', 'APP_ORIGIN', 'CONTENT_ORIGIN', 'MAIL_FROM', 'APP_NAME'];
 const missing = required.filter((k) => !process.env[k]);
@@ -49,6 +50,7 @@ const env = {
   // both features degrade to 501 without these.
   GITHUB_REPO: process.env.GITHUB_REPO ?? '',
   GITHUB_DEPLOY_TOKEN: process.env.GITHUB_DEPLOY_TOKEN ?? '',
+  ADMIN_EMAIL: process.env.ADMIN_EMAIL ?? '',
 };
 
 // Cloudflare's ExecutionContext.waitUntil() keeps the isolate alive after
@@ -76,3 +78,12 @@ const port = Number(process.env.PORT ?? 8787);
 serve({ fetch: app.fetch, port }, (info) => {
   console.log(`StoryLark (${env.APP_NAME}) listening on http://localhost:${info.port}`);
 });
+
+// Operator notifications (AB#7403/F2), Azure side: this process stays warm
+// (App Service Always On), so a daily interval does the same job
+// Cloudflare's Cron Trigger does. No-ops without RESEND_API_KEY +
+// ADMIN_EMAIL configured; failures are logged, never crash the process.
+const DAY_MS = 24 * 60 * 60 * 1000;
+setInterval(() => {
+  checkForUpdateAndNotify(env).catch((err) => console.error('Update check failed:', err));
+}, DAY_MS);

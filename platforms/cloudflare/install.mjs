@@ -109,7 +109,8 @@ function ensureWranglerEnvBlock() {
         "CONTENT_ORIGIN": "${env.CONTENT_ORIGIN}",
         "MAIL_FROM": "${env.MAIL_FROM}",
         "APP_NAME": "${env.APP_NAME}"
-      }
+      },
+      "triggers": { "crons": ["0 13 * * *"] }
     }`;
   // Insert right before the closing brace of the "env" object's last entry.
   const insertAt = text.lastIndexOf('\n  }');

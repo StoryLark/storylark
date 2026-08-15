@@ -8,6 +8,7 @@ import { preferences } from './routes/preferences';
 import { bookmarks } from './routes/bookmarks';
 import { push } from './routes/push';
 import { admin } from './routes/admin';
+import { checkForUpdateAndNotify } from './lib/update-check';
 
 const app = new Hono<AppContext>();
 
@@ -64,5 +65,14 @@ export default {
     const raw = env as Env & { DB: D1Database };
     (raw as unknown as { DB: unknown }).DB = d1Database(raw.DB);
     return app.fetch(request, raw as Env, ctx);
+  },
+
+  // Operator notifications (AB#7403/F2), Cloudflare side: a Cron Trigger
+  // (see wrangler.jsonc `triggers.crons`) invokes this instead of fetch.
+  // Same env, same check as the in-portal GET /api/admin/update-status —
+  // this just also emails the operator when RESEND_API_KEY + ADMIN_EMAIL
+  // are configured, so they hear about it without opening /admin.
+  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(checkForUpdateAndNotify(env));
   },
 };

@@ -16,7 +16,8 @@
     "./package.json": "./package.json",
     "./db/postgres": "./src/db/postgres.ts",
     "./db/d1": "./src/db/d1.ts",
-    "./db/types": "./src/db/types.ts"
+    "./db/types": "./src/db/types.ts",
+    "./lib/update-check": "./src/lib/update-check.ts"
   },
   "files": [
     "src/",

@@ -25,6 +25,10 @@ export interface Env {
   // it (a fine-grained PAT scoped to just this repo, not a broad token).
   GITHUB_REPO: string;
   GITHUB_DEPLOY_TOKEN: string;
+  // Operator notifications (AB#7403/F2) — optional. Without both, the
+  // scheduled check still runs but never emails; the in-portal check
+  // (/api/admin/update-status) always works regardless.
+  ADMIN_EMAIL: string;
 }
 
 export interface User {

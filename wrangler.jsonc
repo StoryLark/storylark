@@ -36,7 +36,11 @@
         "CONTENT_ORIGIN": "https://content.storylark.dev",
         "MAIL_FROM": "StoryLark <noreply@storylark.dev>",
         "APP_NAME": "StoryLark"
-      }
+      },
+      // Daily operator-update check (AB#7403/F2) — set ADMIN_EMAIL +
+      // RESEND_API_KEY (wrangler secret put) to also email when a new
+      // release is found; the in-portal check works either way.
+      "triggers": { "crons": ["0 13 * * *"] }
     },
     // Example customer brands — placeholder IDs/domains on purpose; a real
     // deployment fills in its own resources (see docs/deploy-your-own.md).
@@ -60,7 +64,8 @@
         "CONTENT_ORIGIN": "https://content.example.com",
         "MAIL_FROM": "Gunner the Lab <noreply@example.com>",
         "APP_NAME": "StoryReader"
-      }
+      },
+      "triggers": { "crons": ["0 13 * * *"] }
     },
     "hold-fast-press": {
       "name": "hold-fast-press",
@@ -82,7 +87,8 @@
         "CONTENT_ORIGIN": "https://content.example.com",
         "MAIL_FROM": "Holdfast Press <noreply@example.com>",
         "APP_NAME": "StoryReader"
-      }
+      },
+      "triggers": { "crons": ["0 13 * * *"] }
     }
   }
 }

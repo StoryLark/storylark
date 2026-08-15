@@ -129,6 +129,7 @@ npx wrangler secret put GOOGLE_CLIENT_SECRET --env <your-id>
 | `RESEND_API_KEY` | Magic-link email | Only if you enable the (currently dormant) magic-link path. See [`auth.md`](auth.md). |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in | Only if you enable the (currently dormant) Google path. |
 | `GITHUB_REPO` / `GITHUB_DEPLOY_TOKEN` | Self-update + admin-portal story upload | `GITHUB_REPO` is `owner/repo` for your site's own repo; `GITHUB_DEPLOY_TOKEN` is a fine-grained PAT with Actions:write + Contents:write on just that repo. Without these, `/admin` shows update status read-only and story upload is disabled — see [`updating.md`](updating.md) and [`admin-guide.md`](admin-guide.md). |
+| `ADMIN_EMAIL` | Proactive update emails | With `RESEND_API_KEY` also set, the daily scheduled check (Cron Trigger — already in `wrangler.jsonc`) emails this address when a new release exists, so you hear about it without opening `/admin`. Without it, the daily check still runs but stays silent; `/admin` always shows the current status regardless. |
 
 Password + passkey sign-in need **no** secrets.
 
