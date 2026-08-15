@@ -1,0 +1,116 @@
+name: Self-update
+
+# Triggered by the admin portal's "Install update" button (POST
+# /api/admin/update-install -> workflow_dispatch on this file) or manually.
+# The click is the approval — this workflow does the actual work a Worker
+# or App Service process can't do to itself: bump the pinned engine
+# version, migrate, build, and redeploy.
+#
+# Set the repository variable STORYLARK_PLATFORM to "cloudflare" or "azure"
+# (Settings -> Secrets and variables -> Actions -> Variables) to select
+# which job runs — set automatically the first time you deploy through the
+# wizard (platforms/wizard.mjs), or set it by hand.
+#
+# Required secrets, matching whichever platform you deploy to:
+#   Cloudflare: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+#   Azure:      AZURE_CREDENTIALS (service principal, federated or JSON),
+#               DATABASE_URL, AZURE_STORAGE_CONNECTION_STRING (App Service
+#               app settings — see platforms/azure/.env.example)
+
+on:
+  workflow_dispatch:
+
+concurrency: self-update
+
+jobs:
+  bump-engine:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.bump.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: bump
+        run: |
+          BEFORE=$(node -p "require('./package.json').dependencies['storylark-core']")
+          npm install --save-exact storylark-core@latest storylark-worker@latest
+          AFTER=$(node -p "require('./package.json').dependencies['storylark-core']")
+          if [ "$BEFORE" = "$AFTER" ]; then
+            echo "Already on the latest engine version ($AFTER)."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Updating engine $BEFORE -> $AFTER"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: steps.bump.outputs.changed == 'true'
+        with:
+          name: bumped-package-files
+          path: |
+            package.json
+            package-lock.json
+
+  deploy-cloudflare:
+    needs: bump-engine
+    if: needs.bump-engine.outputs.changed == 'true' && vars.STORYLARK_PLATFORM == 'cloudflare'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: bumped-package-files }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - name: Apply D1 migrations
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 migrations apply __BRAND_ID__ --env __BRAND_ID__ --remote
+      - run: npm run build
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --env __BRAND_ID__
+
+  deploy-azure:
+    needs: bump-engine
+    if: needs.bump-engine.outputs.changed == 'true' && vars.STORYLARK_PLATFORM == 'azure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: bumped-package-files }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      # Snapshot before migrating: Postgres has no in-place undo for a bad
+      # migration the way D1's time-travel recovery does, so take a real
+      # backup first. Requires pg_dump on the runner (ubuntu-latest ships it).
+      - name: Snapshot database
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pg_dump "$DATABASE_URL" --format=custom --file="pre-update-$(date +%Y%m%d%H%M%S).dump"
+      - name: Upload snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-update-db-snapshot
+          path: '*.dump'
+          retention-days: 30
+      - name: Apply migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: node packages/worker/migrate-postgres.mjs --connection-string="$DATABASE_URL"
+      - run: npm run build -w app -- --mode __BRAND_ID__ 2>/dev/null || npm run build
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Deploy to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: __BRAND_ID__-app
+          package: .

@@ -20,6 +20,10 @@ Thumbs.db
 .codex/
 .mcp.json
 .github/
+# ...except the scaffold template's own .github/ — this is shipped content
+# (stamped into every npm-create-storylark site), not this repo's own CI.
+!create-storylark/template/.github/
+!create-storylark/template/.github/**
 .wrangler/
 /AGENTS.md
 /CLAUDE.md
