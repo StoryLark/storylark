@@ -1,0 +1,42 @@
+/* Gunner the Lab — warm storybook palette. Cream pages, pumpkin accents and
+   forest-green links; the dark scale stays in the same warm charcoal family
+   rather than dropping to neutral gray. An example of matching a StoryLark
+   theme 1:1 to an existing site's identity. */
+:root {
+  color-scheme: light;
+
+  --bg: #FDF6EC;
+  --bg-raised: #FFFCF5;
+  --bg-sunken: #F5EBDA;
+  --text: #3B2412;
+  --text-muted: #6b4a2e;
+  --text-faint: #9a7c62;
+  --accent: #E87A2E;
+  --accent-strong: #D06A20;
+  --rule: #e8dcc6;
+  --link: #2D5F2D;
+
+  --font-display: "Newsreader", Georgia, serif;
+  --font-headers: "Newsreader", Georgia, serif;
+  --font-body: "Newsreader", Georgia, serif;
+  --font-mono: "Inter", system-ui, sans-serif;
+
+  --highlight-word: rgba(232, 122, 46, 0.25);
+  --highlight-block: rgba(232, 122, 46, 0.55);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1E1108;
+  --bg-raised: #2a1a0d;
+  --bg-sunken: #170d06;
+  --text: #f3e8d8;
+  --text-muted: #d3bda6;
+  --text-faint: #a08a74;
+  --accent: #F0934A;
+  --accent-strong: #E87A2E;
+  --rule: #3d2915;
+  --link: #5A9A5A;
+  --highlight-word: rgba(240, 147, 74, 0.28);
+  --highlight-block: rgba(240, 147, 74, 0.55);
+}

@@ -1,0 +1,26 @@
+{
+  "id": "gunner-the-lab",
+  "name": "Gunner the Lab",
+  "appName": "StoryReader",
+  "shortName": "Gunner Reader",
+  "tagline": "Every adventure, wherever you are.",
+  "appOrigin": "https://app.example.com",
+  "contentOrigin": "https://content.example.com",
+  "themeColor": "#FDF6EC",
+  "backgroundColor": "#FDF6EC",
+  "defaultTheme": "light",
+  "author": "Gunner the Lab",
+  "layout": "flat",
+  "tts": {
+    "voice": "af_heart",
+    "rate": "0%",
+    "outputFormat": "Audio48Khz96KBitRateMonoMp3"
+  },
+  "vapidPublicKey": "",
+  "fonts": {
+    "display": "Newsreader",
+    "headers": "Newsreader",
+    "body": "Newsreader",
+    "mono": "Inter"
+  }
+}

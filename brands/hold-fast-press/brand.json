@@ -1,0 +1,26 @@
+{
+  "id": "hold-fast-press",
+  "name": "Holdfast Press",
+  "appName": "StoryReader",
+  "shortName": "Holdfast Reader",
+  "tagline": "Read it. Hear it. Carry it with you.",
+  "appOrigin": "https://app.example.com",
+  "contentOrigin": "https://content.example.com",
+  "themeColor": "#1A1D24",
+  "backgroundColor": "#1A1D24",
+  "defaultTheme": "dark",
+  "author": "Holdfast Press",
+  "layout": "flat",
+  "tts": {
+    "voice": "bm_george",
+    "rate": "0%",
+    "outputFormat": "Audio48Khz96KBitRateMonoMp3"
+  },
+  "vapidPublicKey": "",
+  "fonts": {
+    "display": "Cormorant Garamond",
+    "headers": "Cinzel",
+    "body": "Lora",
+    "mono": "IBM Plex Mono"
+  }
+}
