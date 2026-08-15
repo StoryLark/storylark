@@ -55,6 +55,9 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
   you pick one
 - Social sign-in (Apple, Google, Microsoft)
 - iOS background audio for driving — a research spike
+- Provider independence — storage and database adapter layer so the Worker and pipeline can
+  run beyond Cloudflare (D1/R2 stay the reference implementations); the adapter interfaces
+  land before the 1.0 contract freeze
 
 ## Later
 
