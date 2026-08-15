@@ -1,0 +1,23 @@
+{
+  "name": "__BRAND_ID__-site",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "setup": "node platforms/wizard.mjs",
+    "publish": "node node_modules/storylark-pipeline/publish.mjs --brand __BRAND_ID__ --source content"
+  },
+  "dependencies": {
+    "storylark-core": "__CORE_VERSION__",
+    "storylark-worker": "__WORKER_VERSION__"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "@cloudflare/workers-types": "^4.20260601.0",
+    "@types/node": "^22.0.0"
+  }
+}

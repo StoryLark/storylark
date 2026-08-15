@@ -1,0 +1,41 @@
+# __APP_NAME__
+
+A branded [StoryLark](https://github.com/StoryLark/storylark) site, created with
+`npm create storylark`. The engine comes from npm (`storylark-core` +
+`storylark-worker`, pinned exactly); this folder owns only the brand theme
+(`brands/__BRAND_ID__/`), content, and deployment config.
+
+## Deploy
+
+```
+npm run setup
+```
+
+Runs the setup wizard — pick your platform (Cloudflare or Azure), answer a
+few questions, and it verifies everything is ready to deploy. See
+`platforms/cloudflare/README.md` or `platforms/azure/README.md` for the full
+manual steps if you'd rather not use the wizard.
+
+## Brand your site
+
+Edit `brands/__BRAND_ID__/brand.json` and `theme.css` — see
+[build-your-own-theme.md](https://github.com/StoryLark/storylark/blob/main/docs/build-your-own-theme.md)
+in the engine repo, or start from a theme in the
+[gallery](https://gallery.storylark.dev).
+
+## Publish content
+
+```
+npm run publish -- --source content
+```
+
+Stories are plain markdown — see
+[authoring-stories.md](https://github.com/StoryLark/storylark/blob/main/docs/authoring-stories.md).
+
+## Day to day
+
+```
+npm run dev
+npm run build
+npm run typecheck
+```

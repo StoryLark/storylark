@@ -1,0 +1,19 @@
+{
+  "name": "create-storylark",
+  "version": "0.1.0",
+  "description": "Scaffold a new branded StoryLark site — npm create storylark",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/StoryLark/storylark.git",
+    "directory": "create-storylark"
+  },
+  "type": "module",
+  "bin": {
+    "create-storylark": "./bin/create-storylark.mjs"
+  },
+  "files": [
+    "bin/",
+    "template/"
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "__BRAND_ID__",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-01",
+  "assets": {
+    "directory": "dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"],
+    "not_found_handling": "single-page-application"
+  },
+  "observability": { "enabled": true },
+  "env": {
+    "__BRAND_ID__": {
+      "name": "__BRAND_ID__",
+      "routes": [{ "pattern": "app.example.com", "custom_domain": true }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "__BRAND_ID__",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "node_modules/storylark-worker/migrations"
+        }
+      ],
+      "r2_buckets": [
+        { "binding": "CONTENT", "bucket_name": "__BRAND_ID__-content" }
+      ],
+      "vars": {
+        "BRAND": "__BRAND_ID__",
+        "APP_ORIGIN": "https://app.example.com",
+        "CONTENT_ORIGIN": "https://content.example.com",
+        "MAIL_FROM": "__APP_NAME__ <noreply@example.com>",
+        "APP_NAME": "__APP_NAME__"
+      }
+    }
+  }
+}
