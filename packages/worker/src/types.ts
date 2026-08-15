@@ -1,5 +1,10 @@
+import type { Database, ConflictInsert } from './db/types';
+
 export interface Env {
-  DB: D1Database;
+  // Platform-agnostic seam (AB#7399): the Cloudflare Worker entry binds this
+  // to the D1 reference driver; other platform entries (Azure, AWS) bind it
+  // to the Postgres driver. Route code only ever sees this interface.
+  DB: Database & ConflictInsert;
   CONTENT: R2Bucket;
   ASSETS: Fetcher;
   BRAND: string;

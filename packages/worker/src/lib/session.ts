@@ -1,6 +1,7 @@
 import type { Context, Next } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { AppContext, SessionRow, User } from '../types';
+import type { Database } from '../db/types';
 import { randomToken, sha256Hex } from './crypto';
 
 const COOKIE = 'sr_session';
@@ -84,7 +85,7 @@ export function requireAuth() {
   };
 }
 
-export async function upsertUserByEmail(db: D1Database, email: string): Promise<string> {
+export async function upsertUserByEmail(db: Database, email: string): Promise<string> {
   const now = Date.now();
   const existing = await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: string }>();
   if (existing) {

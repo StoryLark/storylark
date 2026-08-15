@@ -21,9 +21,11 @@
   ],
   "dependencies": {
     "@simplewebauthn/server": "^13.3.2",
-    "hono": "^4.6.0"
+    "hono": "^4.6.0",
+    "pg": "^8.13.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260601.0"
+    "@cloudflare/workers-types": "^4.20260601.0",
+    "@types/pg": "^8.11.0"
   }
 }

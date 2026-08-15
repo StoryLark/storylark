@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import type { WebAuthnCredential } from '@simplewebauthn/server';
 import type { AppContext } from '../types';
+import type { Database } from '../db/types';
 import { b64url, b64urlDecode, randomToken } from './crypto';
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutes — a WebAuthn ceremony is a single user gesture
@@ -25,7 +26,7 @@ export function getRpConfig(c: Context<AppContext>): RpConfig {
 
 /** Stores a ceremony's challenge, single-use and short-lived — same shape as magic_links. */
 export async function storeChallenge(
-  db: D1Database,
+  db: Database,
   challenge: string,
   purpose: ChallengePurpose,
   userId: string | null
@@ -41,7 +42,7 @@ export async function storeChallenge(
 
 /** Consumes (marks used) a challenge if it's unused, unexpired, and for the right purpose. */
 export async function consumeChallenge(
-  db: D1Database,
+  db: Database,
   id: string,
   purpose: ChallengePurpose
 ): Promise<{ challenge: string; userId: string | null } | null> {

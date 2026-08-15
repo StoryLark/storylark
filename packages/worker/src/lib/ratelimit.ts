@@ -7,7 +7,9 @@
  * (returns true), so a database hiccup degrades to "unthrottled" rather than
  * locking everyone out of sign-in.
  */
-export async function rateLimit(db: D1Database, bucket: string, limit: number, windowMs: number): Promise<boolean> {
+import type { Database } from '../db/types';
+
+export async function rateLimit(db: Database, bucket: string, limit: number, windowMs: number): Promise<boolean> {
   try {
     const now = Date.now();
     const row = await db

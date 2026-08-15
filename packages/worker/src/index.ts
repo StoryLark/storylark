@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
-import type { AppContext } from './types';
+import type { AppContext, Env } from './types';
+import { d1Database } from './db/d1';
 import { auth } from './routes/auth';
 import { passkeys } from './routes/passkeys';
 import { progress } from './routes/progress';
@@ -39,4 +40,14 @@ app.onError((err, c) => {
   return c.json({ error: 'internal' }, 500);
 });
 
-export default app;
+// Cloudflare hands the raw D1Database binding declared in wrangler.jsonc;
+// wrap it in the platform-agnostic Database seam (AB#7399) before any route
+// sees it. Other platform entries (platforms/azure, platforms/aws) bind
+// env.DB to postgresDatabase(...) instead — same Env type, same routes.
+export default {
+  fetch(request: Request, env: unknown, ctx: ExecutionContext) {
+    const raw = env as Env & { DB: D1Database };
+    const wrapped: Env = { ...raw, DB: d1Database(raw.DB) };
+    return app.fetch(request, wrapped, ctx);
+  },
+};

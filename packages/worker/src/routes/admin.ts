@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { AppContext } from '../types';
+import type { Database } from '../db/types';
 import { sendPush } from '../lib/vapid';
 import { INIT_SCHEMA } from '../lib/schema';
 
@@ -79,7 +80,7 @@ async function fanOut(
   }
 }
 
-async function bumpFailure(db: D1Database, endpoint: string, current: number): Promise<void> {
+async function bumpFailure(db: Database, endpoint: string, current: number): Promise<void> {
   if (current + 1 >= 5) {
     await db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').bind(endpoint).run();
   } else {

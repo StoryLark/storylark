@@ -186,9 +186,12 @@ auth.post('/password/forgot', async (c) => {
     .run();
 
   const code = sixDigitCode();
-  await c.env.DB.prepare('INSERT OR IGNORE INTO password_resets (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
-    .bind(await resetCodeHash(user.id, code), user.id, expiresAt)
-    .run();
+  await c.env.DB.insertIgnore(
+    'password_resets',
+    ['token_hash', 'user_id', 'expires_at'],
+    [await resetCodeHash(user.id, code), user.id, expiresAt],
+    ['token_hash']
+  );
 
   const link = `${c.env.APP_ORIGIN}/settings?reset=${token}`;
   c.executionCtx.waitUntil(
@@ -292,12 +295,15 @@ auth.post('/magic/request', async (c) => {
   // Second credential, same table: a 6-digit code the user can type INSIDE the
   // app (fetch → Set-Cookie in the same browser context). The hash is namespaced
   // by email so codes never collide on the token_hash primary key and one email's
-  // code can't be verified against another's. INSERT OR IGNORE tolerates the
+  // code can't be verified against another's. insertIgnore tolerates the
   // (1-in-a-million) case of regenerating an identical outstanding code.
   const code = sixDigitCode();
-  await c.env.DB.prepare('INSERT OR IGNORE INTO magic_links (token_hash, email, expires_at) VALUES (?, ?, ?)')
-    .bind(await codeHash(email, code), email, expiresAt)
-    .run();
+  await c.env.DB.insertIgnore(
+    'magic_links',
+    ['token_hash', 'email', 'expires_at'],
+    [await codeHash(email, code), email, expiresAt],
+    ['token_hash']
+  );
 
   const link = `${c.env.APP_ORIGIN}/api/auth/magic/verify?token=${token}`;
   c.executionCtx.waitUntil(
@@ -411,11 +417,12 @@ auth.get('/google/callback', async (c) => {
     await c.env.DB.prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').bind(Date.now(), userId).run();
   } else {
     userId = await upsertUserByEmail(c.env.DB, claims.email.toLowerCase());
-    await c.env.DB.prepare(
-      'INSERT OR IGNORE INTO oauth_identities (provider, provider_user_id, user_id) VALUES (?, ?, ?)'
-    )
-      .bind('google', claims.sub, userId)
-      .run();
+    await c.env.DB.insertIgnore(
+      'oauth_identities',
+      ['provider', 'provider_user_id', 'user_id'],
+      ['google', claims.sub, userId],
+      ['provider', 'provider_user_id']
+    );
     if (claims.name) {
       await c.env.DB.prepare('UPDATE users SET display_name = COALESCE(display_name, ?) WHERE id = ?')
         .bind(claims.name, userId)
