@@ -107,13 +107,26 @@ function deploy() {
   }
 
   console.log(`\nDeploying infrastructure for brand "${env.BRAND_ID}" to resource group "${env.AZURE_RESOURCE_GROUP}"...`);
+  const parameters = [`brandId=${env.BRAND_ID}`, `location=${env.AZURE_LOCATION}`, `dbAdminPassword=${env.DB_ADMIN_PASSWORD}`];
+  // Optional: run a brands/<id>/ folder that differs from the Azure resource
+  // naming prefix (BRAND_ID) — e.g. testing BRAND_ID=my-brand-dev against the
+  // real brands/my-brand/ folder.
+  if (env.BRAND) parameters.push(`brand=${env.BRAND}`);
+  // Postgres Flexible Server provisioning is restricted to a subset of regions
+  // per subscription (independent of the region's general availability) — a
+  // deploy can fail with `ParameterOutOfRange: 'Version' should be in: []`
+  // even though the SKU/version combo genuinely exists. If AZURE_LOCATION is
+  // restricted for your subscription, set DB_LOCATION to an unrestricted one
+  // (check via: az rest --method get --url "https://management.azure.com/subscriptions/<sub>/providers/Microsoft.DBforPostgreSQL/locations/<region>/capabilities?api-version=2025-08-01" --query "value[0].reason").
+  if (env.DB_LOCATION) parameters.push(`dbLocation=${env.DB_LOCATION}`);
+  if (env.APP_SERVICE_SKU) parameters.push(`appServiceSku=${env.APP_SERVICE_SKU}`);
   run(
     'az',
     [
       'deployment', 'group', 'create',
       '--resource-group', env.AZURE_RESOURCE_GROUP,
       '--template-file', join(__dirname, 'infra.bicep'),
-      '--parameters', `brandId=${env.BRAND_ID}`, `location=${env.AZURE_LOCATION}`, `dbAdminPassword=${env.DB_ADMIN_PASSWORD}`,
+      '--parameters', ...parameters,
     ],
     { stdio: 'inherit' }
   );

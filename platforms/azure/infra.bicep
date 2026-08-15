@@ -12,8 +12,14 @@
 @maxLength(24)
 param brandId string
 
-@description('Azure region for every resource.')
+@description('Brand folder to run (brands/<brand>/) — defaults to brandId, override if your Azure resource prefix differs from your brand folder name.')
+param brand string = brandId
+
+@description('Azure region for every resource except PostgreSQL (see dbLocation).')
 param location string = resourceGroup().location
+
+@description('Azure region for the PostgreSQL Flexible Server. Separate from `location` because Flexible Server provisioning is restricted per-subscription to a subset of regions — pick one where Microsoft.DBforPostgreSQL/locations/<region>/capabilities returns no restriction reason.')
+param dbLocation string = location
 
 @description('PostgreSQL administrator username.')
 param dbAdminUser string = 'storylark'
@@ -24,6 +30,12 @@ param dbAdminPassword string
 
 @description('App Service plan SKU. B1 is the smallest that supports Always On, needed so the Node process (and its background push/email sends) stays warm.')
 param appServiceSku string = 'B1'
+
+@description('Human-readable app name shown in the UI (About screen, mail templates). Defaults to brand if not set.')
+param appName string = brand
+
+@description('The From: address for transactional email, e.g. "Your App <noreply@example.com>". Update once you have a real domain — the default is a placeholder.')
+param mailFrom string = '${appName} <noreply@example.com>'
 
 var storageAccountName = toLower(replace('${brandId}content', '-', ''))
 var postgresServerName = '${brandId}-db'
@@ -54,9 +66,9 @@ resource contentContainer 'Microsoft.Storage/storageAccounts/blobServices/contai
   }
 }
 
-resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview' = {
+resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2025-08-01' = {
   name: postgresServerName
-  location: location
+  location: dbLocation
   sku: {
     name: 'Standard_B1ms'
     tier: 'Burstable'
@@ -70,16 +82,29 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview'
   }
 }
 
-resource postgresDb 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-06-01-preview' = {
+resource postgresDb 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2025-08-01' = {
   parent: postgres
   name: 'storylark'
+}
+
+// migrations-postgres/0001_init.sql uses `CREATE EXTENSION citext` (matching
+// user emails case-insensitively). Flexible Server rejects CREATE EXTENSION
+// for anything not on this allow-list — without it, migrate-postgres.mjs
+// fails with "extension \"citext\" is not allow-listed for users".
+resource postgresExtensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2025-08-01' = {
+  parent: postgres
+  name: 'azure.extensions'
+  properties: {
+    value: 'citext'
+    source: 'user-override'
+  }
 }
 
 // Allows Azure services (this App Service) to reach the database. Tighten
 // with a VNet integration + private endpoint for production hardening —
 // left open here to keep the out-of-the-box path simple, matching the
 // Cloudflare recipe's own free-tier-first stance.
-resource postgresFirewall 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-06-01-preview' = {
+resource postgresFirewall 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2025-08-01' = {
   parent: postgres
   name: 'AllowAzureServices'
   properties: {
@@ -103,12 +128,20 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
     serverFarmId: appServicePlan.id
     siteConfig: {
       linuxFxVersion: 'NODE|20-lts'
-      alwaysOn: true
+      alwaysOn: appServiceSku != 'F1' // Free tier doesn't support Always On
       appCommandLine: 'npm start --prefix platforms/azure'
       appSettings: [
-        { name: 'BRAND', value: brandId }
+        { name: 'BRAND', value: brand }
+        { name: 'APP_NAME', value: appName }
+        { name: 'APP_ORIGIN', value: 'https://${webAppName}.azurewebsites.net' }
+        { name: 'CONTENT_ORIGIN', value: 'https://${storage.name}.blob.core.windows.net/${brandId}-content' }
+        { name: 'MAIL_FROM', value: mailFrom }
         { name: 'DATABASE_URL', value: 'postgresql://${dbAdminUser}:${dbAdminPassword}@${postgres.properties.fullyQualifiedDomainName}:5432/storylark?sslmode=require' }
         { name: 'AZURE_STORAGE_CONNECTION_STRING', value: 'DefaultEndpointsProtocol=https;AccountName=${storage.name};AccountKey=${storage.listKeys().keys[0].value};EndpointSuffix=core.windows.net' }
+        // server.mjs's cwd is platforms/azure (`npm start --prefix platforms/azure`
+        // below), so STATIC_ROOT's default (`./app/dist`) resolves wrong when the
+        // whole repo is the deployed site root — point it at the real path.
+        { name: 'STATIC_ROOT', value: '../../app/dist' }
         { name: 'WEBSITE_NODE_DEFAULT_VERSION', value: '~20' }
         { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'true' }
       ]
