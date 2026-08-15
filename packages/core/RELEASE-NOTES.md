@@ -7,6 +7,22 @@
 
 # Release notes
 
+## 0.5.0 (preview)
+
+The considerate release: your screen stays on, and your stories stop when you do.
+
+- Read-along now keeps your screen awake — no more mid-chapter dimming while you follow the
+  highlighting. A "Keep screen awake" setting (on by default where your browser supports it)
+  controls this, and it releases the moment you pause or leave the reader
+- Finishing a story no longer auto-plays the next one. If you liked the old behavior, turn on
+  "Auto-play the next story" in Settings → Playback — your choice syncs across devices.
+  Chapters inside a book still flow continuously either way
+- For deployers: updates are now opt-in by design — each new engine release opens a pull
+  request in your site repo with these release notes attached; merging it is the approval
+  that rebuilds and redeploys your site. Nothing ever updates without your say-so
+- Two example customer brands — Gunner the Lab and Holdfast Press — now ship in the repo
+  alongside the base brand as worked examples of the theme contract
+
 ## 0.4.0 (preview)
 
 Narrator voice picker, and a build identity you can trust.

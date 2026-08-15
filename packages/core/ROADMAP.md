@@ -32,6 +32,15 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
   the update model end to end
 - **Multiple narrator voices** — a library can publish more than one narrator; a picker in
   Settings switches between them, synced across devices and available offline
+- **Screen-awake during read-along** — a wake lock keeps the screen on while narration plays
+  with the text on screen, behind a "Keep screen awake" setting (on by default where supported)
+- **Your story, your pace** — finishing a standalone story now stops by default; an opt-in
+  "Auto-play the next story" setting continues automatically for those who want it
+- **Opt-in updates for downstream sites** — a new release opens a pull request in a deployer's
+  site repo with the release notes; merging the PR is the approval that rebuilds and redeploys.
+  The live demo runs this exact flow
+- **Example customer brands in-repo** — `gunner-the-lab` and `hold-fast-press` ship alongside
+  the base brand as worked examples of the theme contract
 
 ## Now
 
@@ -40,14 +49,12 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
 
 ## Next
 
-- Screen-awake during read-along (Wake Lock)
 - "Listen to anything" — paste text, or bring a PDF, URL, or document, with on-device voices
 - On-device voice & language picker for imported content
 - Voice previews — hear a short sample sentence of each narrator right in Settings before
   you pick one
 - Social sign-in (Apple, Google, Microsoft)
 - iOS background audio for driving — a research spike
-- Opt-in automatic updates for downstream sites (Renovate)
 
 ## Later
 
