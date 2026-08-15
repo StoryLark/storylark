@@ -1,6 +1,6 @@
 {
   "name": "storylark-worker",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "description": "StoryLark API Worker — Hono app over D1 + R2 (auth, progress sync, push, admin publish). Import the default export from your site's worker entry; migrations ship in ./migrations.",
   "license": "Apache-2.0",
   "repository": {

@@ -1,7 +1,7 @@
 {
   "name": "storylark-platform-azure",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Azure entry point + deploy mechanics for a StoryLark site — see README.md.",
   "scripts": {
@@ -11,7 +11,7 @@
   "dependencies": {
     "@hono/node-server": "^2.1.1",
     "hono": "^4.6.0",
-    "storylark-worker": "0.4.0"
+    "storylark-worker": "0.6.0"
   },
   "devDependencies": {
     "tsx": "^4.19.0"
