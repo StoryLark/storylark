@@ -7,6 +7,28 @@
 
 # Release notes
 
+## 0.7.0 (preview)
+
+Runs anywhere, updates itself, and you can manage it from your phone.
+
+- **Runs on Azure now, not just Cloudflare** — a database adapter (Postgres,
+  also covers AWS) and a storage adapter (Azure Blob) sit behind the same
+  interfaces the Cloudflare drivers use, so switching platforms never
+  touches your brand or your content
+- **The deployed app updates itself** — a new admin portal at `/admin` shows
+  you what's running versus the latest release, and one click starts the
+  update: your site rebuilds, migrates its database, and redeploys, with
+  no other action required from you. Updates never touch your theme or
+  presentation
+- **A lighter way to publish** — stories are plain markdown now, one folder
+  per book, no custom code required to get started. The admin portal can
+  also publish a short text story straight from your browser
+- **`npm create storylark`** — one command scaffolds a complete branded
+  site, and a setup wizard walks you through picking a platform and
+  deploying it
+- Two example customer brands, Gunner the Lab and Holdfast Press, now ship
+  in the repo as worked examples of the theme contract
+
 ## 0.5.0 (preview)
 
 The considerate release: your screen stays on, and your stories stop when you do.
