@@ -16,28 +16,46 @@ Apps** as a normal Node process.
   chapters, audio, timings, covers)
 - **Azure App Service** (Node 20+) or **Container Apps**, to run this process
 
-## Setup
+This folder is deliberately **not** an npm workspace member — it installs
+`storylark-worker` from the real npm registry, standalone, the same way any
+customer's deployment would. (It used to be a workspace member; Oryx's App
+Service build extracts a built `node_modules` to an absolute path and
+re-symlinks it into place, which breaks npm workspaces' *relative*
+symlinks — confirmed by a real deploy crashing with
+`ERR_MODULE_NOT_FOUND: storylark-worker`.) Run `npm install` in this folder
+before anything else here.
 
-1. Build the app for your brand from the repo root:
+## Deploying to Azure App Service (the supported path)
+
+`node install.mjs --deploy --yes` (see [`../../docs/deploy-azure.md`](../../docs/deploy-azure.md))
+does the whole thing: provisions `infra.bicep`, applies the database
+schema, builds the app for your brand, and zip-deploys the app code — one
+command to a live URL.
+
+## Running locally against real Azure resources
+
+Useful for testing against a real Postgres/Blob before deploying, or for
+debugging a deployed app's behavior locally.
+
+1. `npm install` (this folder, once — see the workspace note above)
+2. Build the app for your brand from the repo root:
    ```
    npm run build -w app -- --mode <your-brand-id>
    ```
-2. Copy `.env.example` to `.env` and fill in every value — see the comments
+3. Copy `.env.example` to `.env` and fill in every value — see the comments
    in that file for what each one is.
-3. Apply the database schema:
+4. Apply the database schema:
    ```
    npm run migrate
    ```
    (Runs `packages/worker/migrate-postgres.mjs` against `DATABASE_URL` —
    the Postgres-dialect mirror of `wrangler d1 migrations apply`.)
-4. Start the server:
+5. Start the server:
    ```
    npm start
    ```
    This serves the API under `/api/*` and the built app under everything
-   else. In production, front this process with Azure App Service's own
-   ingress (or Container Apps) — `STATIC_ROOT`/`PORT` are configurable via
-   env vars for that.
+   else. `STATIC_ROOT`/`PORT` are configurable via env vars.
 
 ## Publishing content
 
