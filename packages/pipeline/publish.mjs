@@ -56,8 +56,8 @@ if (!args.source || typeof args.source !== 'string') {
   console.error('--source <repo path> is required.\n' + USAGE);
   process.exit(1);
 }
-if (!args.parser || typeof args.parser !== 'string') {
-  console.error('--parser <module path> is required (site-owned content parser).\n' + USAGE);
+if (args.parser !== undefined && typeof args.parser !== 'string') {
+  console.error('--parser, if given, must be a module path.\n' + USAGE);
   process.exit(1);
 }
 
@@ -130,7 +130,12 @@ state.charLedger[month] ??= 0;
 // label: https://app.example.com → https://example.com.
 const siteOrigin = brand.appOrigin.replace('://app.', '://');
 
-const parserMod = await import(pathToFileURL(resolve(args.parser)).href);
+// The blessed markdown-folder format (AB#7401) is the default parser — a
+// site only needs --parser for a source format markdown-import.mjs doesn't
+// cover.
+const parserMod = args.parser
+  ? await import(pathToFileURL(resolve(args.parser)).href)
+  : await import('./lib/markdown-import.mjs');
 const parse = parserMod.parse ?? parserMod.default;
 if (typeof parse !== 'function') {
   console.error(`--parser ${args.parser} must export a \`parse\` function (or default export).`);

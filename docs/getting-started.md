@@ -37,11 +37,13 @@ packages.
 | `npm run typecheck` | `tsc` over the site, core, and worker tsconfigs | Type-checks the site, the engine, and the Worker. |
 
 > **Note on `npm run publish`:** the root script passes only `--brand storylark`,
-> but `packages/pipeline/publish.mjs` *requires* `--source <path>` and `--parser <module>` as
-> well and will exit with a usage message otherwise. Treat the npm script as a
-> shorthand and pass the remaining flags after `--`, e.g.
-> `npm run publish -- --source examples/demo --parser examples/demo/parser.mjs --no-audio --local app/dist`.
-> Full details in [`content-pipeline.md`](content-pipeline.md).
+> but `packages/pipeline/publish.mjs` *requires* `--source <path>` as well and will
+> exit with a usage message otherwise. Treat the npm script as a shorthand and pass
+> the remaining flags after `--`, e.g.
+> `npm run publish -- --source examples/demo --no-audio --local app/dist`.
+> Stories are plain markdown — see [`authoring-stories.md`](authoring-stories.md) for
+> the format and [`content-pipeline.md`](content-pipeline.md) for the full pipeline
+> reference (including `--parser` for non-markdown sources).
 
 After `npm run dev`, open the URL Wrangler prints. The app boots as a branded but
 **empty shelf** — there is no bundled content. To see stories, publish some

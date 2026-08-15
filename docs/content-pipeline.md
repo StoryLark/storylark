@@ -2,14 +2,14 @@
 
 The publish pipeline (`packages/pipeline/publish.mjs`) turns your source content into
 everything the app reads: chapter JSON, narrated MP3 audio, per-word timing
-files, cover images, and a library manifest — uploaded to the brand's R2 bucket.
-It is **brand-neutral**: your site owns the parser that reads *your* content
-shape; the pipeline handles TTS, stitching, hashing, upload, manifest, and
-notify.
+files, cover images, and a library manifest — uploaded to the brand's content
+storage. The default source format is plain markdown (see
+[`authoring-stories.md`](authoring-stories.md)) — no parser needed. Bring your
+own parser (`--parser`) only if your content lives in some other shape.
 
 ```
-your source (markdown, etc.)
-   │  --parser <your-module.mjs>            (site-owned; produces canonical shape)
+your source (markdown by default)
+   │  built-in markdown importer, or --parser <your-module.mjs> for other shapes
    ▼
 packages/pipeline/publish.mjs
    ├─ diff by content hash (only changed chapters proceed)
@@ -24,20 +24,19 @@ packages/pipeline/publish.mjs
 ## Command
 
 ```
-node packages/pipeline/publish.mjs --brand <id> --source <path> --parser <module> [flags]
+node packages/pipeline/publish.mjs --brand <id> --source <path> [flags]
 ```
 
-The three required flags:
+The two required flags:
 
 | Flag | Required | Meaning |
 |---|---|---|
 | `--brand <id>` | yes | Selects `brands/<id>/brand.json` and the content bucket `<id>-content`. |
-| `--source <path>` | yes | Path to your content source (passed straight to your parser). |
-| `--parser <module>` | yes | Path to your site-owned parser module (contract below). |
+| `--source <path>` | yes | Path to your content source — a `books/` folder in the [markdown format](authoring-stories.md) by default. |
 
 > The root `npm run publish` script only passes `--brand storylark`, so it will
 > exit with the usage message on its own. Append the rest after `--`, e.g.
-> `npm run publish -- --source examples/demo --parser examples/demo/parser.mjs`.
+> `npm run publish -- --source examples/demo`.
 
 ### Optional flags
 
@@ -45,7 +44,9 @@ The three required flags:
 |---|---|
 | `--book <id>` | Publish only this book/unit. |
 | `--no-audio` | Skip TTS — text-only publish. Listen mode then uses the on-device Web Speech fallback. Required if you don't have Azure Speech credentials. |
-| `--local <dir>` | Mirror the R2 layout into `<dir>` on disk instead of uploading to a remote bucket. **No Cloudflare account needed.** Serve `<dir>` at the brand's `contentOrigin` (e.g. `--local app/dist` for same-origin dev). |
+| `--local <dir>` | Mirror the storage layout into `<dir>` on disk instead of uploading to a remote bucket/container. **No cloud account needed.** Serve `<dir>` at the brand's `contentOrigin` (e.g. `--local app/dist` for same-origin dev). |
+| `--storage r2\|azure-blob` | Which storage driver to publish through (default `r2`). See [`deploy-azure.md`](deploy-azure.md) for the Azure path. |
+| `--parser <module>` | Use a site-owned parser instead of the built-in markdown importer — for content that isn't plain markdown. Contract below. |
 | `--dry-run` | Parse + report the change plan only. No TTS, no upload. |
 | `--manifest-only` | Regenerate and re-upload just the manifest (after a manifest-schema change), without re-publishing chapters. Requires all chapters to have been published before. |
 
@@ -109,14 +110,13 @@ parser uses —
 | `*whole-line italic*` | `display-beat` |
 | anything else | `paragraph` with `em`/`strong` spans |
 
-See `examples/demo/parser.mjs` for a complete, working parser that reads the
-public-domain markdown stories in `examples/demo/books/` — the fastest way to try
-the pipeline end to end:
+`examples/demo/books/` is a working example of the default markdown format
+(see [`authoring-stories.md`](authoring-stories.md)) — the fastest way to try
+the pipeline end to end, no parser needed:
 
 ```
 node packages/pipeline/publish.mjs --brand storylark \
-  --source examples/demo --parser examples/demo/parser.mjs \
-  --no-audio --local app/dist
+  --source examples/demo --no-audio --local app/dist
 ```
 
 ## Incremental, content-hash publishing

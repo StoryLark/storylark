@@ -1,10 +1,5 @@
 ---
-bookId: gift-of-the-magi
-title: The Gift of the Magi
-author: O. Henry
 label: Read
-description: A young couple, poor but in love, each secretly sell their most prized possession to buy the other a Christmas gift.
-order: 1
 ---
 
 

@@ -1,10 +1,5 @@
 ---
-bookId: the-yellow-wallpaper
-title: The Yellow Wallpaper
-author: Charlotte Perkins Gilman
 label: Read
-description: A woman confined to a room for a rest cure grows fixated on its lurid wallpaper in this landmark 1892 story.
-order: 2
 ---
 
 
