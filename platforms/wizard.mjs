@@ -9,7 +9,7 @@ import { createInterface } from 'node:readline/promises';
 import { writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -90,6 +90,20 @@ async function main() {
 
   const envPath = writeEnvFile(platform, values);
   console.log(`\nWrote ${envPath}`);
+
+  // Best-effort: self-update.yml (self-update, AB#7403) reads this repo
+  // variable to know which platform's deploy job to run. Skips silently if
+  // gh isn't installed/authenticated or this isn't a git repo yet — the
+  // workflow's own comments document setting it by hand as a fallback.
+  try {
+    execFileSync('gh', ['variable', 'set', 'STORYLARK_PLATFORM', '--body', platform], {
+      shell: process.platform === 'win32',
+      stdio: 'pipe',
+    });
+    console.log(`✓ Set the STORYLARK_PLATFORM=${platform} repo variable for self-update.yml`);
+  } catch {
+    console.log(`(Skipped setting STORYLARK_PLATFORM automatically — set it by hand in your repo's Actions variables for self-update.yml to work: ${platform})`);
+  }
 
   const installerDir = join(__dirname, PLATFORMS[platform].dir);
   console.log(`\nRunning ${PLATFORMS[platform].dir}'s installer (--verify)...\n`);

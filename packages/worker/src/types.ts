@@ -19,6 +19,12 @@ export interface Env {
   GOOGLE_CLIENT_SECRET: string;
   ADMIN_KEY: string;
   VAPID_PUBLIC_KEY: string;
+  // Self-update (AB#7403): optional — the admin portal's update card degrades
+  // to "check-only" without these. GITHUB_REPO is "owner/repo" for the
+  // site's own deployment repo; GITHUB_DEPLOY_TOKEN needs Actions:write on
+  // it (a fine-grained PAT scoped to just this repo, not a broad token).
+  GITHUB_REPO: string;
+  GITHUB_DEPLOY_TOKEN: string;
 }
 
 export interface User {
