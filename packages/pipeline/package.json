@@ -20,7 +20,8 @@
     "./tts-kokoro": "./tts-kokoro.mjs",
     "./align": "./align.mjs",
     "./stitch": "./stitch.mjs",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./storage": "./storage.mjs"
   },
   "files": [
     "publish.mjs",
@@ -37,6 +38,7 @@
     "@huggingface/transformers": "^3.8.1",
     "kokoro-js": "^1.2.1",
     "microsoft-cognitiveservices-speech-sdk": "^1.42.0",
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "@azure/storage-blob": "^12.26.0"
   }
 }
