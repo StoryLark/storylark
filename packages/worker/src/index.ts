@@ -40,10 +40,16 @@ app.onError((err, c) => {
   return c.json({ error: 'internal' }, 500);
 });
 
+// The raw Hono app, for platform entries that already hand it a conforming
+// Env (Database & ConflictInsert) — platforms/azure/server.mjs binds env.DB
+// to postgresDatabase(...) directly and calls app.fetch itself. Exported so
+// non-Cloudflare entries never go through the D1-specific wrap below.
+export { app };
+
 // Cloudflare hands the raw D1Database binding declared in wrangler.jsonc;
 // wrap it in the platform-agnostic Database seam (AB#7399) before any route
-// sees it. Other platform entries (platforms/azure, platforms/aws) bind
-// env.DB to postgresDatabase(...) instead — same Env type, same routes.
+// sees it. This default export is Cloudflare-only — other platforms use the
+// named `app` export above with their own driver already bound.
 export default {
   fetch(request: Request, env: unknown, ctx: ExecutionContext) {
     const raw = env as Env & { DB: D1Database };
