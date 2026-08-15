@@ -19,6 +19,7 @@ export const settings = signal<Settings>({
   autoSync: true,
   autoDownload: false,
   narratorVoice: '',
+  keepAwake: true,
   autoPlayNextStory: false,
 });
 
@@ -62,7 +63,7 @@ export async function bootstrap(): Promise<void> {
   await Promise.all([loadManifest(), loadUser()]);
 }
 
-const SYNCED_PREF_KEYS = ['defaultMode', 'readAlong', 'theme', 'fontScale', 'lineHeight', 'narratorVoice', 'autoPlayNextStory'] as const;
+const SYNCED_PREF_KEYS = ['defaultMode', 'readAlong', 'theme', 'fontScale', 'lineHeight', 'narratorVoice', 'keepAwake', 'autoPlayNextStory'] as const;
 
 export async function saveSettings(patch: Partial<Settings>): Promise<void> {
   settings.value = { ...settings.value, ...patch };
@@ -85,6 +86,7 @@ export async function pushPreferences(): Promise<void> {
         theme: settings.value.theme,
         fontScale: settings.value.fontScale,
         lineHeight: settings.value.lineHeight,
+        keepAwake: settings.value.keepAwake,
         autoPlayNextStory: settings.value.autoPlayNextStory,
       },
       Date.now()

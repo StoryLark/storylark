@@ -11,6 +11,7 @@ import { downloadStates, removeDownload, getDownloadRecords } from '../lib/downl
 import { reconcileProgress, resetProgressPushMarker } from '../lib/progress-sync';
 import { syncNow, setAutoDownloadBaseline } from '../lib/autosync';
 import { passkeysSupported, addPasskey, PasskeyCanceledError } from '../lib/webauthn';
+import { syncWakeLock } from '../lib/player';
 
 export function Settings(): JSX.Element {
   return (
@@ -96,6 +97,21 @@ function PlaybackSection(): JSX.Element {
           <option value="off">Off</option>
         </select>
       </label>
+      {'wakeLock' in navigator && (
+        <>
+          <label class="settings-row">
+            <span>Keep screen awake</span>
+            <input
+              type="checkbox"
+              checked={s.keepAwake}
+              onChange={(e) => {
+                void saveSettings({ keepAwake: (e.target as HTMLInputElement).checked }).then(syncWakeLock);
+              }}
+            />
+          </label>
+          <p class="settings-note">While read-along is playing, the screen won't dim or lock mid-{NOUNS.unit}.</p>
+        </>
+      )}
       {BRAND.layout === 'flat' && (
         <>
           <label class="settings-row">

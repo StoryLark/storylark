@@ -164,6 +164,8 @@ export interface Settings {
   autoDownload: boolean;
   /** Narrator voice id (from LibraryManifest.voices); '' = the library default. */
   narratorVoice: string;
+  /** Hold a screen wake lock while read-along plays (visible tab only). */
+  keepAwake: boolean;
   /** When a standalone story ends, start the next one automatically. Chapters
    *  within a book always flow regardless; this only governs crossing into the
    *  next book (which flat-library brands present as the next story). */

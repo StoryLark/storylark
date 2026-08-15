@@ -308,9 +308,10 @@ export function attachContainer(el: HTMLElement | null): void {
 }
 
 /** Hold the screen awake only while read-along is actually on screen:
- *  narration playing AND the Reader's text attached for highlighting. */
-function syncWakeLock(): void {
-  setWakeLock(playerPlaying.value && attachedContainer !== null);
+ *  narration playing AND the Reader's text attached for highlighting AND the
+ *  Keep-screen-awake setting on. Exported so Settings can re-sync on toggle. */
+export function syncWakeLock(): void {
+  setWakeLock(settings.value.keepAwake && playerPlaying.value && attachedContainer !== null);
 }
 
 async function persistListen(ms?: number, dur?: number): Promise<void> {
