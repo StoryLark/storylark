@@ -22,5 +22,13 @@
     "headers": "Newsreader",
     "body": "Newsreader",
     "mono": "Inter"
+  },
+  "nouns": {
+    "unit": "story",
+    "unitPlural": "stories",
+    "Unit": "Story",
+    "UnitPlural": "Stories",
+    "collection": null,
+    "Collection": null
   }
 }

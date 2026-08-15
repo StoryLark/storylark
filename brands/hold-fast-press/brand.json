@@ -22,5 +22,13 @@
     "headers": "Cinzel",
     "body": "Lora",
     "mono": "IBM Plex Mono"
+  },
+  "nouns": {
+    "unit": "story",
+    "unitPlural": "stories",
+    "Unit": "Story",
+    "UnitPlural": "Stories",
+    "collection": null,
+    "Collection": null
   }
 }
