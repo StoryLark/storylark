@@ -1,11 +1,51 @@
 # Getting Started
 
-Get the StoryLark engine running locally under the neutral **StoryLark base
-brand**, then build a production bundle. This is the fastest path to seeing the
-app boot; standing up your own branded site is covered in
-[`deploy-your-own.md`](deploy-your-own.md).
+StoryLark runs on **Cloudflare or Azure** — pick either, or don't pick yet.
+Where you end up depends on what you're trying to do:
 
-## Prerequisites
+- **Stand up your own branded site** (the common case) → skip to
+  [Deploying your own site](#deploying-your-own-site) below, then
+  [`install.md`](install.md) for the full walkthrough.
+- **Run the engine locally to hack on StoryLark itself**, no deployment yet →
+  see [Running the engine locally](#running-the-engine-locally).
+
+## Deploying your own site
+
+There are two starting points, and two ways to drive each one — four paths,
+same result:
+
+| | Manual | Wizard-driven |
+|---|---|---|
+| **Clone the repo** | `git clone` the engine, fill in an env file yourself, run the platform installer | `git clone`, then `node platforms/wizard.mjs` asks the questions and runs the installer for you |
+| **`npm create storylark`** | Scaffolds a standalone site folder, fill in an env file yourself, run the installer | `npm create storylark my-site -- --deploy` — one command, a few prompts, ends at a live URL |
+
+Every path asks you to pick a platform (Cloudflare or Azure) as part of it —
+nothing above assumes Cloudflare. Prerequisites differ by platform:
+
+- **Node.js 20+** either way.
+- **Cloudflare**: a Cloudflare account, authenticated Wrangler
+  (`npx wrangler login`). See [`deploy-your-own.md`](deploy-your-own.md).
+- **Azure**: an Azure subscription, authenticated Azure CLI (`az login`). See
+  [`deploy-azure.md`](deploy-azure.md).
+- **ffmpeg / ffprobe** on your `PATH` — only needed to *publish audio* (the
+  TTS stitch step), regardless of platform.
+
+Full detail on all four paths, what each one produces, and what's shared
+across every path (your brand folder, CI wiring, self-update) is in
+[`install.md`](install.md).
+
+## Running the engine locally
+
+If you just want to see the app boot and poke at the code — no deployment,
+no platform account needed beyond what local dev requires — clone the engine
+repo directly and run it against the neutral **StoryLark base brand**.
+
+> This path always runs on Cloudflare tooling (`wrangler dev`) regardless of
+> which platform you'd eventually deploy to — it's the engine's own local dev
+> loop, not a platform choice. Standing up a real site (Cloudflare or Azure)
+> is covered above.
+
+### Prerequisites
 
 - **Node.js 20+**
 - A **Cloudflare account** — `npm run dev` runs `wrangler dev`, which needs an
@@ -13,7 +53,7 @@ app boot; standing up your own branded site is covered in
 - **ffmpeg / ffprobe** on your `PATH` — only needed to *publish audio* (the TTS
   stitch step). Not required just to run or build the app.
 
-## Clone and install
+### Clone and install
 
 ```
 git clone <your-fork-or-clone-url> storylark
@@ -26,13 +66,13 @@ the `app` site and the `packages/*` (`storylark-core`, `storylark-worker`,
 `storylark-pipeline`) workspaces together, linking the site against the local
 packages.
 
-## The commands (from the root `package.json`)
+### The commands (from the root `package.json`)
 
 | Command | What it runs | Notes |
 |---|---|---|
 | `npm run dev` | `npm run build -w app -- --mode storylark && wrangler dev --env storylark` | Builds the PWA for the `storylark` brand, then serves it (static assets + `/api/*`) through the Worker on a local port. |
 | `npm run build` | `npm run build -w app -- --mode storylark` | Production build of the app into `app/dist`. |
-| `npm run deploy` | `npm run build && wrangler deploy --env storylark` | Build, then deploy the Worker + assets to Cloudflare. See [`deploy-your-own.md`](deploy-your-own.md). |
+| `npm run deploy` | `npm run build && wrangler deploy --env storylark` | Build, then deploy the Worker + assets to Cloudflare directly (bypasses the installer — see [Deploying your own site](#deploying-your-own-site) for the supported path). |
 | `npm run publish` | `node packages/pipeline/publish.mjs --brand storylark` | Publish content to R2. **This script needs extra flags** — see the note below and [`content-pipeline.md`](content-pipeline.md). |
 | `npm run typecheck` | `tsc` over the site, core, and worker tsconfigs | Type-checks the site, the engine, and the Worker. |
 
@@ -59,7 +99,7 @@ After `npm run dev`, open the URL Wrangler prints. The app boots as a branded bu
 > that env's `vars` block in `wrangler.jsonc` and remove it before
 > committing — never commit a real secret this way.
 
-## How the brand "mode" works
+### How the brand "mode" works
 
 The Vite build **mode is the brand id**. The `defineStorylarkConfig` preset
 (from `storylark-core/vite`, used by `app/vite.config.ts`) reads
@@ -79,15 +119,16 @@ The built-in Vite modes (`development`, `production`, `test`) fall back to the
 `storylark` brand. Any other `--mode` value is treated as a brand id, so
 `--mode acme` builds `brands/acme/`. The root scripts all pin `--mode storylark`.
 
-## Project layout
+### Project layout
 
 ```
 brands/             per-brand config: brand.json, theme.css, assets/icons/ (and optional assets/covers/)
 app/                the base SITE — a thin consumer of storylark-core (index.html, entry.ts, vite.config.ts)
 packages/core/      storylark-core — the PWA engine (library / reader / player / settings + service worker)
                     plus the defineStorylarkConfig Vite preset that builds a site from a brand folder
-packages/worker/    storylark-worker — Cloudflare Worker: Hono API (/api/*) over D1; SQL migrations
-packages/pipeline/  storylark-pipeline — publish pipeline (markdown -> chapter JSON + TTS audio + word timings -> R2) + generators
+packages/worker/    storylark-worker — Hono API (/api/*) over a database adapter (D1 or Postgres); SQL migrations
+packages/pipeline/  storylark-pipeline — publish pipeline (markdown -> chapter JSON + TTS audio + word timings -> storage) + generators
+platforms/          per-platform deploy tooling (cloudflare/, azure/) — installers, IaC, the shared wizard
 docs/               these docs
 examples/           demo content + a sample parser (public-domain stories) for trying the pipeline
 ```
@@ -101,7 +142,7 @@ Inside `packages/core/src/`:
 
 ## Next steps
 
-- Stand up your own site → [`deploy-your-own.md`](deploy-your-own.md)
+- Stand up your own site → [`install.md`](install.md) (then [`deploy-your-own.md`](deploy-your-own.md) or [`deploy-azure.md`](deploy-azure.md))
 - Restyle it → [`build-your-own-theme.md`](build-your-own-theme.md)
-- Publish stories → [`content-pipeline.md`](content-pipeline.md)
+- Publish stories → [`publishing-stories.md`](publishing-stories.md)
 - Understand the internals → [`architecture.md`](architecture.md)
