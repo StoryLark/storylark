@@ -7,7 +7,8 @@ export type Route =
   | { name: 'now-playing' }
   | { name: 'reader'; bookId: string; chapterId: string; mode?: 'read' | 'both' }
   | { name: 'settings' }
-  | { name: 'about' };
+  | { name: 'about' }
+  | { name: 'admin' };
 
 export const route = signal<Route>(parse(location.pathname + location.search));
 
@@ -40,5 +41,6 @@ function parse(path: string): Route {
   if (p.startsWith('/now-playing')) return { name: 'now-playing' };
   if (p.startsWith('/settings')) return { name: 'settings' };
   if (p.startsWith('/about')) return { name: 'about' };
+  if (p.startsWith('/admin')) return { name: 'admin' };
   return { name: 'home' };
 }

@@ -7,6 +7,7 @@ import { NowPlaying } from './screens/NowPlaying';
 import { Reader } from './screens/Reader';
 import { Settings } from './screens/Settings';
 import { About } from './screens/About';
+import { Admin } from './screens/Admin';
 import { TabBar } from './components/TabBar';
 import { UpdateBanner } from './components/UpdateBanner';
 
@@ -35,6 +36,8 @@ function Screen(): JSX.Element {
       return <Settings />;
     case 'about':
       return <About />;
+    case 'admin':
+      return <Admin />;
     default:
       return <Home />;
   }

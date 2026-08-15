@@ -52,8 +52,17 @@ export { app };
 // named `app` export above with their own driver already bound.
 export default {
   fetch(request: Request, env: unknown, ctx: ExecutionContext) {
+    // Mutate the DB property on the SAME object Cloudflare handed us,
+    // in place — no spread, no Proxy. Both were tried and both broke
+    // sub-router env access in local `wrangler dev` (confirmed live: routes
+    // mounted via app.route(), e.g. /api/admin/*, silently never ran —
+    // no console.log even at the top of the handler — while top-level
+    // routes like /api/health worked fine through the same wrapper). A
+    // spread also has the separate, real problem of dropping non-enumerable
+    // secrets. In-place mutation has neither failure mode: it's the exact
+    // object reference the runtime already wired up everywhere.
     const raw = env as Env & { DB: D1Database };
-    const wrapped: Env = { ...raw, DB: d1Database(raw.DB) };
-    return app.fetch(request, wrapped, ctx);
+    (raw as unknown as { DB: unknown }).DB = d1Database(raw.DB);
+    return app.fetch(request, raw as Env, ctx);
   },
 };

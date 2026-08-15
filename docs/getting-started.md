@@ -50,6 +50,15 @@ After `npm run dev`, open the URL Wrangler prints. The app boots as a branded bu
 (the bundled `examples/demo` public-domain stories are the quickest way; see
 [`content-pipeline.md`](content-pipeline.md)).
 
+> **Testing secret-gated routes locally (`ADMIN_KEY` etc.):** confirmed on this
+> project's Workers+Assets setup, `.dev.vars` / `.dev.vars.<env>` / `--var`
+> do not actually reach `env` in `wrangler dev` — the startup banner claims
+> the binding exists, but the Worker never sees it (verified by dumping every
+> key on `env` at runtime: only what's declared in `wrangler.jsonc`'s `vars`
+> shows up). To test an admin route locally, temporarily add the value under
+> that env's `vars` block in `wrangler.jsonc` and remove it before
+> committing — never commit a real secret this way.
+
 ## How the brand "mode" works
 
 The Vite build **mode is the brand id**. The `defineStorylarkConfig` preset

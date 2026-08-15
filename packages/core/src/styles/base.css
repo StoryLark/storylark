@@ -339,6 +339,35 @@ select:focus-visible {
   color: var(--accent-strong);
 }
 
+/* ---- Admin portal ---- */
+
+.admin-error {
+  color: var(--accent-strong);
+}
+
+.admin-status-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.admin-markdown-input {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  padding: 0.6rem;
+  margin: 0.5rem 0;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  color: var(--text);
+  resize: vertical;
+}
+
 .signin-form {
   display: flex;
   flex-direction: column;
