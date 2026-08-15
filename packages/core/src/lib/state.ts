@@ -19,6 +19,7 @@ export const settings = signal<Settings>({
   autoSync: true,
   autoDownload: false,
   narratorVoice: '',
+  autoPlayNextStory: false,
 });
 
 /** Per-item consumption-mode overrides (key: bookId/chapterId). */
@@ -61,7 +62,7 @@ export async function bootstrap(): Promise<void> {
   await Promise.all([loadManifest(), loadUser()]);
 }
 
-const SYNCED_PREF_KEYS = ['defaultMode', 'readAlong', 'theme', 'fontScale', 'lineHeight', 'narratorVoice'] as const;
+const SYNCED_PREF_KEYS = ['defaultMode', 'readAlong', 'theme', 'fontScale', 'lineHeight', 'narratorVoice', 'autoPlayNextStory'] as const;
 
 export async function saveSettings(patch: Partial<Settings>): Promise<void> {
   settings.value = { ...settings.value, ...patch };
@@ -84,6 +85,7 @@ export async function pushPreferences(): Promise<void> {
         theme: settings.value.theme,
         fontScale: settings.value.fontScale,
         lineHeight: settings.value.lineHeight,
+        autoPlayNextStory: settings.value.autoPlayNextStory,
       },
       Date.now()
     );

@@ -14,6 +14,7 @@ import { contentUrl, BRAND } from '../brand';
 import { audioController } from '../reader/AudioController';
 import { speechFallback } from '../reader/SpeechFallback';
 import { setupMediaSession, updatePlaybackState } from './mediasession';
+import { setWakeLock } from './wakelock';
 
 /** Audio + timings for the user's chosen narrator; the chapter's base
  *  `audio`/`timings` are the library default voice. Applies on next load. */
@@ -156,12 +157,17 @@ export async function startPlayback(bookId: string, chapterId: string, opts: { a
       },
       onPlayState: (p) => {
         playerPlaying.value = p;
+        syncWakeLock();
         if (!p) void persistListen();
       },
       onEnded: () => {
         void persistListen();
         const next = nextItem(bookId, chapterId);
-        if (next) void startPlayback(next.bookId, next.chapterId);
+        if (!next) return;
+        // Chapters within a book always flow; crossing into another book —
+        // which flat-library brands present as the next story — is opt-in.
+        if (next.bookId !== bookId && !settings.value.autoPlayNextStory) return;
+        void startPlayback(next.bookId, next.chapterId);
       },
     });
     audioController.setReadAlongMode(settings.value.readAlong);
@@ -212,10 +218,12 @@ function startFallback(): void {
     () => {
       void persistFallback(null, 1);
       playerPlaying.value = false;
+      syncWakeLock();
       updatePlaybackState('none');
     }
   );
   playerPlaying.value = true;
+  syncWakeLock();
   updatePlaybackState('playing');
   void persistFallback(fromBlock);
 }
@@ -248,6 +256,7 @@ export function togglePlay(): void {
     if (speechFallback.active) {
       speechFallback.stop();
       playerPlaying.value = false;
+      syncWakeLock();
       updatePlaybackState('none');
     } else {
       startFallback();
@@ -278,6 +287,7 @@ export function cycleRate(): void {
 }
 
 export function stopPlayback(): void {
+  setWakeLock(false);
   void persistListen();
   speechFallback.stop();
   audioController.dispose();
@@ -294,6 +304,13 @@ export function stopPlayback(): void {
 export function attachContainer(el: HTMLElement | null): void {
   attachedContainer = el;
   audioController.setContainer(el);
+  syncWakeLock();
+}
+
+/** Hold the screen awake only while read-along is actually on screen:
+ *  narration playing AND the Reader's text attached for highlighting. */
+function syncWakeLock(): void {
+  setWakeLock(playerPlaying.value && attachedContainer !== null);
 }
 
 async function persistListen(ms?: number, dur?: number): Promise<void> {

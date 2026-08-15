@@ -96,6 +96,22 @@ function PlaybackSection(): JSX.Element {
           <option value="off">Off</option>
         </select>
       </label>
+      {BRAND.layout === 'flat' && (
+        <>
+          <label class="settings-row">
+            <span>Auto-play the next {NOUNS.unit}</span>
+            <input
+              type="checkbox"
+              checked={s.autoPlayNextStory}
+              onChange={(e) => void saveSettings({ autoPlayNextStory: (e.target as HTMLInputElement).checked })}
+            />
+          </label>
+          <p class="settings-note">
+            When a {NOUNS.unit} ends, start the next one automatically. Off means playback stops when the {NOUNS.unit} is
+            done. Chapters inside a {NOUNS.unit} always continue.
+          </p>
+        </>
+      )}
     </section>
   );
 }

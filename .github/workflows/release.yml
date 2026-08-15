@@ -33,6 +33,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - name: Version or publish
+        id: changesets
         uses: changesets/action@v1
         with:
           publish: npx changeset publish
@@ -43,3 +44,29 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           # setup-node's registry-url writes an .npmrc that reads this on publish.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Push channel for downstream brand sites: after a real publish, poke
+      # each site's update-check workflow so its engine-update PR opens within
+      # minutes instead of waiting for the daily cron. The PR is still the
+      # deployer's approval gate — this only makes the choice arrive faster.
+      #
+      # Requires the RELEASE_DISPATCH_TOKEN repo secret (a token with repo
+      # scope on the brand-site repos; GITHUB_TOKEN cannot dispatch
+      # cross-repo). Without the secret this step just logs and succeeds —
+      # sites still pick the release up from their cron.
+      - name: Notify brand sites
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          DISPATCH_TOKEN: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$DISPATCH_TOKEN" ]; then
+            echo "RELEASE_DISPATCH_TOKEN not set - skipping push notify (sites update via cron)"
+            exit 0
+          fi
+          for repo in gunner-the-lab hold-fast-press; do
+            curl -sS -o /dev/null -w "dispatch $repo: %{http_code}\n" -X POST \
+              -H "Authorization: Bearer $DISPATCH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/StoryLark/$repo/dispatches" \
+              -d '{"event_type":"storylark-release"}' || true
+          done
