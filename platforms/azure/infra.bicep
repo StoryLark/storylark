@@ -129,7 +129,15 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
     siteConfig: {
       linuxFxVersion: 'NODE|20-lts'
       alwaysOn: appServiceSku != 'F1' // Free tier doesn't support Always On
-      appCommandLine: 'npm start --prefix platforms/azure'
+      // The deployed site root IS platforms/azure's own contents (server.mjs,
+      // package.json, app/dist) — see install.mjs's deploy step. platforms/azure
+      // is deliberately NOT an npm workspace member: Oryx extracts a built
+      // node_modules to an absolute /node_modules path and re-symlinks it back,
+      // which breaks npm workspaces' relative symlinks (confirmed:
+      // ERR_MODULE_NOT_FOUND for storylark-worker when it was a workspace member).
+      // Standalone, `npm install` resolves storylark-worker from the real npm
+      // registry, same as any customer's deployment would.
+      appCommandLine: 'npm start'
       appSettings: [
         { name: 'BRAND', value: brand }
         { name: 'APP_NAME', value: appName }
@@ -138,10 +146,6 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'MAIL_FROM', value: mailFrom }
         { name: 'DATABASE_URL', value: 'postgresql://${dbAdminUser}:${dbAdminPassword}@${postgres.properties.fullyQualifiedDomainName}:5432/storylark?sslmode=require' }
         { name: 'AZURE_STORAGE_CONNECTION_STRING', value: 'DefaultEndpointsProtocol=https;AccountName=${storage.name};AccountKey=${storage.listKeys().keys[0].value};EndpointSuffix=core.windows.net' }
-        // server.mjs's cwd is platforms/azure (`npm start --prefix platforms/azure`
-        // below), so STATIC_ROOT's default (`./app/dist`) resolves wrong when the
-        // whole repo is the deployed site root — point it at the real path.
-        { name: 'STATIC_ROOT', value: '../../app/dist' }
         { name: 'WEBSITE_NODE_DEFAULT_VERSION', value: '~20' }
         { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'true' }
       ]

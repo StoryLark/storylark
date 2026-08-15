@@ -5,8 +5,7 @@
   "description": "StoryLark — installable PWA for branded story libraries (read + listen + offline + sync)",
   "workspaces": [
     "app",
-    "packages/*",
-    "platforms/*"
+    "packages/*"
   ],
   "scripts": {
     "dev": "npm run build -w app -- --mode storylark && wrangler dev --env storylark",

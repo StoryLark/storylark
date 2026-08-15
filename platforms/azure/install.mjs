@@ -8,10 +8,11 @@
 // --deploy creates real Azure resources and real cost. It refuses to run
 // without --yes as an explicit second flag, on top of whatever your own
 // deployment process already requires for approval.
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, cpSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const args = new Set(process.argv.slice(2));
@@ -130,8 +131,42 @@ function deploy() {
     ],
     { stdio: 'inherit' }
   );
+  console.log('\nInfrastructure deployed.');
 
-  console.log('\nInfrastructure deployed. Next: fill platforms/azure/.env from the deployment outputs, run `npm run migrate`, then `npm start` or deploy the App Service.');
+  const outputs = JSON.parse(
+    run('az', ['deployment', 'group', 'show', '--resource-group', env.AZURE_RESOURCE_GROUP, '--name', 'infra', '--query', 'properties.outputs'], { encoding: 'utf8' })
+  );
+  const dbAdminUser = env.DB_ADMIN_USER || 'storylark';
+  const databaseUrl = `postgresql://${dbAdminUser}:${env.DB_ADMIN_PASSWORD}@${outputs.postgresHost.value}:5432/storylark?sslmode=require`;
+  const webAppName = `${env.BRAND_ID}-app`;
+
+  console.log('\nApplying database migrations...');
+  run('node', [join(__dirname, '..', '..', 'packages', 'worker', 'migrate-postgres.mjs'), `--connection-string=${databaseUrl}`], { stdio: 'inherit' });
+
+  const brandFolder = env.BRAND || env.BRAND_ID;
+  console.log(`\nBuilding the app for brand "${brandFolder}"...`);
+  run('npm', ['run', 'build', '-w', 'app', '--', '--mode', brandFolder], { cwd: join(__dirname, '..', '..'), stdio: 'inherit' });
+
+  console.log('\nStaging and deploying app code to App Service...');
+  const stage = join(tmpdir(), `storylark-azure-deploy-${Date.now()}`);
+  mkdirSync(stage, { recursive: true });
+  cpSync(join(__dirname, 'server.mjs'), join(stage, 'server.mjs'));
+  cpSync(join(__dirname, 'package.json'), join(stage, 'package.json'));
+  if (existsSync(join(__dirname, 'package-lock.json'))) cpSync(join(__dirname, 'package-lock.json'), join(stage, 'package-lock.json'));
+  cpSync(join(__dirname, '..', '..', 'app', 'dist'), join(stage, 'app', 'dist'), { recursive: true });
+
+  const zipPath = join(tmpdir(), `storylark-azure-deploy-${Date.now()}.zip`);
+  if (WIN) {
+    run('powershell', ['-NoProfile', '-Command', `Compress-Archive -Path '${stage}\\*' -DestinationPath '${zipPath}' -Force`]);
+  } else {
+    run('zip', ['-rq', zipPath, '.'], { cwd: stage });
+  }
+  run('az', ['webapp', 'deploy', '--resource-group', env.AZURE_RESOURCE_GROUP, '--name', webAppName, '--src-path', zipPath, '--type', 'zip'], { stdio: 'inherit' });
+  rmSync(stage, { recursive: true, force: true });
+  rmSync(zipPath, { force: true });
+
+  console.log(`\nDeployed. Live at: https://${webAppName}.azurewebsites.net`);
+  console.log('Publish content with: node ../../packages/pipeline/publish.mjs --brand <id> --source <path> --storage azure-blob');
 }
 
 if (args.has('--deploy')) deploy();
