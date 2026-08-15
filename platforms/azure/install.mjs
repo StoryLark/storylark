@@ -121,6 +121,7 @@ function deploy() {
   // (check via: az rest --method get --url "https://management.azure.com/subscriptions/<sub>/providers/Microsoft.DBforPostgreSQL/locations/<region>/capabilities?api-version=2025-08-01" --query "value[0].reason").
   if (env.DB_LOCATION) parameters.push(`dbLocation=${env.DB_LOCATION}`);
   if (env.APP_SERVICE_SKU) parameters.push(`appServiceSku=${env.APP_SERVICE_SKU}`);
+  if (env.ADMIN_KEY) parameters.push(`adminKey=${env.ADMIN_KEY}`);
   run(
     'az',
     [

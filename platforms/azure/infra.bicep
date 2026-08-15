@@ -37,6 +37,10 @@ param appName string = brand
 @description('The From: address for transactional email, e.g. "Your App <noreply@example.com>". Update once you have a real domain — the default is a placeholder.')
 param mailFrom string = '${appName} <noreply@example.com>'
 
+@description('Admin portal (/admin) access key — the x-admin-key header value it checks. Leave empty to keep the admin portal disabled (its routes 401 without one). Pass via --parameters, never commit a real value.')
+@secure()
+param adminKey string = ''
+
 var storageAccountName = toLower(replace('${brandId}content', '-', ''))
 var postgresServerName = '${brandId}-db'
 var appServicePlanName = '${brandId}-plan'
@@ -146,6 +150,7 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'MAIL_FROM', value: mailFrom }
         { name: 'DATABASE_URL', value: 'postgresql://${dbAdminUser}:${dbAdminPassword}@${postgres.properties.fullyQualifiedDomainName}:5432/storylark?sslmode=require' }
         { name: 'AZURE_STORAGE_CONNECTION_STRING', value: 'DefaultEndpointsProtocol=https;AccountName=${storage.name};AccountKey=${storage.listKeys().keys[0].value};EndpointSuffix=core.windows.net' }
+        { name: 'ADMIN_KEY', value: adminKey }
         { name: 'WEBSITE_NODE_DEFAULT_VERSION', value: '~20' }
         { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'true' }
       ]
