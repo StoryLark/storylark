@@ -41,6 +41,33 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
   The live demo runs this exact flow
 - **Example customer brands in-repo** — `gunner-the-lab` and `hold-fast-press` ship alongside
   the base brand as worked examples of the theme contract
+- **Runs on Azure, not just Cloudflare** — a database adapter (Postgres driver, also covers AWS
+  RDS/Aurora) and a storage adapter (Azure Blob driver) sit behind the same interfaces the
+  Cloudflare D1/R2 drivers use, so the API code is identical either way. A documented Azure
+  recipe (App Service + PostgreSQL Flexible Server + Blob Storage, with a Bicep template) sits
+  alongside the Cloudflare one
+- **The blessed story format** — plain markdown, no custom parser required. One folder per book,
+  numbered chapter files, optional `book.json` for metadata; a single `.md` file is shorthand
+  for a one-chapter book. Custom parsers remain available for other source shapes
+- **`npm create storylark`** — one command scaffolds a complete branded site (entry, config,
+  brand folder seeded from the base theme, both platforms' deploy tooling) and can chain
+  straight into the setup wizard for a single, seamless install
+- **One setup wizard for both platforms** — asks which cloud, collects the values, writes the
+  env file, runs that platform's installer. Each installer verifies everything (login state,
+  config validity) before creating anything, and only provisions real resources on explicit
+  confirmation
+- **The deployed solution updates itself** — a Worker or App Service process can't rebuild
+  itself, so the real mechanism is the deployment triggering its own CI: an admin-facing
+  update card shows the current vs. latest engine version, and clicking Install dispatches the
+  site's own `self-update.yml`, which bumps the pinned version, migrates (with a database
+  snapshot on the Postgres path), builds, and redeploys. The click is the only way an update
+  ever ships — the updater can only touch the pinned engine version, never a brand's theme or
+  presentation
+- **A lightweight admin portal** (`/admin`) — the update card above, a status view (library
+  size, push subscriber count), and a text story-upload form that commits markdown straight to
+  the site's repo and publishes through the real, unchanged pipeline (never a second copy of
+  its logic). An optional scheduled check can also email the operator proactively when a new
+  release exists
 
 ## Now
 
@@ -55,14 +82,16 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
   you pick one
 - Social sign-in (Apple, Google, Microsoft)
 - iOS background audio for driving — a research spike
-- Provider independence — storage and database adapter layer so the Worker and pipeline can
-  run beyond Cloudflare (D1/R2 stay the reference implementations); the adapter interfaces
-  land before the 1.0 contract freeze
+- A documented AWS recipe (the Postgres + S3-API drivers already make it possible; the
+  step-by-step guide and IaC template are the remaining work)
+- In-app admin upload for audio-narrated stories (not just text) — the admin portal's story
+  form is text-only today; narration still needs either TTS credentials configured on the
+  publish workflow or a CLI publish
 
 ## Later
 
 Hardening toward 1.0: an automated test suite and CI quality gate, a full device/browser QA
 pass, an accessibility audit, rate-limiting across every auth endpoint, complete API
 documentation, and a final API-stability review that freezes the config, theme, and manifest
-contracts for 1.0.0. A `create-storylark` scaffolder (`npm create storylark`) is planned as a
-1.1 convenience layer once the contracts are frozen.
+contracts for 1.0.0 — including the database/storage adapter interfaces and the self-update
+workflow contract.

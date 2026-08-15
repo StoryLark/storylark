@@ -1,0 +1,48 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Add a Story" id="storylark-content-flow">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="420" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="s1" value="Markdown&#10;(CLI: your files, or&#10;admin portal: pasted text)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="40" y="140" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s2" value="Parse&#10;(markdown-import.mjs&#10;or your --parser)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="240" y="140" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s3" value="Diff by content hash&#10;(unchanged chapters&#10;skip everything below)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="440" y="140" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s4" value="Narrate&#10;(Kokoro on-device, or&#10;Azure Speech if configured)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="640" y="60" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s5" value="Force-align&#10;(word timings against&#10;the real audio)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="840" y="60" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s6" value="Upload&#10;(R2 or Azure Blob —&#10;content-hashed, immutable keys)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="140" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s7" value="Manifest updated&#10;(uploaded LAST — readers&#10;never see a broken reference)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="260" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s8" value="Push notify&#10;(readers subscribed&#10;get told)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="840" y="260" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s3b" value="--no-audio: skip straight&#10;to Upload (text-only publish)" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="440" y="260" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="s1" target="s2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="s2" target="s3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="s3" target="s4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="s4" target="s5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="s5" target="s6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="s6" target="s7"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="s7" target="s8"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1" source="s3" target="s3b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1" source="s3b" target="s6"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

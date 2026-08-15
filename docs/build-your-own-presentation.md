@@ -25,7 +25,9 @@ About       app version, changelog, roadmap
 The tab bar (`packages/core/src/components/TabBar.tsx`) is fixed: **Home · Library · Now
 Playing · Settings**. The routes are defined in `packages/core/src/router.ts`
 (`/`, `/library`, `/library/<bookId>`, `/read/<bookId>/<chapterId>`,
-`/now-playing`, `/settings`, `/about`). This structure is not currently
+`/now-playing`, `/settings`, `/about`, `/admin`). `/admin` is the operator's
+[admin portal](admin-guide.md) — not part of the reader-facing presentation
+and not in the tab bar, but worth knowing it's there. This structure is not currently
 config-driven — changing nav arrangement or screen composition means editing the
 components.
 
