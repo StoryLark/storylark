@@ -521,10 +521,12 @@ test('a Cloudflare update uploads the engine AND carries the deployment\'s own b
     //    (confirmed live 2026-08-16: /content does not exist for an
     //    asset-backed Worker; the plain script endpoint does, but replaces
     //    the whole config, so bindings have to be resent, not avoided), then
-    //    PUTs to the plain script endpoint carrying them forward unchanged —
-    //    the plain var keeps its VALUE, the secret comes back by name only
-    //    (Cloudflare never returns a secret's value, and that is exactly how
-    //    "keep the stored value" is spelled) — plus the engine's own
+    //    PUTs to the plain script endpoint carrying them forward — the plain
+    //    var keeps its VALUE; ADMIN_KEY (secret_text) is OMITTED entirely,
+    //    not referenced (also confirmed live: resending a secret_text binding
+    //    by name with no value is REJECTED by Cloudflare's API, not treated
+    //    as "keep it" — the real rule is that omitted secrets are preserved
+    //    automatically from the previous version) — plus the engine's own
     //    asset-routing contract, which is NOT read back the same way: it is
     //    the engine's routing architecture, not this deployment's state.
     const settingsCall = api.calls.find((c) => c.url.endsWith('/settings'));
@@ -536,7 +538,6 @@ test('a Cloudflare update uploads the engine AND carries the deployment\'s own b
       main_module: 'index.js',
       bindings: [
         { name: 'BRAND', type: 'plain_text', text: 'acme' },
-        { name: 'ADMIN_KEY', type: 'secret_text' },
         { name: 'DB', type: 'd1', id: 'db-id-123' },
       ],
       compatibility_date: '2026-06-01',

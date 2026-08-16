@@ -148,15 +148,24 @@ const CF_API = 'https://api.cloudflare.com/client/v4';
  * accept `assets.jwt` — but does replace the Worker's whole configuration with
  * whatever this request sends, so bindings genuinely have to be resupplied,
  * not avoided. That is what step 3 is for: `GET .../settings` returns the
- * live binding list — plain vars WITH their values, `secret_text` bindings by
- * NAME ONLY (Cloudflare does not return a secret's value, and re-sending a
- * `secret_text` binding with no `text` field is exactly how you tell it "keep
- * whatever is already stored" — the same convention `wrangler secret put`
- * relies on for every OTHER deploy that doesn't touch secrets either) — so the
- * new upload carries forward exactly what was already there. Routes and cron
- * triggers are independent Cloudflare resources that reference a script by
- * name rather than living inside its content, so a script-content update does
- * not touch them regardless of which endpoint is used.
+ * live binding list — plain vars WITH their values, which get resent as-is.
+ *
+ * `secret_text` bindings are handled differently, and this was ALSO wrong on
+ * the first real attempt: re-sending a `secret_text` binding by name with no
+ * `text` field does not mean "keep the stored value" — Cloudflare's API
+ * rejects it outright ("invalid or missing text property for binding
+ * ADMIN_KEY", confirmed live). The actual rule, confirmed against Cloudflare's
+ * own docs after that failure: a secret is a resource independent of the
+ * script's bindings list, and "existing secrets not included in the upload
+ * are preserved from the previous version" — so `secret_text` bindings are
+ * filtered OUT of what gets resent entirely, not referenced. Two real,
+ * different failures on two real attempts, both fixed by actually running
+ * this against a live account rather than reasoning about the API from its
+ * documentation alone.
+ *
+ * Routes and cron triggers are independent Cloudflare resources that
+ * reference a script by name rather than living inside its content, so this
+ * swap does not touch them regardless of which endpoint is used.
  *
  * The asset-routing contract (`not_found_handling`, `run_worker_first`) is
  * deliberately NOT read back the same way — it is not this deployment's own
@@ -273,17 +282,30 @@ export function cloudflareSelfDeploy(env: Env): SelfDeployTarget {
       //    the whole configuration with whatever this request sends, so
       //    "leave bindings alone" has to mean "resend exactly what is already
       //    there", the same principle step 2 already applies to brand assets.
-      //    secret_text bindings come back by NAME ONLY (Cloudflare never
-      //    returns a secret's value) — resending them with no `text` field is
-      //    the documented way to keep the stored value, the same convention
-      //    `wrangler secret put` relies on for every deploy that isn't
-      //    touching secrets either.
+      //
+      //    CORRECTED LIVE, 2026-08-16: `secret_text` bindings do NOT come back
+      //    by resending the name with no value — a real deploy against
+      //    app.storylark.dev failed with "invalid or missing text property for
+      //    binding ADMIN_KEY" the moment that assumption was tried. The actual
+      //    Cloudflare behaviour (confirmed against their own docs after that
+      //    failure) is simpler: secrets are a resource independent of the
+      //    script's bindings list, and "existing secrets not included in the
+      //    [uploaded bindings] are preserved from the previous version" — so
+      //    the fix is to leave secret_text bindings OUT of what gets resent
+      //    entirely, not to reference them. Every other binding type (plain
+      //    vars, D1, R2, the ASSETS binding itself) has to be resent with its
+      //    real value/config or it is genuinely dropped.
       const settings = (await call(`/accounts/${account}/workers/scripts/${encodeURIComponent(script)}/settings`)) as {
         compatibility_date?: string;
         compatibility_flags?: string[];
-        bindings?: unknown[];
+        bindings?: { type?: string; name?: string }[];
       };
-      log(`Read back ${settings.bindings?.length ?? 0} existing binding(s) to carry forward unchanged.`);
+      const secretCount = (settings.bindings ?? []).filter((b) => b.type === 'secret_text').length;
+      const nonSecretBindings = (settings.bindings ?? []).filter((b) => b.type !== 'secret_text');
+      log(
+        `Read back ${nonSecretBindings.length} binding(s) to carry forward unchanged` +
+          (secretCount ? ` (${secretCount} secret(s) left untouched — omitted, not resent, per Cloudflare's own preserve-on-omit rule).` : '.')
+      );
 
       // 4. Swap the code. Bindings above keep this deployment's D1/R2/vars/
       //    secrets exactly as they were; the asset-routing contract below is
@@ -296,7 +318,7 @@ export function cloudflareSelfDeploy(env: Env): SelfDeployTarget {
         'metadata',
         JSON.stringify({
           main_module: 'index.js',
-          bindings: settings.bindings ?? [],
+          bindings: nonSecretBindings,
           compatibility_date: settings.compatibility_date,
           compatibility_flags: settings.compatibility_flags ?? [],
           assets: {
