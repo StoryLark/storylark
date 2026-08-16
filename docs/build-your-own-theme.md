@@ -273,6 +273,39 @@ neutral placeholders in your accent color:
 node packages/pipeline/gen-icons.mjs --brand <your-id>
 ```
 
+## Sample themes to start from
+
+Four complete themes ship in this repo alongside `storylark` itself. They exist
+to be copied and to be read: between them they use every curated family, both
+values of `defaultTheme`, both `layout`s, both `nav.position`s, both
+`cover.aspect`s and every `reader.defaultMode`, so whatever you are trying to
+build, one of them has already made a similar decision and you can see what it
+took.
+
+| Theme | Subject | Look | Fonts (display / body) | Build |
+|---|---|---|---|---|
+| `weatherglass` | Weather and almanac | Light. Pulp-grey stock, admiralty chart blue, storm-rust highlight | IBM Plex Mono / Lora | `vite build --mode weatherglass` |
+| `nebula` | Science fiction | Dark-first. Plate-emulsion violet-grey, reflection blue, H-alpha rose highlight | Inter / Newsreader | `vite build --mode nebula` |
+| `loveletter` | Romance | Light. Rose-grey laid paper, sealing-wax carmine, faded-ink-violet highlight | Cormorant Garamond / Lora | `vite build --mode loveletter` |
+| `wireless` | Vintage radio drama | Dark-first. Bakelite brown, dial-lamp amber, ON AIR red highlight | Cinzel / Newsreader | `vite build --mode wireless` |
+
+Each is a full set — `brands/<id>/brand.json`, `brands/<id>/theme.css`,
+`brands/<id>/assets/icons/`, `presentation/<id>/presentation.json` — plus a
+short sample library under `examples/<id>/` so you can see the theme with
+content in it rather than on an empty shelf:
+
+```
+node packages/pipeline/publish.mjs --brand wireless \
+  --source examples/wireless --no-audio --local app/dist
+```
+
+Two of them (`nebula`, `wireless`) are dark-first, which is worth reading for
+one specific reason: they put the DARK tokens on bare `:root` and the light
+ones under `:root[data-theme="light"]`, the opposite way round from
+`brands/storylark`. `data-theme` is only stamped once the app's JavaScript
+runs, so on a dark-first brand the unstamped state has to already be dark or
+every cold load flashes white first.
+
 ## Publishing themes (naming convention — planned)
 
 Today a theme is a folder you copy and edit in-repo. The direction is to make

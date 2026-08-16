@@ -198,6 +198,36 @@ your `nouns`:
 }
 ```
 
+### Four worked examples
+
+`presentation/weatherglass`, `presentation/nebula`, `presentation/loveletter`
+and `presentation/wireless` are complete files using the keys above, and they
+disagree with each other on purpose — the fastest way to see what a key does is
+to see two libraries make opposite choices about it:
+
+| | weatherglass | nebula | loveletter | wireless |
+|---|---|---|---|---|
+| `layout` | `flat` | `series` | `flat` | `series` |
+| `nouns.unit` | entry | log (in a *mission*) | letter | episode (in a *serial*) |
+| `nav.position` | bottom | **side** | bottom | bottom |
+| `nav.items` | 4, default order | 5, incl. `about` | 4, default order | 5, **`nowPlaying` second** |
+| `home.sections` | continue, newReleases, **allUnits** | **newReleases first**, continue | continue, newReleases | continue, **allUnits** (no carousel) |
+| `library.defaultSort` | `timeframe` | `order` | `recent` | `order` |
+| `library.view` | list | **grid** | **grid** | list |
+| `reader.defaultMode` | `read` | **`readListen`** | `read` | **`listen`** |
+| `player` | core default | skip 30s | skip 10s | skip 30s, **no speed dial** |
+| `cover.aspect` | square | square | **portrait** | square |
+| `detail` | no author | no cover | no chapter list | core defaults |
+
+Note the last column of the last row. Wireless states no `detail` block at all,
+which is not an omission — it is the "a missing key takes the core default"
+rule being used deliberately, and it is why that theme will pick up any
+improvement core makes to the detail screen without being edited.
+
+The matching brand folders are described in
+[`build-your-own-theme.md`](build-your-own-theme.md#sample-themes-to-start-from),
+and each has a small sample library under `examples/<id>/`.
+
 ### What v1 deliberately does not do
 
 No custom components, no arbitrary screen composition, no new routes. Those are
