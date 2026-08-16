@@ -1,0 +1,53 @@
+/* Weatherglass — a weather and almanac library.
+ *
+ * The material this is drawn from is a printed almanac, not a book: cheap
+ * pulp-grey stock with a faint green cast (never cream — cream is a novel's
+ * paper, and this is a record), ruled columns, cold ink, and figures set in the
+ * same face as the instrument they came off. Everything chrome-like is
+ * admiralty chart blue; the only warm colour in the theme is the storm-warning
+ * rust, held back for the read-along highlight so the spoken word reads as a
+ * signal against blue instrument furniture rather than as decoration.
+ *
+ * Dark is the night watch: an unlit room, an instrument panel, and a pale
+ * chart blue lifted enough to survive on it.
+ */
+:root {
+  color-scheme: light;
+
+  --bg: #E9EBE5;          /* pressed pulp — grey with a green cast */
+  --bg-raised: #F3F4EF;   /* the tipped-in chart plate, a shade brighter */
+  --bg-sunken: #DBDED5;
+  --text: #1B2327;        /* cold ink, never black */
+  --text-muted: #566065;
+  --text-faint: #8C9691;
+  --accent: #21506E;      /* admiralty chart blue */
+  --accent-strong: #163D56;
+  --rule: #C7CDC2;        /* the ruled column line */
+  --link: #21506E;
+
+  --font-display: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --font-headers: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --font-body: "Lora", Georgia, Cambria, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+
+  /* Storm-warning rust. The one warm colour, and only ever on the sung word:
+     on a weather chart, red is what you are meant to look at. */
+  --highlight-word: rgba(184, 74, 42, 0.2);
+  --highlight-block: rgba(184, 74, 42, 0.42);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0F1519;          /* the night watch */
+  --bg-raised: #171F24;
+  --bg-sunken: #090E11;
+  --text: #DCE4E2;
+  --text-muted: #98A5A6;
+  --text-faint: #6B7779;
+  --accent: #6FA6C6;      /* chart blue, lit from behind */
+  --accent-strong: #92C1DC;
+  --rule: #232E33;
+  --link: #92C1DC;
+  --highlight-word: rgba(226, 122, 84, 0.24);
+  --highlight-block: rgba(226, 122, 84, 0.46);
+}

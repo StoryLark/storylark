@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 260" font-family='"IBM Plex Mono", ui-monospace, monospace'>
+  <rect x="8" y="26" width="208" height="208" rx="48" fill="#21506E"/>
+  <g transform="translate(8 26) scale(0.40625)">
+  <circle cx="256" cy="256" r="196" fill="none" stroke="#E9EBE5" stroke-width="18" opacity="0.22"/>
+  <circle cx="256" cy="256" r="176" fill="none" stroke="#E9EBE5" stroke-width="9" opacity="0.5"/>
+  <path d="M131.7 371.9 A 170 170 0 0 1 99.5 189.6" fill="none" stroke="#B84A2A" stroke-width="22" stroke-linecap="butt"/>
+  <line x1="147.1" y1="364.9" x2="175.4" y2="336.6" stroke="#E9EBE5" stroke-width="15" stroke-linecap="round" opacity="0.95"/>
+  <line x1="128.0" y1="341.6" x2="146.2" y2="329.3" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="113.7" y1="314.9" x2="134.0" y2="306.5" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="105.0" y1="286.0" x2="126.5" y2="281.8" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="102.0" y1="256.0" x2="142.0" y2="256.0" stroke="#E9EBE5" stroke-width="15" stroke-linecap="round" opacity="0.95"/>
+  <line x1="105.0" y1="226.0" x2="126.5" y2="230.2" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="113.7" y1="197.1" x2="134.0" y2="205.5" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="128.0" y1="170.4" x2="146.2" y2="182.7" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="147.1" y1="147.1" x2="175.4" y2="175.4" stroke="#E9EBE5" stroke-width="15" stroke-linecap="round" opacity="0.95"/>
+  <line x1="170.4" y1="128.0" x2="182.7" y2="146.2" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="197.1" y1="113.7" x2="205.5" y2="134.0" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="226.0" y1="105.0" x2="230.2" y2="126.5" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="256.0" y1="102.0" x2="256.0" y2="142.0" stroke="#E9EBE5" stroke-width="15" stroke-linecap="round" opacity="0.95"/>
+  <line x1="286.0" y1="105.0" x2="281.8" y2="126.5" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="314.9" y1="113.7" x2="306.5" y2="134.0" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="341.6" y1="128.0" x2="329.3" y2="146.2" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="364.9" y1="147.1" x2="336.6" y2="175.4" stroke="#E9EBE5" stroke-width="15" stroke-linecap="round" opacity="0.95"/>
+  <line x1="384.0" y1="170.4" x2="365.8" y2="182.7" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="398.3" y1="197.1" x2="378.0" y2="205.5" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="407.0" y1="226.0" x2="385.5" y2="230.2" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="410.0" y1="256.0" x2="370.0" y2="256.0" stroke="#E9EBE5" stroke-width="15" stroke-linecap="round" opacity="0.95"/>
+  <line x1="407.0" y1="286.0" x2="385.5" y2="281.8" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="398.3" y1="314.9" x2="378.0" y2="306.5" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="384.0" y1="341.6" x2="365.8" y2="329.3" stroke="#E9EBE5" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+  <line x1="364.9" y1="364.9" x2="336.6" y2="336.6" stroke="#E9EBE5" stroke-width="15" stroke-linecap="round" opacity="0.95"/>
+  <line x1="256" y1="256" x2="315.0" y2="153.8" stroke="#B84A2A" stroke-width="10" stroke-linecap="round"/>
+  <line x1="256" y1="256" x2="396.9" y2="199.1" stroke="#E9EBE5" stroke-width="23" stroke-linecap="round"/>
+  <circle cx="256" cy="256" r="27" fill="#E9EBE5"/>
+  <circle cx="256" cy="256" r="10" fill="#B84A2A"/>
+  </g>
+  <text x="262" y="150" font-size="96" fill="#1B2327" letter-spacing="1">Weather<tspan fill="#21506E">glass</tspan></text>
+  <text x="266" y="196" font-size="27" fill="#566065" opacity="0.85" font-style="italic">Readings, records, and the long view of the weather.</text>
+</svg>

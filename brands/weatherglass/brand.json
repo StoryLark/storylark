@@ -1,0 +1,18 @@
+{
+  "contractVersion": 1,
+  "id": "weatherglass",
+  "name": "The Almanac",
+  "appName": "Weatherglass",
+  "shortName": "Weatherglass",
+  "tagline": "Readings, records, and the long view of the weather.",
+  "author": "The Weatherglass Society",
+  "themeColor": "#E9EBE5",
+  "backgroundColor": "#E9EBE5",
+  "defaultTheme": "light",
+  "fonts": {
+    "display": "IBM Plex Mono",
+    "headers": "IBM Plex Mono",
+    "body": "Lora",
+    "mono": "IBM Plex Mono"
+  }
+}

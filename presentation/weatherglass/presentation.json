@@ -1,0 +1,48 @@
+{
+  "contractVersion": 1,
+  "layout": "flat",
+  "nouns": {
+    "unit": "entry",
+    "unitPlural": "entries",
+    "Unit": "Entry",
+    "UnitPlural": "Entries",
+    "collection": null,
+    "Collection": null
+  },
+  "nav": {
+    "position": "bottom",
+    "items": ["home", "library", "nowPlaying", "settings"],
+    "labels": {
+      "home": "Today",
+      "library": "Almanac",
+      "nowPlaying": "Listening"
+    }
+  },
+  "home": {
+    "sections": ["continue", "newReleases", "allUnits"]
+  },
+  "library": {
+    "defaultSort": "timeframe",
+    "sortOptions": ["timeframe", "order", "title"],
+    "groupBy": "none",
+    "groupOptions": ["timeframe", "group"],
+    "view": "list",
+    "showSearch": true
+  },
+  "reader": {
+    "defaultMode": "read"
+  },
+  "cover": {
+    "aspect": "square"
+  },
+  "detail": {
+    "showAuthor": false,
+    "showLength": true
+  },
+  "emptyState": {
+    "library": "The glass is steady. Nothing set down yet — new {unitPlural} are recorded as the season turns.",
+    "librarySearch": "No {unitPlural} answer to “{query}”. Try a month, or a kind of weather.",
+    "home": "Taking a reading…",
+    "nowPlaying": "The needle is still."
+  }
+}
