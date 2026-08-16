@@ -33,7 +33,6 @@ function errorText(err: unknown, fallback: string): string {
 
 interface StatusResponse {
   brand: string;
-  appName: string;
   engineVersion: string;
   bookCount: number | null;
   chapterCount: number | null;
@@ -445,7 +444,7 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
   return (
     <div class="screen admin-screen">
       <header class="screen-header">
-        <h1 class="screen-title">Admin — {status?.appName ?? BRAND.appName}</h1>
+        <h1 class="screen-title">Admin — {BRAND.appName}</h1>
         <button class="btn-ghost" onClick={onSignOut}>
           Sign out
         </button>

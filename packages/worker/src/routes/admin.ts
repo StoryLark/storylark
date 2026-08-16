@@ -334,7 +334,6 @@ admin.get('/status', async (c) => {
 
   return c.json({
     brand: c.env.BRAND,
-    appName: c.env.APP_NAME,
     engineVersion: workerPkg.version,
     bookCount,
     chapterCount,
