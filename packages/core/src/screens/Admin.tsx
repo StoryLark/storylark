@@ -56,6 +56,30 @@ interface UpdateStatusResponse {
   /** The command that actually performs the update, run by the operator on their own machine. */
   updateCommand?: string;
   updateDocsUrl?: string;
+  /**
+   * Layer 3 (AB#7418). Optional for the same reason as the three above — a
+   * newer portal can be talking to an older worker — and `available: false`
+   * with a reason is the NORMAL answer, not an error. The card below renders
+   * the command in every case and adds a button only when this says it can.
+   */
+  oneClick?: {
+    available: boolean;
+    platform?: 'cloudflare' | 'azure-app-service';
+    /** What is allowed to deploy this site, in the operator's terms. */
+    credential?: string;
+    /** Why there is no button, when there isn't one. */
+    reason?: string;
+    detail?: string;
+  };
+}
+
+/** What POST /update-install answers with. */
+interface UpdateInstallResponse {
+  ok?: boolean;
+  installed?: string;
+  message?: string;
+  error?: string;
+  log?: string[];
 }
 
 type Phase =
@@ -467,16 +491,45 @@ function StatusSection({ status }: { status: StatusResponse | null }): JSX.Eleme
 }
 
 /**
- * Platform update (AB#7403). This card tells you where you stand and hands you
- * the command that does the work — it deliberately has no "install" button.
- * The update runs from your own machine with the platform credentials you
- * already have, so this deployment never holds a credential that could deploy
- * on your behalf. See docs/updating.md.
+ * Platform update (AB#7403, extended AB#7418). This card always tells you where
+ * you stand and always hands you the command that does the work. What it adds
+ * ON TOP, and only where the operator has deliberately enabled it, is the
+ * button: layer 3, an in-portal update that downloads a prebuilt engine and
+ * hands it to the platform this site already runs on.
+ *
+ * The command never goes away when the button appears, and that is deliberate.
+ * The button depends on a permission that can be revoked, a release artifact
+ * that might not exist for a given version, and a platform API that can be
+ * having a bad day; the command depends on none of those. It is the floor, and
+ * a card that hid it as soon as something fancier was configured would be
+ * hiding the thing that always works.
+ *
+ * With one-click NOT configured — which is the default and the recommended
+ * posture — this renders exactly what it rendered before AB#7418, plus one line
+ * saying the feature exists and how to turn it on.
  */
 const UPDATE_DOCS_URL = 'https://storylark.org/docs/updating.html';
 
 function UpdateSection({ updateStatus }: { updateStatus: UpdateStatusResponse | null }): JSX.Element {
   const [copied, setCopied] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [result, setResult] = useState<UpdateInstallResponse | null>(null);
+  const oneClick = updateStatus?.oneClick;
+
+  async function install() {
+    setInstalling(true);
+    setConfirming(false);
+    setResult(null);
+    try {
+      const res = await adminFetch<UpdateInstallResponse>('/update-install', { method: 'POST', body: JSON.stringify({}) });
+      setResult(res);
+    } catch (err) {
+      setResult({ error: 'failed', message: errorText(err, 'The update could not be installed.') });
+    } finally {
+      setInstalling(false);
+    }
+  }
   // Falls back to the generic form when talking to a worker that predates
   // AB#7403's response fields — still a correct instruction, just without the
   // platform already filled in.
@@ -515,9 +568,46 @@ function UpdateSection({ updateStatus }: { updateStatus: UpdateStatusResponse | 
               ' — up to date.'
             )}
           </p>
+          {/* Layer 3, when and only when the operator turned it on. */}
+          {oneClick?.available && updateStatus.hasUpdate && !result && (
+            <div class="admin-oneclick">
+              {!confirming ? (
+                <button class="btn" disabled={installing} onClick={() => setConfirming(true)}>
+                  Install update
+                </button>
+              ) : (
+                <>
+                  <p class="settings-note">
+                    This downloads the prebuilt <strong>{updateStatus.latest}</strong> engine, checks it against its published
+                    checksum, applies any database migrations, and redeploys this site through {oneClick.credential}. Your brand,
+                    your theme and your content are not touched.
+                  </p>
+                  <button class="btn" disabled={installing} onClick={install}>
+                    {installing ? 'Installing…' : `Yes — install ${updateStatus.latest}`}
+                  </button>{' '}
+                  <button class="btn-ghost" disabled={installing} onClick={() => setConfirming(false)}>
+                    Cancel
+                  </button>
+                </>
+              )}
+              {!confirming && <p class="settings-note">Deployed by {oneClick.credential}.</p>}
+            </div>
+          )}
+          {result && (
+            <div class="admin-oneclick">
+              <p class={`settings-note${result.ok ? '' : ' admin-error'}`}>
+                {result.ok ? `Installed ${result.installed}. ${result.message ?? ''}` : (result.message ?? 'The update failed.')}
+              </p>
+              {/* The log is the receipt. Shown on success as well as failure —
+                  "what did that button just do to my site" deserves an answer
+                  either way, not only when something went wrong. */}
+              {result.log?.length ? <pre class="admin-command">{result.log.join('\n')}</pre> : null}
+            </div>
+          )}
+
           <p class="settings-note">
             {updateStatus.hasUpdate
-              ? 'To take it, run this from your copy of the site, on the machine you deploy from:'
+              ? `${oneClick?.available ? 'You can also take it' : 'To take it'}, run this from your copy of the site, on the machine you deploy from:`
               : 'When there is one, you take it by running this from your copy of the site, on the machine you deploy from:'}
           </p>
           <pre class="admin-command">{command}</pre>
@@ -526,11 +616,15 @@ function UpdateSection({ updateStatus }: { updateStatus: UpdateStatusResponse | 
           </button>
           <p class="settings-note">
             It pulls the new engine, migrates, rebuilds with your brand untouched, and redeploys — using the platform login
-            you already have. This site stores no credential that could update itself.{' '}
+            you already have.{' '}
+            {oneClick?.available
+              ? 'This works whether or not one-click updates are enabled, and needs nothing stored on the site.'
+              : 'This site stores no credential that could update itself.'}{' '}
             <a href={updateStatus.updateDocsUrl ?? UPDATE_DOCS_URL} target="_blank" rel="noreferrer">
               How updating works
             </a>
           </p>
+          {oneClick && !oneClick.available && oneClick.reason && <p class="settings-note">{oneClick.reason}</p>}
         </>
       )}
     </section>

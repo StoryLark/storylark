@@ -7,6 +7,26 @@ name: Release
 # Requires the NPM_TOKEN repo secret (an npm automation token with publish
 # rights for the storylark-* packages). Until that secret exists the publish step
 # fails harmlessly and the version PR still works.
+#
+# ── The prebuilt engine artifact (AB#7418 — plan §0d Phase 5) ────────────────
+# When a release actually publishes, two more files are attached to the GitHub
+# Release changesets just cut for `storylark-core@<version>`:
+#
+#   storylark-engine-<version>.zip          the whole engine, brand-free
+#   storylark-engine-<version>.zip.sha256   what it must hash to
+#
+# That artifact is what turns an update from "rebuild the engine on your own
+# machine" into "download this and restart", which is the entire point of
+# Phase 5 — and it is attached to the release changesets already creates rather
+# than published through a parallel mechanism, so there is exactly one thing
+# called "a StoryLark release".
+#
+# It is only correct to ship ONE of these for every customer because Phases 1-3
+# made brand, presentation and deployment config runtime data and `--mode engine`
+# resolves all three to empty. package-engine.mjs re-proves that on every run
+# (it scans every output byte for every brand string in the repo and fails on a
+# hit), so a regression that reintroduced compiled-in brand data would break the
+# release rather than ship one customer's identity to everyone else.
 
 on:
   push:
@@ -32,6 +52,31 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+      - run: npm test
+
+      # BEFORE the publish, not after (AB#7418). package-engine.mjs refuses to
+      # package a build that carries brand data, and the point of that refusal
+      # is to stop a bad artifact from existing — which it can only do if it
+      # runs while the release can still be aborted. Doing it here also means
+      # the check runs on every merge to main, so a change that recompiled brand
+      # into the bundle breaks the build that day rather than at the next
+      # release. The version in package.json is already the released one by this
+      # point: the "Version Packages" PR bumped it before this run started.
+      - name: Build and verify the prebuilt engine
+        env:
+          # One timestamp for the whole artifact, so re-running this job on the
+          # same commit produces the same bytes and the published sha256 is a
+          # fact about the inputs rather than about when CI happened to run.
+          STORYLARK_BUILD_TIME: ${{ github.event.head_commit.timestamp }}
+        run: |
+          npm run build -w app -- --mode engine
+          # Offline: --dry-run needs no Cloudflare credential and contacts
+          # nothing. This is the Worker module a Cloudflare one-click update
+          # uploads; without it the artifact is frontend-only and the updater
+          # says so rather than deploying half an engine.
+          npx wrangler deploy --env storylark --dry-run --outdir=.engine-worker
+          node packages/core/bin/package-engine.mjs
+
       - name: Version or publish
         id: changesets
         uses: changesets/action@v1
@@ -44,3 +89,22 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           # setup-node's registry-url writes an .npmrc that reads this on publish.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Only on a real publish — on a plain merge to main the changesets step
+      # just refreshes the version PR and there is no release to attach to.
+      - name: Attach it to the storylark-core release
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./packages/core/package.json').version")
+          TAG="storylark-core@$VERSION"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "No release $TAG — storylark-core was not part of this publish. Nothing to attach."
+            exit 0
+          fi
+          gh release upload "$TAG" \
+            "dist-engine/storylark-engine-$VERSION.zip" \
+            "dist-engine/storylark-engine-$VERSION.zip.sha256" \
+            --clobber
+          echo "Attached the prebuilt engine to $TAG."

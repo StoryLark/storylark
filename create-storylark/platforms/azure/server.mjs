@@ -86,6 +86,24 @@ try {
   );
 }
 
+// One-click updates (AB#7418 — plan §4 layer 3 / §0d Phase 5). Node-only by
+// nature: it reads this process's own site directory, zips it and posts it to
+// its own Kudu endpoint, none of which exists in a Worker. That is exactly why
+// it is bound HERE rather than shipped inside storylark-worker — the same
+// reasoning that puts the Azure Blob content driver in ./content-store.mjs.
+//
+// Returns a null target with a reason when the managed identity is not set up,
+// which is the default state and is not an error: /admin then shows the
+// installer command exactly as it does today.
+let selfDeploy = { target: null, reason: '' };
+try {
+  const { azureSelfDeploy } = await import('./self-deploy.mjs');
+  selfDeploy = azureSelfDeploy(process.env);
+  console.log(selfDeploy.target ? 'storylark: one-click updates available (managed identity).' : `storylark: one-click updates off — ${selfDeploy.reason}`);
+} catch (err) {
+  console.warn(`storylark: one-click updates unavailable (${err.message}). Updates run from the installer.`);
+}
+
 const required = ['DATABASE_URL', 'BRAND', 'APP_ORIGIN', 'CONTENT_ORIGIN', 'MAIL_FROM', 'APP_NAME'];
 const missing = required.filter((k) => !process.env[k]);
 if (missing.length > 0) {
@@ -131,6 +149,13 @@ const env = {
   // Theme packages (AB#7417). Same storage as content editing — an imported
   // theme is data the deployment holds, not part of its build.
   THEME_VERSIONS: process.env.THEME_VERSIONS ?? '',
+  // One-click updates (AB#7418). Null unless this app has a managed identity
+  // that Kudu accepts; the route reports the reason it is null rather than
+  // pretending the feature does not exist.
+  SELF_DEPLOY: selfDeploy.target ?? undefined,
+  SELF_DEPLOY_REASON: selfDeploy.reason,
+  ENGINE_RELEASE_REPO: process.env.ENGINE_RELEASE_REPO ?? '',
+  ENGINE_RELEASE_BASE: process.env.ENGINE_RELEASE_BASE ?? '',
 };
 
 // Cloudflare's ExecutionContext.waitUntil() keeps the isolate alive after

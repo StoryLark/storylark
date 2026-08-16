@@ -6,6 +6,10 @@
 //   node install.mjs --deploy    provisions infra.bicep, then migrates + deploys
 //   node install.mjs --update    pulls the latest engine packages, then migrates
 //                                + rebuilds + redeploys an EXISTING deployment
+//   node install.mjs --enable-one-click   opt in to the /admin "Install update"
+//                                button — grants the app permission to deploy
+//                                itself, and stores no credential
+//   node install.mjs --disable-one-click  opt back out
 //
 // --deploy creates real Azure resources and real cost. It refuses to run
 // without --yes as an explicit second flag, on top of whatever your own
@@ -384,6 +388,134 @@ async function update() {
   console.log('='.repeat(72) + '\n');
 }
 
+/**
+ * --enable-one-click (AB#7418 — plan §4 layer 3): opt this deployment in to the
+ * /admin "Install update" button.
+ *
+ * §4 wrote layer 3 as "the installer stores that platform's own deploy
+ * credential as a deployment secret". On Azure that turns out to be the wrong
+ * shape, and a strictly worse one: App Service already gives a running site an
+ * identity, and Kudu — the deployment engine that `az webapp deploy` itself
+ * drives — accepts a Microsoft Entra token. So this stores NO credential at
+ * all. It does two things, both of them visible in the portal and both
+ * revocable there:
+ *
+ *   1. turns on a system-assigned managed identity for the Web App
+ *   2. gives that identity "Website Contributor" ON THE WEB APP ITSELF —
+ *      not the resource group, not the subscription — which carries
+ *      Microsoft.Web/sites/publish/Action, the permission Kudu checks
+ *
+ * The blast radius is one site: the identity can redeploy the app it belongs
+ * to and nothing else. Nothing to leak, nothing to rotate, and turning it off
+ * is deleting a role assignment.
+ */
+async function enableOneClick() {
+  console.log('Verifying install.env and Azure CLI state...\n');
+  if (!verifyCommon()) {
+    console.error('\nRefusing to continue: verification failed.');
+    process.exit(1);
+  }
+  if (!args.has('--yes')) {
+    console.error(
+      '\n--enable-one-click gives this Web App permission to redeploy itself.\n' +
+        'Re-run with --enable-one-click --yes to confirm.'
+    );
+    process.exit(1);
+  }
+
+  const webAppName = `${env.BRAND_ID}-app`;
+  console.log('\n' + '='.repeat(72));
+  console.log('ONE-CLICK UPDATES — what you are about to allow');
+  console.log('='.repeat(72));
+  console.log(`\nAn admin signed into /admin on ${webAppName} will be able to press`);
+  console.log('"Install update". That downloads the prebuilt engine for the version the');
+  console.log('portal shows, checks it against its published checksum, migrates the');
+  console.log('database, and redeploys this app through its own Kudu endpoint.');
+  console.log('\nNo credential is stored anywhere. The app authenticates with a managed');
+  console.log('identity token it fetches at the moment of use, and the permission below');
+  console.log('is scoped to this one site.');
+  console.log('\nYou do not have to do this. Without it, updates run from your own');
+  console.log('machine with:  node platforms/azure/install.mjs --update --yes');
+  console.log('='.repeat(72));
+
+  console.log('\nEnabling the system-assigned managed identity...');
+  const identity = JSON.parse(
+    run('az', ['webapp', 'identity', 'assign', '--resource-group', env.AZURE_RESOURCE_GROUP, '--name', webAppName], { encoding: 'utf8' })
+  );
+  const principalId = identity.principalId ?? identity.PrincipalId;
+  if (!principalId) throw new Error('az webapp identity assign returned no principalId.');
+  console.log(`✓ Managed identity principal ${principalId}`);
+
+  const scope = run(
+    'az',
+    ['webapp', 'show', '--resource-group', env.AZURE_RESOURCE_GROUP, '--name', webAppName, '--query', 'id', '-o', 'tsv'],
+    { encoding: 'utf8' }
+  ).trim();
+
+  console.log(`\nGranting "Website Contributor" on ${scope}...`);
+  try {
+    run(
+      'az',
+      [
+        'role', 'assignment', 'create',
+        '--assignee-object-id', principalId,
+        '--assignee-principal-type', 'ServicePrincipal',
+        '--role', 'Website Contributor',
+        '--scope', scope,
+      ],
+      { stdio: 'inherit' }
+    );
+  } catch (err) {
+    console.error(
+      '\n✗ Could not create the role assignment. This needs Owner or User Access Administrator on the site\n' +
+        '  (Contributor cannot grant roles). Either re-run as someone who has it, or ask them for:\n\n' +
+        `    az role assignment create --assignee-object-id ${principalId} \\\n` +
+        '      --assignee-principal-type ServicePrincipal --role "Website Contributor" \\\n' +
+        `      --scope ${scope}\n`
+    );
+    throw err;
+  }
+
+  console.log('\n✓ One-click updates are on.');
+  console.log('  Role assignments can take a minute or two to take effect. Open /admin —');
+  console.log('  the Platform update card checks the permission for real before it offers');
+  console.log('  a button, so if it still says "off", give it a moment and reload.');
+  console.log('  Turn it off with: node platforms/azure/install.mjs --disable-one-click --yes\n');
+}
+
+/** The exact inverse: drop the role assignment, then the identity. */
+function disableOneClick() {
+  if (!args.has('--yes')) {
+    console.error('\nRe-run with --disable-one-click --yes to confirm.');
+    process.exit(1);
+  }
+  const webAppName = `${env.BRAND_ID}-app`;
+  const scope = run(
+    'az',
+    ['webapp', 'show', '--resource-group', env.AZURE_RESOURCE_GROUP, '--name', webAppName, '--query', 'id', '-o', 'tsv'],
+    { encoding: 'utf8' }
+  ).trim();
+  const principalId = run(
+    'az',
+    ['webapp', 'identity', 'show', '--resource-group', env.AZURE_RESOURCE_GROUP, '--name', webAppName, '--query', 'principalId', '-o', 'tsv'],
+    { encoding: 'utf8' }
+  ).trim();
+
+  if (principalId) {
+    console.log('Removing the role assignment...');
+    try {
+      run('az', ['role', 'assignment', 'delete', '--assignee', principalId, '--role', 'Website Contributor', '--scope', scope], {
+        stdio: 'inherit',
+      });
+    } catch {
+      console.log('  (no matching role assignment — already gone.)');
+    }
+  }
+  console.log('Removing the managed identity...');
+  run('az', ['webapp', 'identity', 'remove', '--resource-group', env.AZURE_RESOURCE_GROUP, '--name', webAppName], { stdio: 'inherit' });
+  console.log('\n✓ One-click updates are off. /admin now shows the installer command only.\n');
+}
+
 async function deploy() {
   if (!verify()) {
     console.error('\nRefusing to deploy: verification failed.');
@@ -440,8 +572,12 @@ async function deploy() {
 
 if (args.has('--deploy')) await deploy();
 else if (args.has('--update')) await update();
+else if (args.has('--enable-one-click')) await enableOneClick();
+else if (args.has('--disable-one-click')) disableOneClick();
 else if (args.has('--verify') || args.size === 0) verify();
 else {
-  console.error('Usage: node install.mjs --verify | --deploy --yes | --update --yes');
+  console.error(
+    'Usage: node install.mjs --verify | --deploy --yes | --update --yes | --enable-one-click --yes | --disable-one-click --yes'
+  );
   process.exit(1);
 }

@@ -84,11 +84,18 @@ notifications. Book/chapter counts come from the public manifest; if it's
 briefly unreachable, they show as `—` rather than breaking the page.
 
 **Platform update** — current version vs. latest, a link to release notes,
-and the command that performs the update, ready to copy. There is no
-install button, on purpose: updates run from your own machine with the
-platform credentials you already have, so this deployment stores nothing
-that could deploy on your behalf. See [`updating.md`](updating.md) for the
-full flow.
+and the command that performs the update, ready to copy. By default there is
+no install button: updates run from your own machine with the platform
+credentials you already have, so this deployment stores nothing that could
+deploy on your behalf.
+
+If you'd rather have the button, you can enable it per deployment
+(`install.mjs --enable-one-click --yes`) — it downloads a prebuilt,
+checksum-verified engine and redeploys through your own platform, without a
+build running anywhere and without touching your brand or content. It stays
+off until you turn it on, the command keeps working either way, and one
+command turns it back off. See [`updating.md`](updating.md) for the full
+flow and for exactly what the button can and cannot do.
 
 **Stories** (or **Books**, depending on how your library is arranged) — the
 content manager. Browse what's published, open any chapter, edit it as plain

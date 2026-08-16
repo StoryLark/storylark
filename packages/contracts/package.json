@@ -26,6 +26,10 @@
       "types": "./theme-package.d.ts",
       "default": "./theme-package.mjs"
     },
+    "./engine-package": {
+      "types": "./engine-package.d.ts",
+      "default": "./engine-package.mjs"
+    },
     "./schemas/*.json": "./schemas/*.json",
     "./package.json": "./package.json"
   },
@@ -38,6 +42,8 @@
     "zip.d.ts",
     "theme-package.mjs",
     "theme-package.d.ts",
+    "engine-package.mjs",
+    "engine-package.d.ts",
     "schemas/",
     "README.md"
   ],

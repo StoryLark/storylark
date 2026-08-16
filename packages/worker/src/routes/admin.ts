@@ -4,6 +4,9 @@ import type { AppContext } from '../types';
 import { INIT_SCHEMA } from '../lib/schema';
 import { requireAdmin } from '../lib/session';
 import { recordPublish } from '../lib/notify';
+import { resolveSelfDeploy } from '../lib/self-deploy';
+import { downloadEngineArtifact, findEngineRelease, EngineReleaseError } from '../lib/engine-release';
+import { readEnginePackage, EnginePackageError } from 'storylark-contracts/engine-package';
 import workerPkg from '../../package.json';
 
 export const admin = new Hono<AppContext>();
@@ -23,6 +26,16 @@ function requireAdminKey(c: { req: { header(name: string): string | undefined };
 admin.use('/update-status', requireAdmin());
 admin.use('/status', requireAdmin());
 admin.use('/publish-story', requireAdmin());
+/**
+ * Session only, and deliberately NOT requireAdminOrKey (AB#7418 — plan §4
+ * layer 3). The GitHub-dispatch version this replaces accepted ADMIN_KEY so a
+ * headless CI job could trigger it. This one must not: §4's rule is that "the
+ * click IS the approval", and a shared header key that lives in an installer's
+ * environment file is not a click. An operator who wants an update from CI
+ * already has a better tool for it — the installer's own `--update` command,
+ * run with their own credentials, on their own runner.
+ */
+admin.use('/update-install', requireAdmin());
 
 /**
  * The one deliberate exception to the session rule. POST /publish is called
@@ -92,9 +105,142 @@ admin.get('/update-status', async (c) => {
       platform,
       updateCommand: UPDATE_COMMANDS[platform],
       updateDocsUrl: 'https://storylark.org/docs/updating.html',
+      // Layer 3 (AB#7418). ALWAYS present, and `available: false` with a reason
+      // is the normal answer — the portal renders the layer-2 command either
+      // way and adds a button only on top of it. Whether it is available is a
+      // live question, not a stored flag: the preflight below actually asks the
+      // platform, so a token that was revoked yesterday stops offering a button
+      // today rather than failing on the click.
+      oneClick: await oneClickStatus(c.env),
     });
   } catch {
     return c.json({ error: 'check_failed' }, 502);
+  }
+});
+
+/** `available` means "there is a target AND it answers". Anything else carries a reason. */
+async function oneClickStatus(env: Parameters<typeof resolveSelfDeploy>[0]) {
+  const { target, reason } = resolveSelfDeploy(env);
+  if (!target) return { available: false, reason };
+  const check = await target.preflight().catch((err: Error) => ({ ok: false as const, detail: err.message }));
+  if (!check.ok) {
+    return {
+      available: false,
+      platform: target.platform,
+      credential: target.credential,
+      reason: `One-click updates are configured, but the deployment could not use them right now: ${check.detail}`,
+    };
+  }
+  return { available: true, platform: target.platform, credential: target.credential, detail: check.detail };
+}
+
+/**
+ * POST /api/admin/update-install — the button (AB#7418 — plan §4 layer 3, §0d
+ * Phase 5).
+ *
+ * ── Why this is honest now and was not before ───────────────────────────────
+ * A route with this name existed once and was removed outright, because what it
+ * did was ask GitHub Actions to rebuild the site — which meant a GitHub account,
+ * a fork, and an Actions:write credential stored in a reading app. This one
+ * downloads a PREBUILT artifact and hands it to the platform the operator is
+ * already paying for, with a permission the operator granted to their own
+ * deployment. Phases 2-4 are what made a prebuilt artifact possible at all: with
+ * the brand compiled into the bundle there was no such thing as an engine build
+ * that was correct for more than one customer.
+ *
+ * ── The order, and why every step is where it is ────────────────────────────
+ *   1. Is there a target?      501 if not. No target, no button, no surprise.
+ *   2. Which version?          The npm registry — the same source /update-status
+ *                              showed the operator, so the number they clicked
+ *                              on is the number they get.
+ *   3. Find + verify + read.   Checksum before unzip, manifest sha256 per file,
+ *                              and a package carrying a brand.json is rejected
+ *                              outright. Nothing has touched the deployment yet.
+ *   4. Migrate, then swap.     Inside the target, because the right mechanism
+ *                              for each is platform knowledge.
+ *
+ * Steps 1-3 cannot change anything, by construction: the first call that can is
+ * inside `install()`. So every way this fails except a platform failure is a
+ * pure no-op, which is the same guarantee the theme import gives and for the
+ * same reason.
+ */
+admin.post('/update-install', async (c) => {
+  const { target, reason } = resolveSelfDeploy(c.env);
+  if (!target) {
+    return c.json(
+      {
+        error: 'not_configured',
+        message: reason,
+        updateCommand: UPDATE_COMMANDS[detectPlatform()],
+      },
+      501
+    );
+  }
+
+  const body = await c.req.json<{ version?: string }>().catch(() => ({}) as { version?: string });
+  let version = body.version;
+  if (!version) {
+    try {
+      const res = await fetch('https://registry.npmjs.org/storylark-worker/latest');
+      if (!res.ok) throw new Error(`registry ${res.status}`);
+      version = ((await res.json()) as { version: string }).version;
+    } catch {
+      return c.json({ error: 'check_failed', message: 'Could not ask the npm registry which version is current.' }, 502);
+    }
+  }
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+    return c.json({ error: 'bad_request', message: `"${version}" is not a version number.` }, 400);
+  }
+
+  const log: string[] = [];
+  const push = (line: string) => {
+    log.push(line);
+    console.log(`storylark update: ${line}`);
+  };
+
+  try {
+    push(`Looking for the prebuilt engine ${version}…`);
+    const release = await findEngineRelease(version, {
+      repo: c.env.ENGINE_RELEASE_REPO,
+      base: c.env.ENGINE_RELEASE_BASE,
+    });
+    const { bytes, sha256 } = await downloadEngineArtifact(release);
+    push(`Downloaded ${Math.round(bytes.byteLength / 1024)}KB and verified sha256 ${sha256.slice(0, 16)}….`);
+
+    const pkg = await readEnginePackage(bytes);
+    push(`Package reads clean: storylark-core ${pkg.manifest.coreVersion}, ${pkg.dist.size} engine files.`);
+
+    const result = await target.install(pkg, push);
+    return c.json({
+      ok: true,
+      installed: pkg.manifest.coreVersion,
+      workerVersion: pkg.manifest.workerVersion,
+      platform: target.platform,
+      sha256,
+      releaseUrl: release.releaseUrl,
+      log,
+      message: result.note,
+    });
+  } catch (err) {
+    if (err instanceof EngineReleaseError) {
+      return c.json({ error: err.code, message: err.message, applied: false, log }, err.code === 'no_release' ? 404 : 502);
+    }
+    if (err instanceof EnginePackageError) {
+      return c.json({ error: 'invalid_package', message: err.errors[0], errors: err.errors, applied: false, log }, 502);
+    }
+    // Anything from here on happened INSIDE the platform call, so "applied" is
+    // genuinely unknown — say so rather than claim a clean rollback that this
+    // code cannot perform.
+    console.error(err);
+    return c.json(
+      {
+        error: 'deploy_failed',
+        message: `${(err as Error).message} — check the log below, then take the update with the installer command if it persists.`,
+        updateCommand: UPDATE_COMMANDS[detectPlatform()],
+        log,
+      },
+      502
+    );
   }
 });
 

@@ -1,5 +1,6 @@
 import type { Database, ConflictInsert } from './db/types';
 import type { ContentStore } from './lib/content-store';
+import type { SelfDeployTarget } from './lib/self-deploy';
 
 export interface Env {
   // Platform-agnostic seam (AB#7399): the Cloudflare Worker entry binds this
@@ -61,6 +62,47 @@ export interface Env {
   // scheduled check still runs but never emails; the in-portal check
   // (/api/admin/update-status) always works regardless.
   ADMIN_EMAIL: string;
+
+  // ── One-click updates (AB#7418 — plan §4 layer 3) ─────────────────────────
+  //
+  // Every one of these is optional, and a deployment with none of them set
+  // behaves exactly as it did before this feature existed: /update-status
+  // reports `oneClick.available: false` with a reason, the portal shows the
+  // installer command, and POST /update-install answers 501. That is the
+  // DEFAULT and the recommended posture — the deployment holds no standing
+  // permission to deploy anything.
+  //
+  // CF_API_TOKEN is a Cloudflare API token the OPERATOR issued, scoped to their
+  // own Worker, stored as a Worker secret by
+  // `platforms/cloudflare/install.mjs --enable-one-click`. It is deliberately
+  // NOT in deployment/<id>/deployment.json with the origins and the VAPID public
+  // key: that file is committed to a repository and holds public values, and a
+  // credential that can redeploy a live site does not belong in the same
+  // category, let alone the same file. Revoke it in the Cloudflare dashboard and
+  // the button is gone on the next request; nothing else changes.
+  //
+  // Azure needs NO equivalent. The Node entry gets a short-lived token from the
+  // App Service managed identity at the moment of use and never stores one —
+  // see platforms/azure/self-deploy.mjs.
+  CF_API_TOKEN?: string;
+  CF_ACCOUNT_ID?: string;
+  /** Defaults to BRAND, which is what the installer names the Worker. */
+  CF_SCRIPT_NAME?: string;
+  /** Test seam only — points the Cloudflare client at a local server. Never set in production. */
+  CF_API_BASE?: string;
+  /** Where prebuilt engine artifacts are published. Defaults to StoryLark/storylark. */
+  ENGINE_RELEASE_REPO?: string;
+  /** A plain static host for artifacts, instead of the GitHub Releases API. */
+  ENGINE_RELEASE_BASE?: string;
+  /**
+   * The platform-native deployer, bound by the platform entry (AB#7418).
+   * Cloudflare builds it from CF_API_TOKEN in-process; platforms/azure/server.mjs
+   * binds its own Node implementation. Absent = no one-click updates, which is
+   * the default and is a perfectly good state to be in.
+   */
+  SELF_DEPLOY?: SelfDeployTarget;
+  /** Why SELF_DEPLOY is absent, in the platform entry's own words. Shown in the portal. */
+  SELF_DEPLOY_REASON?: string;
 }
 
 export interface User {

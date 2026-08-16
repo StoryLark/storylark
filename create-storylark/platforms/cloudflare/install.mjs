@@ -11,6 +11,11 @@
 //                                                     packages, then migrates +
 //                                                     rebuilds + redeploys an
 //                                                     EXISTING deployment
+//   node platforms/cloudflare/install.mjs --enable-one-click
+//                                                     opt in to the /admin
+//                                                     "Install update" button
+//   node platforms/cloudflare/install.mjs --disable-one-click
+//                                                     opt back out
 //
 // --deploy creates real Cloudflare resources. It refuses to run without
 // --yes on top of a passing verify, matching the Azure installer.
@@ -318,6 +323,123 @@ async function update() {
   console.log('='.repeat(72) + '\n');
 }
 
+/**
+ * --enable-one-click (AB#7418 — plan §4 layer 3): opt this deployment in to the
+ * /admin "Install update" button.
+ *
+ * What it does is store ONE thing: a Cloudflare API token, as a Worker secret,
+ * that the operator issued themselves. That is the honest shape of layer 3 on
+ * Cloudflare — a Worker has no ambient identity, so the only way it can call
+ * the Cloudflare API is with a token, and the only acceptable token is one the
+ * operator minted, scoped, and can revoke without asking anyone.
+ *
+ * Deliberately NOT generated here. `wrangler` could mint an account-wide token
+ * on the operator's behalf, and doing so would be the single worst decision in
+ * this file: the operator would end up with a broad standing credential inside
+ * their reading app that they never consciously created and would not think to
+ * revoke. So this prints exactly which scopes to grant and reads the token from
+ * stdin, and the token never appears in argv, in shell history or in
+ * install.env.
+ */
+async function enableOneClick() {
+  if (!env.BRAND_ID) {
+    console.error('✗ BRAND_ID is missing from install.env — it names the Worker this would apply to.');
+    process.exit(1);
+  }
+  if (!args.has('--yes')) {
+    console.error(
+      '\n--enable-one-click gives this deployment standing permission to redeploy itself.\n' +
+        'Re-run with --enable-one-click --yes to confirm.'
+    );
+    process.exit(1);
+  }
+
+  console.log('\n' + '='.repeat(72));
+  console.log('ONE-CLICK UPDATES — what you are about to allow');
+  console.log('='.repeat(72));
+  console.log('\nAn admin signed into /admin will be able to press "Install update".');
+  console.log('That downloads the prebuilt engine for the version the portal shows,');
+  console.log('checks it against its published checksum, migrates the database, and');
+  console.log('redeploys THIS Worker — using a Cloudflare API token you create now.');
+  console.log('\nIt cannot touch your brand, your content, or any binding: the update');
+  console.log('uses Cloudflare\'s "put script content" endpoint, which leaves the');
+  console.log("Worker's configuration alone.");
+  console.log('\nYou do not have to do this. Without it, updates run from your own');
+  console.log('machine with:  node platforms/cloudflare/install.mjs --update --yes');
+  console.log('\n--- Create the token ---------------------------------------------------');
+  console.log('\n  1. https://dash.cloudflare.com/profile/api-tokens -> Create Token');
+  console.log('  2. Custom token. Permissions:');
+  console.log('       Account | Workers Scripts | Edit');
+  console.log('  3. Account Resources: your account only.');
+  console.log('  4. Create, and copy the token.');
+  console.log('\nRevoke it on that same page whenever you like — the button disappears');
+  console.log('on the next page load and nothing else changes.');
+  console.log('\n' + '='.repeat(72) + '\n');
+
+  const token = (await prompt('Paste the API token (input is not echoed to your shell history): ')).trim();
+  if (!token) {
+    console.error('\nNothing pasted — nothing changed.');
+    process.exit(1);
+  }
+  const accountId = (env.CF_ACCOUNT_ID || (await prompt('Cloudflare account id: '))).trim();
+  if (!accountId) {
+    console.error('\nNo account id — nothing changed. Find it on any Cloudflare dashboard URL, or with `wrangler whoami`.');
+    process.exit(1);
+  }
+
+  // Piped, never on the command line: an argv value would land in this
+  // machine's shell history and in any process listing. Same rule --deploy
+  // already follows for ADMIN_KEY.
+  run('wrangler', ['secret', 'put', 'CF_API_TOKEN', '--env', env.BRAND_ID], {
+    input: token,
+    stdio: ['pipe', 'inherit', 'inherit'],
+    cwd: ROOT,
+  });
+  run('wrangler', ['secret', 'put', 'CF_ACCOUNT_ID', '--env', env.BRAND_ID], {
+    // A secret rather than a var: it is not sensitive on its own, but keeping
+    // it beside the token means one `--disable-one-click` removes the pair and
+    // there is no half-configured state where the portal thinks it is enabled.
+    input: accountId,
+    stdio: ['pipe', 'inherit', 'inherit'],
+    cwd: ROOT,
+  });
+
+  console.log('\n✓ One-click updates are on.');
+  console.log('  Open /admin — the Platform update card now offers a button when there is');
+  console.log('  something to install, and still shows the command either way.');
+  console.log('  Turn it off with: node platforms/cloudflare/install.mjs --disable-one-click --yes\n');
+}
+
+/** The exact inverse. Deleting the token is also enough on its own — this is just tidier. */
+function disableOneClick() {
+  if (!args.has('--yes')) {
+    console.error('\nRe-run with --disable-one-click --yes to confirm.');
+    process.exit(1);
+  }
+  for (const name of ['CF_API_TOKEN', 'CF_ACCOUNT_ID']) {
+    try {
+      run('wrangler', ['secret', 'delete', name, '--env', env.BRAND_ID], { stdio: 'inherit', cwd: ROOT, input: 'y\n' });
+    } catch {
+      console.log(`  (${name} was not set — nothing to remove.)`);
+    }
+  }
+  console.log('\n✓ One-click updates are off. Revoke the token itself at');
+  console.log('  https://dash.cloudflare.com/profile/api-tokens if you have not already.\n');
+}
+
+/** One line from stdin. No echo suppression: a terminal that supports it is not guaranteed, and the value is pasted, not typed. */
+function prompt(question) {
+  return new Promise((resolve) => {
+    process.stdout.write(question);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+    process.stdin.once('data', (data) => {
+      process.stdin.pause();
+      resolve(String(data).replace(/[\r\n]+$/, ''));
+    });
+  });
+}
+
 async function deploy() {
   if (!verify()) {
     console.error('\nRefusing to deploy: verification failed.');
@@ -375,8 +497,12 @@ async function deploy() {
 
 if (args.has('--deploy')) await deploy();
 else if (args.has('--update')) await update();
+else if (args.has('--enable-one-click')) await enableOneClick();
+else if (args.has('--disable-one-click')) disableOneClick();
 else if (args.has('--verify') || args.size === 0) verify();
 else {
-  console.error('Usage: node install.mjs --verify | --deploy --yes | --update --yes');
+  console.error(
+    'Usage: node install.mjs --verify | --deploy --yes | --update --yes | --enable-one-click --yes | --disable-one-click --yes'
+  );
   process.exit(1);
 }

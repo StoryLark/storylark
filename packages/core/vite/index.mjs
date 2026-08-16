@@ -12,13 +12,17 @@
 // Brand selection: the Vite mode IS the brand id (`vite build --mode <id>`,
 // matching brands/<id>/ under the site root). With no brand mode, `storylark`.
 //
+// One mode is reserved: `--mode engine` builds the BRAND-FREE engine — see
+// ENGINE_MODE below (AB#7418 — plan §0d Phase 5).
+//
 // Plain .mjs on purpose: Vite loads config-time code through Node, so this
 // module must run without a TS compile step. Types live in ./index.d.ts.
 
 import preact from '@preact/preset-vite';
 import { VitePWA } from 'vite-plugin-pwa';
-import { readFileSync, cpSync, existsSync } from 'node:fs';
-import { resolve, dirname, relative } from 'node:path';
+import { readFileSync, readdirSync, writeFileSync, cpSync, existsSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { resolve, dirname, relative, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
@@ -34,7 +38,64 @@ import { CURATED_FONTS, fontBlockCss, fontRegistry } from './fonts.mjs';
 
 const CORE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const requireFromCore = createRequire(import.meta.url);
+
+/**
+ * The reserved mode that builds the ENGINE rather than a site (AB#7418 —
+ * plan §0d Phase 5).
+ *
+ * ── Why it has to exist ─────────────────────────────────────────────────────
+ * Phase 5 wants ONE prebuilt bundle that is correct for every deployment, so an
+ * update can be "download it, keep your brand, restart" instead of "rebuild on
+ * your own machine". Phases 1-3 made brand, presentation and deployment config
+ * runtime DATA — but they deliberately kept a build-time FALLBACK compiled in
+ * (`virtual:storylark-config` / `-presentation` / `-deployment`) for contexts
+ * with no injector: `vite dev`, `vite preview`, a bare static host, or a
+ * platform mid-update still running an older engine. That fallback is real
+ * brand data inside the JS chunk, and it is why two brands' builds are NOT
+ * byte-identical. Measured, not assumed: `storylark` vs `nebula` on 0.14.0
+ * agree on 212 of 232 files and differ on exactly the six that carry brand —
+ * index.html, admin.html, sw.js and the three entry chunks — plus the
+ * brand-owned files themselves (brand.json, presentation.json, theme.css,
+ * manifest.webmanifest, icons/*).
+ *
+ * `--mode engine` resolves all three contracts to EMPTY. The fallback is then
+ * "core's own defaults", which is the right answer for a bundle that has no
+ * brand yet, and the output carries no customer data at all — the same bytes
+ * for every deployment on a given engine version.
+ *
+ * ── What it does NOT emit, and why that is the point ────────────────────────
+ * No brand.json, no presentation.json, no theme.css, no manifest.webmanifest,
+ * no icons/. Those are the deployment's OWN files; an update preserves them
+ * rather than shipping someone else's. A dist/ from this mode is therefore not
+ * a runnable site on its own — it is half of one, and the deployment supplies
+ * the other half.
+ *
+ * ── Safe only because injection is unconditional ────────────────────────────
+ * Both platform entries inject the deployment config into every document with
+ * no "if configured" test, and inject brand/presentation whenever the files are
+ * present — which they are, because the update preserves them. So the neutral
+ * fallback is never what a reader sees. `vite preview` of an engine build IS
+ * unbranded, and that is honest rather than broken.
+ */
+export const ENGINE_MODE = 'engine';
+
 const BUILTIN_MODES = new Set(['development', 'production', 'test']);
+
+/**
+ * Files a build emits that belong to the DEPLOYMENT, not to the engine.
+ *
+ * The one list, exported so the release packager and the in-portal updater
+ * agree about what an update must leave alone. `icons/` is a prefix: the icon
+ * set is copied wholesale from brands/<id>/assets/icons/, so its member names
+ * are a brand's business and cannot be enumerated here.
+ */
+export const BRAND_OWNED_OUTPUTS = ['brand.json', 'presentation.json', 'theme.css', 'manifest.webmanifest'];
+export const BRAND_OWNED_PREFIXES = ['icons/'];
+
+/** True for a path (relative to dist/, forward slashes) the deployment owns. */
+export function isBrandOwnedOutput(path) {
+  return BRAND_OWNED_OUTPUTS.includes(path) || BRAND_OWNED_PREFIXES.some((p) => path.startsWith(p));
+}
 
 /**
  * The standalone admin page (AB#7404). It is a second Vite entry owned
@@ -61,9 +122,12 @@ const ADMIN_ENTRY = resolve(CORE_DIR, 'src', 'admin-entry.tsx');
 export function defineStorylarkConfig(options = {}) {
   return ({ mode }) => {
     const siteRoot = process.cwd();
-    const brandId = options.brandId ?? (mode && !BUILTIN_MODES.has(mode) ? mode : 'storylark');
+    const engineBuild = options.brandId === ENGINE_MODE || mode === ENGINE_MODE;
+    const brandId = engineBuild ? ENGINE_MODE : options.brandId ?? (mode && !BUILTIN_MODES.has(mode) ? mode : 'storylark');
     const brandDir = resolve(siteRoot, options.brandsRoot ?? 'brands', brandId);
-    const { brand, identity, presentation, deployment } = loadStorylarkConfig(siteRoot, brandId, brandDir, options);
+    const { brand, identity, presentation, deployment } = engineBuild
+      ? neutralConfig()
+      : loadStorylarkConfig(siteRoot, brandId, brandDir, options);
     const themeFile = resolve(brandDir, 'theme.css');
 
     /** @type {import('vite').UserConfig} */
@@ -72,13 +136,16 @@ export function defineStorylarkConfig(options = {}) {
         preact(),
         configModulePlugin(brand),
         presentationModulePlugin(presentation),
-        presentationAssetPlugin(presentation),
+        // The three brand-owned outputs are skipped in an engine build: an
+        // update preserves the deployment's own copies rather than shipping a
+        // neutral one on top of them.
+        ...(engineBuild ? [] : [presentationAssetPlugin(presentation), themePlugin(themeFile, identity), brandAssetsPlugin(brandDir, identity)]),
+        ...(engineBuild ? [engineDocumentPlugin()] : []),
         deploymentModulePlugin(deployment),
         buildInfoPlugin(resolveBuildInfo(siteRoot, brandId)),
         fontsModulePlugin(),
-        themePlugin(themeFile, identity),
-        brandAssetsPlugin(brandDir, identity),
         adminPagePlugin(brand, siteRoot),
+        outputManifestPlugin(),
         VitePWA({
           strategies: 'injectManifest',
           // The service worker ships inside storylark-core and compiles in
@@ -107,13 +174,20 @@ export function defineStorylarkConfig(options = {}) {
             //     network-first in sw.ts; brand.json and presentation.json are
             //     never fetched by the client at all (they arrive injected, and
             //     the worker re-stamps the cached shell with both).
+            //   icons/** — swappable since Phase 4 (an imported theme's icons
+            //     come out of storage) and absent entirely from a Phase 5 engine
+            //     build, which ships no brand files at all. Precaching them
+            //     would pin an installed PWA to the pictures it was installed
+            //     with AND would make the precache manifest differ between an
+            //     engine build and a brand build. sw.ts caches them
+            //     stale-while-revalidate instead: same offline floor, no pin.
             globPatterns: ['**/*.{js,css,html,svg,png}'],
             // The admin page is deliberately NOT part of the installable app
             // (AB#7404): readers who install the PWA must not carry operator
             // code, and the operator must never be looking at a stale cached
             // admin UI while pushing a platform update. admin.html and the
             // admin entry's own js/css are the only outputs matching these.
-            globIgnores: ['**/node_modules/**/*', 'admin.html', 'assets/admin-*', 'theme.css'],
+            globIgnores: ['**/node_modules/**/*', 'admin.html', 'assets/admin-*', 'theme.css', 'icons/**'],
             maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
             buildPlugins: {
               vite: [configModulePlugin(brand), presentationModulePlugin(presentation), deploymentModulePlugin(deployment)],
@@ -230,6 +304,31 @@ function loadStorylarkConfig(siteRoot, brandId, brandDir, options = {}) {
     presentation: resolvePresentation(presentation),
     deployment: deploymentFromEnv(deployment),
   };
+}
+
+/**
+ * The three contracts, all empty — what `--mode engine` builds against
+ * (AB#7418 — plan §0d Phase 5).
+ *
+ * Deliberately not "the defaults": `{}` for each. A default written into the
+ * bundle is a value a later core release could never improve for that
+ * deployment, which is the exact reasoning resolvePresentation already follows
+ * ("resolving here would freeze today's defaults into a customer's bundle").
+ * An engine bundle is the extreme case of that — it is meant to be dropped onto
+ * deployments that have not been rebuilt for years — so it states nothing and
+ * lets the frontend resolver and the serving platform between them decide
+ * everything.
+ *
+ * Deployment config is the one place that is NOT quite empty: DEPLOYMENT_DEFAULTS
+ * is core's own contract default, not a brand's data, and dropping it would put
+ * `undefined` where the frontend expects a string in the one context nothing
+ * injects into. Crucially, the STORYLARK_* env overrides are NOT applied — an
+ * engine artifact must never carry the origins of the machine that built it.
+ */
+function neutralConfig() {
+  const deployment = { ...DEPLOYMENT_DEFAULTS };
+  delete deployment.contractVersion;
+  return { brand: {}, identity: { contractVersion: 1 }, presentation: {}, deployment };
 }
 
 /**
@@ -383,7 +482,13 @@ function resolveBuildInfo(siteRoot, brandId) {
     coreVersion: corePkg.version,
     versions,
     commit: commit ? commit.slice(0, 7) : 'local',
-    builtAt: new Date().toISOString(),
+    // STORYLARK_BUILD_TIME makes a build REPRODUCIBLE (AB#7418). Without it the
+    // timestamp is the one thing that changes between two otherwise identical
+    // builds — which was already noted in Phase 0 ("the three that differ do so
+    // only because the bundle carries a build timestamp") and which would make
+    // "is this prebuilt engine artifact free of brand data?" unanswerable by
+    // comparison. CI sets it once per release; nothing else needs to.
+    builtAt: process.env.STORYLARK_BUILD_TIME || new Date().toISOString(),
     brandId,
   };
 }
@@ -612,7 +717,7 @@ function adminHtml(brand, scriptSrc, cssHrefs) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="robots" content="noindex, nofollow" />
-    <title data-storylark-title="admin">Admin — ${brand.appName}</title>
+    <title data-storylark-title="admin">Admin — ${brand.appName ?? NEUTRAL_APP_NAME}</title>
     <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
     <link rel="stylesheet" href="/theme.css" />
 ${styles}  </head>
@@ -711,32 +816,7 @@ function brandAssetsPlugin(brandDir, identity) {
       outDir = config.build.outDir;
       root = config.root;
     },
-    transformIndexHtml: {
-      order: 'pre',
-      handler(html, ctx) {
-        // The standalone admin page titles itself ("Admin — <appName>") and is
-        // served by adminPagePlugin, not from a site file — leave it alone.
-        if (ctx?.path?.startsWith('/admin')) return html;
-        // Brand-driven document title, marked so the serving platform can
-        // rewrite it from the live brand before any JavaScript has run.
-        const titled = html.replace(
-          /<title>[\s\S]*?<\/title>/,
-          `<title data-storylark-title="app">${identity.appName}</title>`
-        );
-        // The theme link goes in by hand rather than through `tags`, because
-        // `injectTo: 'head-prepend'` would put a stylesheet ahead of
-        // `<meta charset>`. It has to come BEFORE the app's own stylesheets —
-        // where it sat when it was an import at the top of mount.tsx — and
-        // Vite appends those at the end of <head>, so anywhere near the top
-        // works. Immediately after the charset declaration is both.
-        const link = '\n    <link rel="stylesheet" href="/theme.css" />';
-        const charset = /<meta charset=[^>]*>/i.exec(titled);
-        if (charset) return titled.slice(0, charset.index + charset[0].length) + link + titled.slice(charset.index + charset[0].length);
-        const head = /<head[^>]*>/i.exec(titled);
-        if (head) return titled.slice(0, head.index + head[0].length) + link + titled.slice(head.index + head[0].length);
-        return titled;
-      },
-    },
+    transformIndexHtml: { order: 'pre', handler: (html, ctx) => stampDocument(html, ctx, identity.appName) },
     generateBundle() {
       this.emitFile({ type: 'asset', fileName: 'brand.json', source: `${JSON.stringify(identity, null, 2)}\n` });
       this.emitFile({
@@ -772,3 +852,118 @@ function brandAssetsPlugin(brandDir, identity) {
     },
   };
 }
+
+/**
+ * The engine-owned parts of index.html: the title MARKER and the /theme.css
+ * link. Shared by the brand build and the engine build (AB#7418) because they
+ * are structure, not identity — the serving platform rewrites the title from
+ * the live brand before any JavaScript runs, and it can only find it if the
+ * marker is there. An engine build therefore emits the same document shape with
+ * a neutral title inside the marker.
+ *
+ * The theme link goes in by hand rather than through `tags`, because
+ * `injectTo: 'head-prepend'` would put a stylesheet ahead of `<meta charset>`.
+ * It has to come BEFORE the app's own stylesheets — where it sat when it was an
+ * import at the top of mount.tsx — and Vite appends those at the end of <head>,
+ * so anywhere near the top works. Immediately after the charset declaration is
+ * both.
+ */
+function stampDocument(html, ctx, appName) {
+  // The standalone admin page titles itself ("Admin — <appName>") and is served
+  // by adminPagePlugin, not from a site file — leave it alone.
+  if (ctx?.path?.startsWith('/admin')) return html;
+  const titled = html.replace(/<title>[\s\S]*?<\/title>/, `<title data-storylark-title="app">${appName ?? NEUTRAL_APP_NAME}</title>`);
+  const link = '\n    <link rel="stylesheet" href="/theme.css" />';
+  const charset = /<meta charset=[^>]*>/i.exec(titled);
+  if (charset) return titled.slice(0, charset.index + charset[0].length) + link + titled.slice(charset.index + charset[0].length);
+  const head = /<head[^>]*>/i.exec(titled);
+  if (head) return titled.slice(0, head.index + head[0].length) + link + titled.slice(head.index + head[0].length);
+  return titled;
+}
+
+/**
+ * What an engine build calls itself where a brand build would say a name
+ * (AB#7418). It reaches a reader only on a site that ships no brand.json at
+ * all, which on a real deployment cannot happen — an update preserves that
+ * file, and a fresh install builds a brand. It is the product's own name rather
+ * than a placeholder because "StoryLark" is also core's own default for the
+ * same field (packages/core/src/brand.ts), so the two agree.
+ */
+const NEUTRAL_APP_NAME = 'StoryLark';
+
+/**
+ * The engine build's substitute for brandAssetsPlugin + themePlugin (AB#7418).
+ *
+ * Emits nothing. Its whole job is the document stamp above, so index.html comes
+ * out of an engine build byte-identical in STRUCTURE to a brand build's — same
+ * title marker, same /theme.css link — while carrying no brand.
+ */
+function engineDocumentPlugin() {
+  return {
+    name: 'storylark-engine-document',
+    transformIndexHtml: { order: 'pre', handler: (html, ctx) => stampDocument(html, ctx, NEUTRAL_APP_NAME) },
+  };
+}
+
+/**
+ * Emits `dist/outputs.json` — every file this build produced, with its sha256
+ * (AB#7418 — plan §0d Phase 5).
+ *
+ * Two callers need it and neither can get the list any other way:
+ *
+ *  1. The release packager (.github/workflows/release.yml) uses it to prove the
+ *     artifact it uploads is the artifact this build produced.
+ *  2. The in-portal updater on Cloudflare NEEDS to enumerate the deployment's
+ *     current assets and cannot. `env.ASSETS` can fetch a known path but has no
+ *     list API, and Cloudflare's asset upload takes a manifest of the COMPLETE
+ *     asset set — so without this file the updater could not carry the
+ *     deployment's own icons across an update, because icon names come from
+ *     brands/<id>/assets/icons/ and are a brand's business, not a fixed list.
+ *
+ * Written in closeBundle rather than generateBundle so it sees the icons
+ * brandAssetsPlugin copies in ITS closeBundle. It therefore cannot list itself,
+ * which is stated in the file so nobody reads the omission as a bug.
+ */
+function outputManifestPlugin() {
+  let outDir = 'dist';
+  let root = process.cwd();
+  return {
+    name: 'storylark-output-manifest',
+    // Last, so every other plugin's closeBundle has already written its files.
+    enforce: 'post',
+    configResolved(config) {
+      outDir = config.build.outDir;
+      root = config.root;
+    },
+    closeBundle() {
+      const dist = resolve(root, outDir);
+      if (!existsSync(dist)) return;
+      const files = {};
+      const walk = (dir) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(full);
+            continue;
+          }
+          const rel = relative(dist, full).split(sep).join('/');
+          if (rel === OUTPUT_MANIFEST) continue;
+          const body = readFileSync(full);
+          files[rel] = { sha256: createHash('sha256').update(body).digest('hex'), size: statSync(full).size };
+        }
+      };
+      walk(dist);
+      const doc = {
+        formatVersion: 1,
+        note: 'Every file this build wrote, except this one. `brandOwned` marks the files that belong to the deployment rather than to the engine; an engine update replaces the others and leaves these alone.',
+        files: Object.fromEntries(
+          Object.entries(files).map(([path, meta]) => [path, isBrandOwnedOutput(path) ? { ...meta, brandOwned: true } : meta])
+        ),
+      };
+      writeFileSync(resolve(dist, OUTPUT_MANIFEST), `${JSON.stringify(doc, null, 2)}\n`);
+    },
+  };
+}
+
+/** Where outputManifestPlugin writes, relative to dist/. */
+export const OUTPUT_MANIFEST = 'outputs.json';

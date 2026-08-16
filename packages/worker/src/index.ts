@@ -14,6 +14,7 @@ import { adminThemes } from './routes/admin-themes';
 import { r2ContentStore } from './lib/content-store';
 import { readActiveTheme, readActiveCss, readActiveIcon, type ActiveTheme } from './lib/theme-store';
 import { checkForUpdateAndNotify } from './lib/update-check';
+import { cloudflareSelfDeploy } from './lib/self-deploy';
 import { deploymentConfigFromEnv, injectDeploymentIntoHtml, injectDeploymentIntoScript } from './lib/deployment';
 import {
   BRAND_ASSET,
@@ -400,6 +401,12 @@ export default {
     // Cloudflare. A deployment whose wrangler config declares no bucket simply
     // leaves this undefined and those routes report that plainly.
     if (raw.CONTENT && !raw.CONTENT_STORE) raw.CONTENT_STORE = r2ContentStore(raw.CONTENT);
+    // One-click updates (AB#7418), Cloudflare side. Bound only when the
+    // operator has put a Cloudflare API token on this Worker as a secret —
+    // there is no default, no fallback and nothing to disable, because a
+    // deployment with no token simply has no deployer. Same in-place mutation
+    // as the two above, for the same reason.
+    if (!raw.SELF_DEPLOY && raw.CF_API_TOKEN && raw.CF_ACCOUNT_ID) raw.SELF_DEPLOY = cloudflareSelfDeploy(raw as Env);
     return app.fetch(request, raw as Env, ctx);
   },
 

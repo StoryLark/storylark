@@ -18,14 +18,16 @@ So the deployment cannot update itself, full stop — something outside it
 has to do the work.
 
 The question is *whose* credential does that work, and where it lives. The
-answer this design settles on: **the operator's own platform login, on the
-operator's own machine.** The installer that created the deployment already
-holds a `wrangler login` / `az login` session; there is no reason to
-introduce a second credential, and every reason not to store one inside the
-app. A deployment that can deploy itself is a deployment holding a standing
-deploy permission — for a reading app, that's an unforced liability.
+answer this design settles on by default: **the operator's own platform
+login, on the operator's own machine.** The installer that created the
+deployment already holds a `wrangler login` / `az login` session; there is
+no reason to introduce a second credential, and every reason not to store
+one inside the app. A deployment that can deploy itself is a deployment
+holding a standing deploy permission — for a reading app, that's an
+unforced liability unless the owner decides otherwise, deliberately, for
+their own deployment. Layer 3 below is that decision, and nothing else.
 
-## The two layers
+## The layers
 
 **Layer 1 — detect (in the deployment, zero credentials).** A scheduled
 check (Cloudflare Cron Trigger / Azure `setInterval`,
@@ -60,6 +62,123 @@ two paths cannot drift. What it does *not* share is provisioning: `--update`
 never creates infrastructure, never edits `wrangler.jsonc`, never writes a
 secret. That's what makes it safe to re-run at any time.
 
+**Layer 3 — one-click, in the portal (opt-in, off by default).** See
+[The prebuilt engine](#the-prebuilt-engine-layer-3) below. It does not
+replace layer 2 and does not change anything above: a deployment that has
+not opted in behaves exactly as this section describes.
+
+## The prebuilt engine (layer 3)
+
+### What changed to make it honest
+
+The constraint at the top of this document has not moved: a deployment
+still cannot *build* itself. What changed is that it no longer has to.
+
+Until Phases 1–3 of the layer plan, the brand, the presentation and the
+deployment config were compiled into the JS bundle. There was therefore no
+such thing as "the engine build" — only *a customer's* build. Now all three
+are runtime data injected into every document, and a fourth mode,
+`vite build --mode engine`, resolves them to **empty**. What comes out is
+the same bytes for every deployment on a given version.
+
+Measured, not assumed. Two brand builds of 0.14.0 (`storylark` and
+`nebula`) agree on 212 of 232 output files and differ on exactly the six
+that carry brand — `index.html`, `admin.html`, `sw.js` and the three entry
+chunks — plus the brand-owned files themselves. An `--mode engine` build is
+219 files, byte-identical across runs (with `STORYLARK_BUILD_TIME` set), and
+contains **zero** occurrences of any string that appears in a brand file but
+not in core's own source. `package-engine.mjs` re-runs that scan on every
+release and fails the build on a hit, so it is a gate rather than a claim.
+
+### The artifact
+
+`storylark-engine-<version>.zip`, attached by `release.yml` to the GitHub
+Release changesets already cuts for `storylark-core@<version>`, alongside a
+`.sha256`:
+
+```
+engine.json                  versions, and a sha256 per file
+dist/**                      the brand-free site build
+worker/index.js              the bundled Cloudflare Worker
+migrations/*.sql             the D1 set, for this version
+migrations-postgres/*.sql    the Postgres set, likewise
+```
+
+The migrations travel *with the code they belong to* because the order that
+matters is migrate-then-swap and the set that has to run is the new one —
+the failure `install.mjs` documents at length is a bumped version whose
+migrations were still the old ones.
+
+What is **not** in it: `brand.json`, `presentation.json`, `theme.css`,
+`manifest.webmanifest`, `icons/`. `readEnginePackage()` rejects a package
+containing any of them. Shipping one customer's identity to every other
+customer is the worst thing this feature could do, so it is made
+structurally impossible rather than merely avoided.
+
+### The flow
+
+1. **Is there a target?** No credential, no button, `501` from the route.
+2. **Which version?** The npm registry — the same source the portal showed,
+   so the number clicked is the number installed.
+3. **Download and verify.** Checksum first, then the package's own per-file
+   digests. Nothing has touched the deployment yet, by construction: the
+   first call that can is inside `install()`.
+4. **Migrate, then swap**, inside the platform target.
+
+### Per platform
+
+**Cloudflare** — an API token the operator issued, scoped to
+`Workers Scripts | Edit`, stored as a Worker secret. The update follows
+Cloudflare's documented direct-upload flow: register an asset manifest, get
+back only the hashes Cloudflare does not already hold (which on a normal
+release excludes the six font families), upload those, then
+`PUT /accounts/:id/workers/scripts/:name/content` — *"put script content
+without touching config or metadata"*. That endpoint is chosen precisely
+because the full script-upload endpoint would require rebuilding every
+binding, var, secret, route and cron trigger from the outside and would
+silently drop anything it failed to reconstruct.
+
+The manifest is authoritative — Cloudflare deletes anything left out of it —
+so the deployment's own brand files are read back through `env.ASSETS` and
+re-uploaded. Knowing *which* files those are needed a new build output,
+`dist/outputs.json`, because `env.ASSETS` can fetch a known path but cannot
+list, and icon names come from `brands/<id>/assets/icons/` and are a brand's
+business. A site built before that file existed falls back to the standard
+icon names.
+
+**Azure App Service** — no stored credential. `IDENTITY_ENDPOINT` /
+`IDENTITY_HEADER` yield a short-lived Microsoft Entra token, and Kudu's
+`POST /api/publish?type=zip` accepts one. The process stages its own
+`wwwroot` with the engine replaced and the brand files kept, rewrites
+`package.json` to pin the artifact's `storylark-worker`, and posts the zip;
+`SCM_DO_BUILD_DURING_DEPLOYMENT` (already `true` in `infra.bicep`) makes App
+Service install the new engine and restart. §4 assumed a stored credential
+here; the platform makes one unnecessary, and this is the better design.
+
+### What is verified, and what is not
+
+Verified for real: the artifact build and its brand-free gate; the package
+format and every way it can be refused; the download and checksum over real
+HTTP; D1 migrations against a real SQL engine, writing wrangler's own
+`d1_migrations` table; the Azure stager against a real filesystem; and the
+whole route end to end inside a live `wrangler dev` with real D1 and real
+assets, which downloaded a real 3.4MB artifact, verified its real checksum,
+and produced a 230-file manifest carrying all 11 of that deployment's own
+brand files.
+
+**Not verified: Cloudflare's and Azure's own servers accepting the calls.**
+Both are exercised against local servers implementing the published
+contracts, and the tests assert the exact requests. What no test here can
+prove is that the vendors agree with their own documentation — proving that
+needs a credential capable of redeploying a live site, which is the risk
+this design exists to bound rather than to take casually. The specific open
+question on Cloudflare is whether `/content` honours `assets.jwt`: the
+documented metadata shape lists `assets` for the script, version and
+Workers-for-Platforms upload endpoints, and `/content` is a fourth. If it
+does not, the first real run fails with the API's own 4xx, the portal shows
+it, and nothing is deployed — the failure mode is a red message, not a
+broken site.
+
 ## What was removed, and why
 
 Until AB#7403 landed this shape, `/admin` had an **Install update** button
@@ -81,10 +200,12 @@ who wants it (the update command is just a Node script) — but with the
 operator's CI holding the operator's credential, which is a different thing
 from the app holding one.
 
-A genuine one-click in-portal update remains a future phase, blocked on the
-prebuilt-artifact work (brand/presentation as runtime data, so an update is
-"download the bundle, keep your brand file, restart" rather than a rebuild).
-Until that exists, the honest answer is a command.
+That prebuilt-artifact design is now built — see
+[The prebuilt engine](#the-prebuilt-engine-layer-3) above — and it is a
+different shape from what was removed in every way that mattered: no
+GitHub credential, no rebuild, no third party, opt-in, and off by default.
+The command remains the answer for anyone who does not opt in, which is
+everyone until they say otherwise.
 
 ## The hard rule, enforced by construction
 

@@ -11,6 +11,11 @@ dist/
 themes/*.storylark-theme.zip
 !themes/storylark.storylark-theme.zip
 dist-themes/
+# The prebuilt engine artifact (AB#7418). Built by CI on a release and attached
+# to the GitHub Release; never committed — it is 3.5MB of build output whose
+# whole purpose is to be downloaded from a release, not from a checkout.
+dist-engine/
+.engine-worker/
 
 .wrangler/
 .dev.vars

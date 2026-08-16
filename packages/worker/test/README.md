@@ -9,6 +9,7 @@
 | `content-origin.test.mjs` | Where content came from decides who owns its edit button, and `sync.mjs` has exactly two connectors. |
 | `postgres-numeric-parity.test.mjs` | A D1-shaped `COUNT(*)` and a Postgres-shaped one agree in type. |
 | `theme-package.test.mjs` | The theme package format, against the **real** brands in this repo: every one packages clean, build → read → build is a fixed point, and each way a package can be wrong is refused with a message that says what to fix. Also asserts the committed `themes/storylark.storylark-theme.zip` still matches `brands/storylark` byte for byte. |
+| `engine-update.test.mjs` | The prebuilt engine artifact and the one-click update. The format and every way it is refused (a brand file in it, a swapped byte, a file `engine.json` never vouched for); the download and checksum over a **real** HTTP server; D1 migrations against a **real** SQLite database writing wrangler's own `d1_migrations` table; and both platform deployers driven against local servers implementing Cloudflare's and Kudu's published contracts, asserting the exact requests. The two vendors' own servers are the one thing not proven — see the file's own header, and `docs/design/update-flow.md`. If `dist-engine/*.zip` exists it also checks the real artifact this repo produces. |
 
 ## The two scripts that are not tests
 

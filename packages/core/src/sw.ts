@@ -33,6 +33,28 @@ const THEME_PATH = '/theme.css';
 /** Font files. Hashed and immutable, so cache-first is safe and permanent. */
 const FONT_RE = /\.(woff2?|ttf|otf)$/i;
 
+/**
+ * The brand's icons (AB#7418 — plan §0d Phase 5).
+ *
+ * They used to reach the cache only through the precache glob, which was fine
+ * while they could only change with a rebuild. Two things broke that:
+ *
+ *  1. Phase 4 made icons swappable at runtime — an imported theme's icons come
+ *     out of storage, so a precache entry keyed to the BUILD pins an installed
+ *     PWA to the icons it was installed with. Same staleness THEME_PATH above
+ *     exists to avoid.
+ *  2. Phase 5's prebuilt engine build ships no icons at all (they are the
+ *     deployment's files, and an update preserves them), so after an update the
+ *     precache manifest would simply not mention them and an installed app
+ *     would lose its icons offline.
+ *
+ * Stale-while-revalidate rather than the fonts' cache-first: an icon URL is
+ * stable across a swap, so cache-first would pin the old picture forever, and
+ * network-first would cost a blocking request for something that is allowed to
+ * be one launch out of date. This is the offline floor plus a refresh.
+ */
+const ICON_PREFIX = '/icons/';
+
 // App shell — injected by vite-plugin-pwa at build time.
 precacheAndRoute(self.__WB_MANIFEST);
 cleanupOutdatedCaches();
@@ -112,6 +134,10 @@ self.addEventListener('fetch', (event) => {
     // use one. A font only enters the cache once something actually renders in it.
     if (FONT_RE.test(url.pathname)) {
       event.respondWith(cacheFirst(event.request));
+      return;
+    }
+    if (url.pathname.startsWith(ICON_PREFIX)) {
+      event.respondWith(staleWhileRevalidate(event.request));
       return;
     }
   }
