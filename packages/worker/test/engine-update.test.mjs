@@ -24,6 +24,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
+import { createRequire } from 'node:module';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -727,6 +728,26 @@ function azureEnv(base) {
 function localFetch(base) {
   return (url, init) => fetch(String(url).replace(`https://${base.replace('http://', '')}`, base), init);
 }
+
+test('storylark-worker/migrate-postgres.mjs resolves through the package exports map', () => {
+  // self-deploy.mjs's migrate() resolves this exact specifier with
+  // createRequire(...).resolve() before running Postgres migrations for a
+  // real Azure one-click update. migrate-postgres.mjs was listed in `files`
+  // (so it really shipped in the published tarball) but missing from
+  // `exports` — Node's strict exports-map resolution rejects any subpath not
+  // explicitly listed there regardless of `files`, so the resolve() call
+  // threw ERR_PACKAGE_PATH_NOT_EXPORTED, self-deploy.mjs's catch turned that
+  // into "not found", and every real Azure one-click update failed at the
+  // migration step with a false "file is missing" — found live against
+  // Azure dev, 2026-08-16, after two earlier real bugs in this same flow
+  // were already fixed and the artifact was downloading and verifying
+  // correctly. Node's package self-reference feature resolves this straight
+  // from packages/worker/package.json's own exports map — no install step
+  // needed — so this test catches a regression here directly, the same
+  // place self-deploy.mjs's real failure was.
+  const script = createRequire(import.meta.url).resolve('storylark-worker/migrate-postgres.mjs');
+  assert.ok(existsSync(script), 'the resolved path should exist on disk');
+});
 
 test('an Azure update stages the whole site, swaps the engine, keeps the brand, and pins the new worker', async () => {
   const api = await azureApi();

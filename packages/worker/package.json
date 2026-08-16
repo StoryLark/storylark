@@ -13,6 +13,7 @@
     ".": "./src/index.ts",
     "./types": "./src/types.ts",
     "./migrations/*": "./migrations/*",
+    "./migrate-postgres.mjs": "./migrate-postgres.mjs",
     "./package.json": "./package.json",
     "./db/postgres": "./src/db/postgres.ts",
     "./db/d1": "./src/db/d1.ts",
