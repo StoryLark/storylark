@@ -4,12 +4,69 @@ Running your deployed StoryLark site from `/admin` — the operator's portal.
 
 ## Getting in
 
-Open `https://<your-app-origin>/admin` and enter your deployment's admin
-key (the `ADMIN_KEY` secret you set when deploying — see
-[`deploy-your-own.md`](deploy-your-own.md) / [`deploy-azure.md`](deploy-azure.md)).
-The key is stored in your browser's local storage on that device only; it's
-sent as a header to this site's own `/api/admin/*` endpoints and nowhere
-else. Sign out clears it.
+The admin portal uses a normal account — the same email and password any
+reader on your site would have, just flagged as an operator. There's no
+shared key to type in and no separate login system to remember.
+
+### First time: the setup link
+
+At the end of a successful deploy, the installer prints two things:
+
+1. **A one-time setup link** — `https://<your-app-origin>/admin?setup=…`.
+   Open it and choose the email and password you'll use to sign in from now
+   on. The link works once and expires an hour after it's printed.
+2. **Ten recovery codes** — `XXXX-XXXX-XXXX` each. This is the only time
+   they're ever shown. Put them in your password manager, not in the
+   terminal scrollback you're about to close.
+
+That's it. From then on, `https://<your-app-origin>/admin` is an ordinary
+email-and-password sign-in.
+
+If you missed the output, or the installer couldn't reach the site in time
+to print it, mint a fresh link and a fresh set of codes yourself:
+
+```
+curl -X POST https://<your-app-origin>/api/admin/setup/reset \
+  -H "x-admin-key: <your ADMIN_KEY>"
+```
+
+### Day to day
+
+Open `/admin` and sign in with that email and password. The session is a
+normal `httpOnly` cookie, same as the reader side — no key is stored in your
+browser, and **Sign out** ends the session server-side.
+
+If you sign in with an account that isn't an operator, the portal says so
+plainly rather than showing you an empty page.
+
+### Locked out? Three ways back in
+
+**1. Forgot-password email.** The fastest door, and nothing special: your
+admin account is a regular account, so the standard reset works on it. Use
+**Forgot password?** on the sign-in form (it hands off to the same reset
+flow readers use), get the 6-digit code by email, pick a new password.
+Needs `RESEND_API_KEY` and `MAIL_FROM` configured on the deployment and
+access to that mailbox.
+
+**2. A recovery code.** Choose **Use a recovery code instead** on the
+sign-in form, then enter your admin email, one of the codes from install
+time, and a new password. Each code works once. This door has no runtime
+dependencies at all — no mail provider, no CLI, no cloud console — so it's
+the one that still works when everything else is having a bad day. When
+you're running low, mint a fresh batch with the `curl` above; doing so
+invalidates any older codes.
+
+**3. The deployment's `ADMIN_KEY`.** Last resort, for when the password and
+the recovery codes are both gone. Anyone with access to this deployment's
+configuration (Azure portal, `wrangler secret`) can read `ADMIN_KEY` and run
+the `curl` above to mint a brand-new setup link and a new set of recovery
+codes. This grants no new power: someone who can change your deployment's
+configuration can already redeploy the whole application.
+
+`ADMIN_KEY` is therefore no longer a login. Its entire remaining job is
+minting setup links, plus authenticating the publish pipeline's push
+notification call (`POST /api/admin/publish`), which runs headless in CI and
+so can't hold a session cookie.
 
 ## What you'll see
 

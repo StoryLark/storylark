@@ -58,9 +58,22 @@ place, so it's unauthenticated by definition.
 
 ## Admin
 
+The portal's own routes are gated by an **admin session** — a normal account
+in `users` with `is_admin = 1`, signed in through the same cookie as any
+reader (`requireAdmin()` in `lib/session.ts`). `X-Admin-Key` survives only
+where no browser can be involved. See [`admin-guide.md`](admin-guide.md).
+
 | Method & path | Auth | Behavior |
 |---|---|---|
-| `POST /api/admin/publish` | `X-Admin-Key` header | `{version}` → updates `library_state`, fans out **payload-less** VAPID pushes in batches of 50 (`ctx.waitUntil`). 404/410 endpoints deleted; 5 consecutive failures deletes. Called by `packages/pipeline/publish.mjs` as its final step. |
+| `GET /api/admin/status` | admin session | Brand, engine version, book/chapter counts (from the public manifest), push subscriber count. |
+| `GET /api/admin/update-status` | admin session | Installed vs. latest published `storylark-worker`, plus whether self-update is configured. |
+| `POST /api/admin/update-install` | admin session | Dispatches the site's own `self-update.yml` workflow. |
+| `POST /api/admin/publish-story` | admin session | Commits `content/books/<id>.md` via the GitHub Contents API, then dispatches `publish.yml`. |
+| `POST /api/admin/publish` | `X-Admin-Key` **or** admin session | `{version}` → updates `library_state`, fans out **payload-less** VAPID pushes in batches of 50 (`ctx.waitUntil`). 404/410 endpoints deleted; 5 consecutive failures deletes. Called by `packages/pipeline/publish.mjs` as its final step — headless CI, hence the key door. |
+| `POST /api/admin/setup` | `X-Admin-Key` header | One-shot schema bootstrap. Key-gated because it runs before any user can exist. |
+| `POST /api/admin/setup/reset` | `X-Admin-Key` header | Mints one setup token + 10 recovery codes, invalidating any outstanding ones → `{setupUrl, expiresAt, recoveryCodes[]}`. The only time the plaintext codes exist. |
+| `POST /api/admin/setup/claim` | setup token | `{token, email, username?, password}` → creates/promotes the admin account, burns the token, sets the session cookie. |
+| `POST /api/admin/recover` | recovery code | `{email, code, password}` → resets that admin's password, burns the code, sets the session cookie. |
 
 ## Error shape
 

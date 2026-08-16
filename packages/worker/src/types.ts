@@ -38,6 +38,14 @@ export interface User {
   display_name: string | null;
   created_at: number;
   last_seen_at: number | null;
+  /**
+   * Operator flag (AB#7404), INTEGER 0/1 in both dialects — SQLite has no
+   * BOOLEAN and the Database seam does no boolean marshalling, so this stays
+   * a number all the way from the row to requireAdmin(). Legacy rows written
+   * before 0007 can also read back null/undefined through a driver, so
+   * always test it as truthy rather than `=== 1`.
+   */
+  is_admin: number;
 }
 
 export interface SessionRow {

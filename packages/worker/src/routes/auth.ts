@@ -442,7 +442,18 @@ auth.post('/logout', async (c) => {
 auth.get('/me', async (c) => {
   const user = await loadUser(c);
   if (!user) return c.json({ error: 'unauthorized' }, 401);
-  return c.json({ user: { id: user.id, email: user.email, username: user.username, displayName: user.display_name } });
+  // isAdmin (AB#7404) is what the /admin screen keys off to decide between
+  // the dashboard and a "this account isn't an operator" message — it's a
+  // display hint only; every admin route re-checks the flag server-side.
+  return c.json({
+    user: {
+      id: user.id,
+      email: user.email,
+      username: user.username,
+      displayName: user.display_name,
+      isAdmin: Boolean(user.is_admin),
+    },
+  });
 });
 
 /** Cryptographically-random 6-digit code, zero-padded (000000–999999). */

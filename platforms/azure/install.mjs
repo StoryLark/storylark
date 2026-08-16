@@ -10,6 +10,7 @@
 // deployment process already requires for approval.
 import { readFileSync, existsSync, mkdirSync, cpSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -59,6 +60,87 @@ const REPO_ROOT = join(__dirname, '..', '..');
 const IS_MONOREPO = existsSync(join(REPO_ROOT, 'app', 'package.json'));
 const SITE_ROOT = IS_MONOREPO ? join(REPO_ROOT, 'app') : REPO_ROOT;
 
+/**
+ * Admin bootstrap (AB#7404), same contract as platforms/cloudflare/install.mjs.
+ *
+ * ADMIN_KEY is no longer something a human types into /admin — the portal is
+ * gated by a normal account in the app's own users table now. It survives as
+ * a deployment-config credential whose one job is to mint the FIRST admin
+ * setup link, plus the printed recovery codes that are the offline way back
+ * in. So the installer always needs one, generates it if the operator didn't
+ * supply one (it goes in as the infra.bicep `adminKey` parameter, never on a
+ * command line beyond that), and calls the mint endpoint after deploy.
+ */
+function generateAdminKey() {
+  return randomBytes(24).toString('base64url');
+}
+
+/**
+ * Poll the freshly-deployed site until it answers. App Service needs a
+ * genuinely slow first boot after a zip deploy (npm install + cold start),
+ * so this is patient: up to ~3 minutes.
+ */
+async function waitForSite(origin, attempts = 20, delayMs = 10000) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(`${origin}/api/health`);
+      if (res.ok) return true;
+    } catch {
+      // not up yet — App Service is still installing/starting
+    }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return false;
+}
+
+/**
+ * Mint the setup link + recovery codes and print them. Never throws: a
+ * failure here means the site just isn't answering yet, which is a "run one
+ * command later" problem, not a reason to fail a deploy that otherwise
+ * succeeded — so it prints the exact curl to run instead.
+ */
+async function printAdminSetup(origin, adminKey) {
+  const endpoint = `${origin}/api/admin/setup/reset`;
+  const manual = () => {
+    console.log('\n' + '='.repeat(72));
+    console.log('ADMIN SETUP — could not reach the site to mint your setup link.');
+    console.log('Once the site is confirmed live, run this yourself:');
+    console.log(`\n  curl -X POST ${endpoint} -H "x-admin-key: <your ADMIN_KEY>"\n`);
+    console.log('ADMIN_KEY is an app setting on the Web App — read it with:');
+    console.log('  az webapp config appsettings list --resource-group <rg> --name <app> \\');
+    console.log('    --query "[?name==\'ADMIN_KEY\'].value" -o tsv');
+    console.log('It returns a one-time setup URL and 10 recovery codes.');
+    console.log('='.repeat(72) + '\n');
+  };
+
+  if (!(await waitForSite(origin))) return manual();
+
+  let data;
+  try {
+    const res = await fetch(endpoint, { method: 'POST', headers: { 'x-admin-key': adminKey } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    data = await res.json();
+  } catch (err) {
+    console.error(`\nCould not mint the admin setup link: ${err.message}`);
+    return manual();
+  }
+
+  console.log('\n' + '='.repeat(72));
+  console.log('ADMIN SETUP — do this now, this is the only time these are shown.');
+  console.log('='.repeat(72));
+  console.log('\n1. Open this link and create your admin login (email + password).');
+  console.log('   It works once, and expires in an hour:\n');
+  console.log(`   ${data.setupUrl}\n`);
+  console.log('2. Save these recovery codes somewhere safe — a password manager,');
+  console.log('   NOT this terminal\'s scrollback. Each one works once, and they are');
+  console.log('   how you get back in if you forget the password and email reset');
+  console.log('   is not available:\n');
+  for (const code of data.recoveryCodes ?? []) console.log(`   ${code}`);
+  console.log('\nAfter that, sign in at /admin with the email and password you just');
+  console.log('chose — same as any account on the site.');
+  console.log('='.repeat(72) + '\n');
+}
+
 function verify() {
   console.log('Verifying install.env and Azure CLI state...\n');
   let ok = true;
@@ -106,7 +188,7 @@ function verify() {
   return ok;
 }
 
-function deploy() {
+async function deploy() {
   if (!verify()) {
     console.error('\nRefusing to deploy: verification failed.');
     process.exit(1);
@@ -130,7 +212,11 @@ function deploy() {
   // (check via: az rest --method get --url "https://management.azure.com/subscriptions/<sub>/providers/Microsoft.DBforPostgreSQL/locations/<region>/capabilities?api-version=2025-08-01" --query "value[0].reason").
   if (env.DB_LOCATION) parameters.push(`dbLocation=${env.DB_LOCATION}`);
   if (env.APP_SERVICE_SKU) parameters.push(`appServiceSku=${env.APP_SERVICE_SKU}`);
-  if (env.ADMIN_KEY) parameters.push(`adminKey=${env.ADMIN_KEY}`);
+  // Always set, generated if the operator didn't supply one: the admin
+  // portal's first-login setup link can't be minted without it (AB#7404).
+  const adminKey = env.ADMIN_KEY || generateAdminKey();
+  if (!env.ADMIN_KEY) console.log('\nNo ADMIN_KEY in install.env — generating one for this deployment.');
+  parameters.push(`adminKey=${adminKey}`);
   run(
     'az',
     [
@@ -195,9 +281,12 @@ function deploy() {
   console.log(`\nDeployed. Live at: https://${webAppName}.azurewebsites.net`);
   const bucketHint = env.BRAND_ID !== brandFolder ? ` --bucket ${env.BRAND_ID}-content` : '';
   console.log(`Publish content with: AZURE_STORAGE_CONNECTION_STRING=<from the app's own settings> node ../../packages/pipeline/publish.mjs --brand ${brandFolder}${bucketHint} --source <path> --storage azure-blob`);
+
+  console.log('\nWaiting for the site to come up so we can mint your admin setup link...');
+  await printAdminSetup(outputs.appOrigin?.value ?? `https://${webAppName}.azurewebsites.net`, adminKey);
 }
 
-if (args.has('--deploy')) deploy();
+if (args.has('--deploy')) await deploy();
 else if (args.has('--verify') || args.size === 0) verify();
 else {
   console.error('Usage: node install.mjs --verify | --deploy --yes');

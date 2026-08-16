@@ -42,7 +42,7 @@ export async function loadUser(c: Context<AppContext>): Promise<User | null> {
   const id = await sha256Hex(raw);
   const now = Date.now();
   const row = await c.env.DB.prepare(
-    `SELECT s.id as sid, s.expires_at, u.id, u.email, u.username, u.display_name, u.created_at, u.last_seen_at
+    `SELECT s.id as sid, s.expires_at, u.id, u.email, u.username, u.display_name, u.created_at, u.last_seen_at, u.is_admin
      FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.id = ? AND s.expires_at > ?`
   )
@@ -67,6 +67,9 @@ export async function loadUser(c: Context<AppContext>): Promise<User | null> {
     display_name: row.display_name,
     created_at: row.created_at,
     last_seen_at: row.last_seen_at,
+    // Normalised to 0/1 here so every caller downstream sees a number,
+    // whatever the driver handed back for the INTEGER column.
+    is_admin: row.is_admin ? 1 : 0,
   };
 }
 
@@ -80,6 +83,33 @@ export function requireAuth() {
     }
     const user = await loadUser(c);
     if (!user) return c.json({ error: 'unauthorized' }, 401);
+    c.set('user', user);
+    await next();
+  };
+}
+
+/**
+ * Middleware: require a signed-in user whose account carries the operator
+ * flag (AB#7404). Same shape and same CSRF rule as requireAuth() — this is
+ * deliberately NOT a stronger kind of authentication, just a different
+ * predicate on the same session. The job is to keep non-operators from
+ * editing content or triggering platform updates; the content itself is
+ * public either way.
+ *
+ * 401 vs 403 is meaningful to the admin UI: 401 means "sign in", 403 means
+ * "you're signed in, but this account isn't an operator" — the portal shows
+ * different screens for each rather than a blank page.
+ */
+export function requireAdmin() {
+  return async (c: Context<AppContext>, next: Next) => {
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+      if (c.req.header('x-requested-with') !== 'storylark') {
+        return c.json({ error: 'missing_csrf_header' }, 403);
+      }
+    }
+    const user = await loadUser(c);
+    if (!user) return c.json({ error: 'unauthorized' }, 401);
+    if (!user.is_admin) return c.json({ error: 'forbidden' }, 403);
     c.set('user', user);
     await next();
   };

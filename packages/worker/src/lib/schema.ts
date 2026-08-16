@@ -1,7 +1,8 @@
 /**
  * Full current schema, mirrored from worker/migrations/*.sql (0001_init.sql +
  * 0002_passkey_credentials.sql + 0003_password_auth.sql + 0004_password_resets.sql +
- * 0005_rate_limits.sql + 0006_user_preferences.sql) so the worker can
+ * 0005_rate_limits.sql + 0006_user_preferences.sql + 0007_admin_accounts.sql)
+ * so the worker can
  * bootstrap its own database via POST /api/admin/setup when API-token D1
  * access is unavailable. Keep in sync with the migration files — this is the
  * cumulative result of applying all of them in order, not just the first one.
@@ -16,7 +17,8 @@ CREATE TABLE users (
   username TEXT COLLATE NOCASE,
   password_hash TEXT,
   password_salt TEXT,
-  password_iterations INTEGER
+  password_iterations INTEGER,
+  is_admin INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX idx_users_username ON users(username) WHERE username IS NOT NULL;
 
@@ -125,5 +127,19 @@ CREATE TABLE user_preferences (
   user_id TEXT PRIMARY KEY REFERENCES users(id),
   prefs TEXT NOT NULL,
   updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE admin_setup_tokens (
+  token_hash TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER
+);
+CREATE INDEX idx_admin_setup_tokens_expires ON admin_setup_tokens(expires_at);
+
+CREATE TABLE admin_recovery_codes (
+  code_hash TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  used_at INTEGER
 );
 `;

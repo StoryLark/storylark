@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
+import type { Context, Next } from 'hono';
 import type { AppContext } from '../types';
 import type { Database } from '../db/types';
 import { sendPush } from '../lib/vapid';
 import { INIT_SCHEMA } from '../lib/schema';
+import { requireAdmin } from '../lib/session';
 import workerPkg from '../../package.json';
 
 export const admin = new Hono<AppContext>();
@@ -12,13 +14,46 @@ function requireAdminKey(c: { req: { header(name: string): string | undefined };
 }
 
 /**
+ * Operator-facing routes (AB#7404) are gated by a real account with
+ * `is_admin = 1` — a session cookie, not the shared ADMIN_KEY header the
+ * portal used to prompt for. Attached the same way requireAuth() is in
+ * progress.ts/preferences.ts/bookmarks.ts. ADMIN_KEY survives only where a
+ * human at a browser genuinely can't be involved: POST /setup (runs before
+ * any user can exist) and POST /publish (see requireAdminOrKey below).
+ */
+admin.use('/update-status', requireAdmin());
+admin.use('/update-install', requireAdmin());
+admin.use('/status', requireAdmin());
+admin.use('/publish-story', requireAdmin());
+
+/**
+ * The one deliberate exception to the session rule. POST /publish is called
+ * by packages/pipeline/publish.mjs (and by the publish.yml workflow that
+ * wraps it) as the final step of a content publish — a headless CI process
+ * that has no browser and cannot hold a session cookie. Locking it to
+ * sessions would break the content pipeline outright.
+ *
+ * So: a valid ADMIN_KEY still gets in here, and an admin session also does
+ * (the CSRF header is enforced on that path only — it's meaningless for the
+ * key path, which isn't cookie-authenticated and so isn't forgeable by a
+ * third-party site in the first place).
+ */
+function requireAdminOrKey() {
+  return async (c: Context<AppContext>, next: Next) => {
+    if (requireAdminKey(c)) return next();
+    return requireAdmin()(c, next);
+  };
+}
+
+admin.use('/publish', requireAdminOrKey());
+
+/**
  * Self-update, part 1: what's running vs what's published. `current` is this
  * exact deployment's installed storylark-worker version (its own
  * package.json — reflects what's *actually* deployed, not an assumption).
  * `hasUpdate` compares against the live npm registry.
  */
 admin.get('/update-status', async (c) => {
-  if (!requireAdminKey(c)) return c.json({ error: 'unauthorized' }, 401);
   try {
     const res = await fetch('https://registry.npmjs.org/storylark-worker/latest');
     if (!res.ok) throw new Error(`registry ${res.status}`);
@@ -41,10 +76,10 @@ admin.get('/update-status', async (c) => {
  * work (bump the pinned version, migrate, build, deploy) runs in the site's
  * own GitHub Actions (self-update.yml, provisioned by the installer/scaffold
  * — see create-storylark/template and docs/updating.md). This endpoint's
- * entire job is: verify the admin key, then dispatch that workflow.
+ * entire job is: confirm the caller is a signed-in operator (requireAdmin,
+ * above), then dispatch that workflow.
  */
 admin.post('/update-install', async (c) => {
-  if (!requireAdminKey(c)) return c.json({ error: 'unauthorized' }, 401);
   if (!c.env.GITHUB_REPO || !c.env.GITHUB_DEPLOY_TOKEN) {
     return c.json(
       {
@@ -101,9 +136,6 @@ admin.post('/setup', async (c) => {
  * worker fetches the new manifest itself and composes the notification).
  */
 admin.post('/publish', async (c) => {
-  if (c.req.header('x-admin-key') !== c.env.ADMIN_KEY || !c.env.ADMIN_KEY) {
-    return c.json({ error: 'unauthorized' }, 401);
-  }
   const body = await c.req.json<{ version?: number }>().catch(() => null);
   if (!body || typeof body.version !== 'number') return c.json({ error: 'bad_request' }, 400);
 
@@ -154,8 +186,6 @@ async function fanOut(
  * status response, it just reports null counts.
  */
 admin.get('/status', async (c) => {
-  if (!requireAdminKey(c)) return c.json({ error: 'unauthorized' }, 401);
-
   let bookCount: number | null = null;
   let chapterCount: number | null = null;
   try {
@@ -198,7 +228,6 @@ admin.get('/status', async (c) => {
  * caller, never implied to already exist.
  */
 admin.post('/publish-story', async (c) => {
-  if (!requireAdminKey(c)) return c.json({ error: 'unauthorized' }, 401);
   if (!c.env.GITHUB_REPO || !c.env.GITHUB_DEPLOY_TOKEN) {
     return c.json(
       { error: 'not_configured', message: 'Story upload needs GITHUB_REPO and GITHUB_DEPLOY_TOKEN secrets. See docs/admin-guide.md.' },

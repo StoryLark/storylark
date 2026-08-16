@@ -8,6 +8,7 @@ import { preferences } from './routes/preferences';
 import { bookmarks } from './routes/bookmarks';
 import { push } from './routes/push';
 import { admin } from './routes/admin';
+import { adminAuth } from './routes/admin-auth';
 import { checkForUpdateAndNotify } from './lib/update-check';
 
 const app = new Hono<AppContext>();
@@ -29,6 +30,12 @@ app.route('/api/preferences', preferences);
 app.route('/api/bookmarks', bookmarks);
 app.route('/api/push', push);
 app.route('/api/admin', admin);
+// Admin account bootstrap + recovery (AB#7404) — same /api/admin prefix, own
+// router because none of it is admin-session gated: these ARE the routes that
+// hand out the first admin session. Registered after `admin` so the paths it
+// already owns (/setup, /status, ...) keep their handlers; the three routes
+// here (/setup/reset, /setup/claim, /recover) don't overlap with any of them.
+app.route('/api/admin', adminAuth);
 
 app.notFound((c) => {
   if (new URL(c.req.url).pathname.startsWith('/api/')) return c.json({ error: 'not_found' }, 404);

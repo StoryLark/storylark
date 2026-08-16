@@ -1,23 +1,33 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { BRAND } from '../brand';
+import { api, call, ApiError, type AuthUser } from '../lib/api';
+import { navigate } from '../router';
 
-// Admin portal (AB#7404). Deliberately separate from the reader-facing
-// session/cookie auth in lib/api.ts — this is the operator's surface, gated
-// by the x-admin-key header the worker's /api/admin/* routes already check.
-// The key lives in localStorage on the operator's own device only; it is
-// never sent anywhere except this site's own /api/admin/* endpoints.
+// Admin portal (AB#7404). Gated by a real account in the app's own `users`
+// table carrying the `is_admin` flag — the same email+password, the same
+// session cookie, and the same emailed password reset any reader gets. The
+// shared ADMIN_KEY this screen used to prompt for is gone from the UI
+// entirely: it's now only a deployment-config credential, used by the
+// installer to mint the first setup link (see docs/admin-guide.md).
+//
+// Auth here is deliberately modest, not high security theatre. The stories
+// themselves are public; the only job is to stop someone who isn't the
+// operator from editing content or triggering a platform update.
 
-const KEY_STORAGE = 'storylark-admin-key';
+/** Same-origin, session-cookie fetch for this site's own /api/admin/* routes. */
+function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  return call<T>(`/admin${path}`, init);
+}
 
-async function adminFetch<T>(path: string, adminKey: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/admin${path}`, {
-    ...init,
-    headers: { 'x-admin-key': adminKey, 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-  });
-  const body = (await res.json().catch(() => ({}))) as T & { error?: string; message?: string };
-  if (!res.ok) throw new Error((body as { message?: string; error?: string }).message ?? (body as { error?: string }).error ?? `HTTP ${res.status}`);
-  return body;
+/** Whatever prose the server sent, else a readable fallback. */
+function errorText(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    if (err.status === 429) return 'Too many attempts. Please wait a few minutes and try again.';
+    if (err.detail) return err.detail;
+    if (err.slug) return err.slug.replace(/_/g, ' ');
+  }
+  return fallback;
 }
 
 interface StatusResponse {
@@ -37,50 +47,360 @@ interface UpdateStatusResponse {
   selfUpdateConfigured: boolean;
 }
 
-export function Admin(): JSX.Element {
-  const [adminKey, setAdminKey] = useState(() => localStorage.getItem(KEY_STORAGE) ?? '');
-  const [keyInput, setKeyInput] = useState('');
+type Phase =
+  | { name: 'loading' }
+  | { name: 'setup'; token: string }
+  | { name: 'signin' }
+  /** Signed in, but this account doesn't carry the operator flag. */
+  | { name: 'not-admin'; user: AuthUser }
+  | { name: 'dashboard' };
 
-  if (!adminKey) {
+export function Admin(): JSX.Element {
+  const [phase, setPhase] = useState<Phase>({ name: 'loading' });
+
+  // An installer-printed setup link lands on /admin?setup=<token>. Take the
+  // token, drop into the one-time account-creation form, and scrub it out of
+  // the URL bar so a refresh or a shared screenshot can't replay it — the
+  // same handling the reader-side reset link gets in Settings.tsx.
+  useEffect(() => {
+    const token = new URLSearchParams(location.search).get('setup');
+    if (token) {
+      setPhase({ name: 'setup', token });
+      history.replaceState(null, '', '/admin');
+      return;
+    }
+    void checkSession();
+  }, []);
+
+  async function checkSession(): Promise<void> {
+    try {
+      const me = await api.me();
+      setPhase(me.user.isAdmin ? { name: 'dashboard' } : { name: 'not-admin', user: me.user });
+    } catch {
+      // 401 (or anything else) means "not signed in as far as this screen
+      // is concerned" — show the sign-in form rather than an error page.
+      setPhase({ name: 'signin' });
+    }
+  }
+
+  async function signOut(): Promise<void> {
+    try {
+      await api.logout();
+    } catch {
+      // Already gone server-side, or offline — either way, land on sign-in.
+    }
+    setPhase({ name: 'signin' });
+  }
+
+  if (phase.name === 'loading') {
     return (
-      <div class="screen admin-screen">
-        <header class="screen-header">
-          <h1 class="screen-title">Admin — {BRAND.appName}</h1>
-        </header>
-        <section class="settings-section">
-          <p class="settings-note">Enter this deployment's admin key to continue. Set with the ADMIN_KEY secret.</p>
-          <label class="settings-row">
-            <span>Admin key</span>
-            <input type="password" value={keyInput} onInput={(e) => setKeyInput((e.target as HTMLInputElement).value)} />
-          </label>
-          <button
-            class="btn"
-            onClick={() => {
-              localStorage.setItem(KEY_STORAGE, keyInput);
-              setAdminKey(keyInput);
-            }}
-          >
-            Continue
-          </button>
-        </section>
-      </div>
+      <AdminShell>
+        <p class="settings-note">Loading…</p>
+      </AdminShell>
     );
   }
 
-  return <AdminDashboard adminKey={adminKey} onSignOut={() => { localStorage.removeItem(KEY_STORAGE); setAdminKey(''); }} />;
+  if (phase.name === 'setup') {
+    return (
+      <AdminShell>
+        <SetupForm token={phase.token} onDone={() => setPhase({ name: 'dashboard' })} onExpired={() => setPhase({ name: 'signin' })} />
+      </AdminShell>
+    );
+  }
+
+  if (phase.name === 'signin') {
+    return (
+      <AdminShell>
+        <AdminSignIn onSignedIn={checkSession} />
+      </AdminShell>
+    );
+  }
+
+  if (phase.name === 'not-admin') {
+    return (
+      <AdminShell>
+        <section class="settings-section">
+          <h2>No admin access</h2>
+          <p class="settings-note">
+            You're signed in as <strong>{phase.user.username ?? phase.user.email}</strong>, but this account isn't an operator on
+            this deployment, so there's nothing here for it.
+          </p>
+          <p class="settings-note">
+            Sign in with the operator account instead, or — if this should be the operator account — have someone with access to
+            this deployment's configuration mint a new setup link (see the admin guide).
+          </p>
+          <button class="btn" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </section>
+      </AdminShell>
+    );
+  }
+
+  return <AdminDashboard onSignOut={() => void signOut()} />;
 }
 
-function AdminDashboard({ adminKey, onSignOut }: { adminKey: string; onSignOut: () => void }): JSX.Element {
+/** Header + page chrome, shared by every phase so the title never flickers away. */
+function AdminShell({ children, title, action }: { children: JSX.Element | JSX.Element[]; title?: string; action?: JSX.Element }): JSX.Element {
+  return (
+    <div class="screen admin-screen">
+      <header class="screen-header">
+        <h1 class="screen-title">Admin — {title ?? BRAND.appName}</h1>
+        {action}
+      </header>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * One-time account creation from an installer-printed setup link. This is
+ * the only way the first operator account comes into existence; afterwards
+ * it's an ordinary email+password sign-in.
+ */
+function SetupForm({ token, onDone, onExpired }: { token: string; onDone: () => void; onExpired: () => void }): JSX.Element {
+  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(): Promise<void> {
+    setBusy(true);
+    setError('');
+    try {
+      await api.adminSetupClaim(token, email.trim(), username.trim(), password);
+      onDone();
+    } catch (err) {
+      if (err instanceof ApiError && err.slug === 'invalid_or_expired') {
+        setError('That setup link is no longer valid — it expired, or it has already been used. Mint a new one (see the admin guide) and try again.');
+      } else {
+        setError(errorText(err, 'Could not create the admin account. Check your details and try again.'));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section class="settings-section">
+      <h2>Create your admin login</h2>
+      <p class="settings-note">
+        This link works once. Pick an email and password you'll use to sign in to this portal from now on — the same kind of
+        account any reader has, just with operator access.
+      </p>
+      <form
+        class="signin-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <input
+          type="email"
+          placeholder="Email"
+          autoComplete="email"
+          value={email}
+          onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
+          required
+        />
+        <input
+          type="text"
+          placeholder="Username (optional)"
+          autoComplete="username"
+          maxLength={20}
+          value={username}
+          onInput={(e) => setUsername((e.target as HTMLInputElement).value.replace(/\s/g, ''))}
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          autoComplete="new-password"
+          value={password}
+          onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
+          required
+        />
+        <p class="settings-note">At least 8 characters.</p>
+        {error && <p class="settings-note admin-error">{error}</p>}
+        <button class="btn" type="submit" disabled={busy || !email || password.length < 8}>
+          {busy ? 'Creating…' : 'Create admin account'}
+        </button>
+        <button type="button" class="btn-ghost signin-forgot-link" onClick={onExpired}>
+          I already have an admin account
+        </button>
+      </form>
+    </section>
+  );
+}
+
+/**
+ * Sign-in, plus the two ways back in when the password is gone:
+ *   • "Forgot password?" hands off to the reader-side reset flow in
+ *     /settings — the emailed code/link path already works for any account
+ *     with a password, admin included, so there is deliberately no second
+ *     copy of it here.
+ *   • "Use a recovery code instead" opens the codes the installer printed at
+ *     deploy time. This is the only place in the app that door exists, so it
+ *     has to live on this form.
+ */
+function AdminSignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }): JSX.Element {
+  const [mode, setMode] = useState<'signin' | 'recover'>('signin');
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(): Promise<void> {
+    setBusy(true);
+    setError('');
+    try {
+      await api.login(identifier.trim(), password);
+      await onSignedIn();
+    } catch (err) {
+      // One message for every failure, same as the reader sign-in form: a
+      // failed attempt never reveals whether the account exists.
+      if (err instanceof ApiError && err.status === 429) setError('Too many attempts. Please wait a few minutes and try again.');
+      else setError('That email or password is not right.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (mode === 'recover') return <RecoverForm onRecovered={onSignedIn} onBack={() => setMode('signin')} />;
+
+  return (
+    <section class="settings-section">
+      <h2>Sign in</h2>
+      <p class="settings-note">Sign in with your operator account to manage this deployment.</p>
+      <form
+        class="signin-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <input
+          type="text"
+          placeholder="Email or username"
+          autoComplete="username"
+          value={identifier}
+          onInput={(e) => setIdentifier((e.target as HTMLInputElement).value)}
+          required
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          autoComplete="current-password"
+          value={password}
+          onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
+          required
+        />
+        {error && <p class="settings-note admin-error">{error}</p>}
+        <button class="btn" type="submit" disabled={busy}>
+          {busy ? 'Signing in…' : 'Sign in'}
+        </button>
+        <button type="button" class="btn-ghost signin-forgot-link" onClick={() => navigate('/settings')}>
+          Forgot password?
+        </button>
+        <button type="button" class="btn-ghost signin-forgot-link" onClick={() => setMode('recover')}>
+          Use a recovery code instead
+        </button>
+      </form>
+    </section>
+  );
+}
+
+/** Recovery codes: the door that still works when email delivery doesn't. */
+function RecoverForm({ onRecovered, onBack }: { onRecovered: () => Promise<void>; onBack: () => void }): JSX.Element {
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(): Promise<void> {
+    setBusy(true);
+    setError('');
+    try {
+      await api.adminRecover(email.trim(), code.trim(), password);
+      await onRecovered();
+    } catch (err) {
+      if (err instanceof ApiError && err.slug === 'invalid_or_expired') {
+        setError('That code and email combination is not right, or the code has already been used. Each code works once.');
+      } else {
+        setError(errorText(err, 'Could not use that recovery code. Try again.'));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section class="settings-section">
+      <h2>Use a recovery code</h2>
+      <p class="settings-note">
+        These are the one-time codes printed when this site was deployed. Enter one along with your admin email and a new
+        password. Each code works once.
+      </p>
+      <form
+        class="signin-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <input
+          type="email"
+          placeholder="Admin email"
+          autoComplete="email"
+          value={email}
+          onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
+          required
+        />
+        <input
+          type="text"
+          placeholder="XXXX-XXXX-XXXX"
+          autoComplete="one-time-code"
+          spellcheck={false}
+          value={code}
+          onInput={(e) => setCode((e.target as HTMLInputElement).value.toUpperCase())}
+          required
+        />
+        <input
+          type="password"
+          placeholder="New password"
+          autoComplete="new-password"
+          value={password}
+          onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
+          required
+        />
+        {error && <p class="settings-note admin-error">{error}</p>}
+        <button class="btn" type="submit" disabled={busy || password.length < 8}>
+          {busy ? 'Checking…' : 'Reset password and sign in'}
+        </button>
+        <button type="button" class="btn-ghost signin-forgot-link" onClick={onBack}>
+          Back to sign in
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatusResponse | null>(null);
   const [error, setError] = useState('');
 
   const refresh = () => {
     setError('');
-    adminFetch<StatusResponse>('/status', adminKey).then(setStatus).catch((e) => setError(String(e.message ?? e)));
-    adminFetch<UpdateStatusResponse>('/update-status', adminKey).then(setUpdateStatus).catch((e) => setError(String(e.message ?? e)));
+    adminFetch<StatusResponse>('/status')
+      .then(setStatus)
+      .catch((e) => setError(errorText(e, 'Could not load status.')));
+    adminFetch<UpdateStatusResponse>('/update-status')
+      .then(setUpdateStatus)
+      .catch((e) => setError(errorText(e, 'Could not check for updates.')));
   };
-  useEffect(refresh, [adminKey]);
+  useEffect(refresh, []);
 
   return (
     <div class="screen admin-screen">
@@ -94,8 +414,8 @@ function AdminDashboard({ adminKey, onSignOut }: { adminKey: string; onSignOut: 
       {error && <p class="settings-note admin-error">{error}</p>}
 
       <StatusSection status={status} />
-      <UpdateSection adminKey={adminKey} updateStatus={updateStatus} onChanged={refresh} />
-      <PublishSection adminKey={adminKey} onPublished={refresh} />
+      <UpdateSection updateStatus={updateStatus} onChanged={refresh} />
+      <PublishSection onPublished={refresh} />
     </div>
   );
 }
@@ -120,11 +440,9 @@ function StatusSection({ status }: { status: StatusResponse | null }): JSX.Eleme
 }
 
 function UpdateSection({
-  adminKey,
   updateStatus,
   onChanged,
 }: {
-  adminKey: string;
   updateStatus: UpdateStatusResponse | null;
   onChanged: () => void;
 }): JSX.Element {
@@ -135,11 +453,11 @@ function UpdateSection({
     setInstalling(true);
     setMessage('');
     try {
-      const res = await adminFetch<{ message: string }>('/update-install', adminKey, { method: 'POST' });
+      const res = await adminFetch<{ message: string }>('/update-install', { method: 'POST' });
       setMessage(res.message);
       onChanged();
     } catch (e) {
-      setMessage(String((e as Error).message ?? e));
+      setMessage(errorText(e, 'Could not start the update.'));
     } finally {
       setInstalling(false);
     }
@@ -184,7 +502,7 @@ function UpdateSection({
   );
 }
 
-function PublishSection({ adminKey, onPublished }: { adminKey: string; onPublished: () => void }): JSX.Element {
+function PublishSection({ onPublished }: { onPublished: () => void }): JSX.Element {
   const [bookId, setBookId] = useState('');
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
@@ -196,7 +514,7 @@ function PublishSection({ adminKey, onPublished }: { adminKey: string; onPublish
     setPublishing(true);
     setMessage('');
     try {
-      const res = await adminFetch<{ message: string }>('/publish-story', adminKey, {
+      const res = await adminFetch<{ message: string }>('/publish-story', {
         method: 'POST',
         body: JSON.stringify({ bookId, title, author, markdown }),
       });
@@ -207,7 +525,7 @@ function PublishSection({ adminKey, onPublished }: { adminKey: string; onPublish
       setMarkdown('');
       onPublished();
     } catch (e) {
-      setMessage(String((e as Error).message ?? e));
+      setMessage(errorText(e, 'Could not publish that story.'));
     } finally {
       setPublishing(false);
     }

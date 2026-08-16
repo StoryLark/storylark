@@ -8,7 +8,14 @@ import type {
   AuthenticationResponseJSON,
 } from '@simplewebauthn/browser';
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * The one same-origin fetch every screen goes through, admin included
+ * (AB#7404 — the admin portal used to carry its own x-admin-key fetch
+ * helper; it now rides this session-cookie path like everything else).
+ * Exported so screens that build their own paths don't reimplement the
+ * credentials + CSRF header contract.
+ */
+export async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     credentials: 'same-origin',
     ...init,
@@ -25,16 +32,25 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 export class ApiError extends Error {
   /** The server's `{error: "<slug>"}` code, when the body was JSON shaped that way. Empty string otherwise. */
   slug: string;
+  /**
+   * The server's `{message: "..."}` prose, when it sent any. Several admin
+   * routes answer with an explanation worth showing verbatim (which secret
+   * is missing, what GitHub said) rather than a slug the UI has to translate.
+   */
+  detail: string;
   constructor(public status: number, body: string) {
     super(`API ${status}: ${body}`);
     let slug = '';
+    let detail = '';
     try {
-      const parsed = JSON.parse(body) as { error?: string };
+      const parsed = JSON.parse(body) as { error?: string; message?: string };
       if (typeof parsed.error === 'string') slug = parsed.error;
+      if (typeof parsed.message === 'string') detail = parsed.message;
     } catch {
-      // body wasn't JSON, leave slug empty
+      // body wasn't JSON, leave slug/detail empty
     }
     this.slug = slug;
+    this.detail = detail;
   }
 }
 
@@ -43,6 +59,8 @@ export interface AuthUser {
   email: string;
   username: string | null;
   displayName: string | null;
+  /** Operator flag (AB#7404). Only /auth/me and the admin routes populate it. */
+  isAdmin?: boolean;
 }
 
 export interface Me {
@@ -82,6 +100,19 @@ export const api = {
       body: JSON.stringify({ ...args, password }),
     }),
   logout: () => call<{ ok: true }>('/auth/logout', { method: 'POST' }),
+  // Admin account bootstrap + recovery (AB#7404). Both are unauthenticated
+  // by definition — the setup token / recovery code IS the credential — and
+  // both set the session cookie on their own response.
+  adminSetupClaim: (token: string, email: string, username: string, password: string) =>
+    call<{ ok: true; user: AuthUser }>('/admin/setup/claim', {
+      method: 'POST',
+      body: JSON.stringify({ token, email, username: username || undefined, password }),
+    }),
+  adminRecover: (email: string, code: string, password: string) =>
+    call<{ ok: true; user: AuthUser; recoveryCodesRemaining: number }>('/admin/recover', {
+      method: 'POST',
+      body: JSON.stringify({ email, code, password }),
+    }),
   passkeyRegisterOptions: () =>
     call<{ options: PublicKeyCredentialCreationOptionsJSON; challengeId: string }>('/auth/passkey/register-options', { method: 'POST' }),
   passkeyRegisterVerify: (challengeId: string, response: RegistrationResponseJSON) =>

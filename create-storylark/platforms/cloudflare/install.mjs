@@ -12,6 +12,7 @@
 // --yes on top of a passing verify, matching the Azure installer.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -42,6 +43,79 @@ const envPath = join(__dirname, 'install.env');
 const env = { ...loadEnvFile(envPath), ...process.env };
 
 const REQUIRED = ['BRAND_ID', 'APP_ORIGIN', 'CONTENT_ORIGIN', 'MAIL_FROM', 'APP_NAME'];
+
+/**
+ * Admin bootstrap (AB#7404), shared with platforms/azure/install.mjs.
+ *
+ * ADMIN_KEY is no longer something a human types into /admin — the portal is
+ * gated by a normal account in the app's own users table now. It survives as
+ * a deployment-config credential whose one job is to mint the FIRST admin
+ * setup link, plus the printed recovery codes that are the offline way back
+ * in. So the installer always needs one, generates it if the operator didn't
+ * supply one, and calls the mint endpoint at the end of a successful deploy.
+ */
+function generateAdminKey() {
+  return randomBytes(24).toString('base64url');
+}
+
+/** Poll the freshly-deployed site until it answers, so the mint below isn't racing DNS/cold start. */
+async function waitForSite(origin, attempts = 10, delayMs = 6000) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(`${origin}/api/health`);
+      if (res.ok) return true;
+    } catch {
+      // not up yet — DNS still propagating, or the platform is cold starting
+    }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return false;
+}
+
+/**
+ * Mint the setup link + recovery codes and print them. Never throws: a
+ * failure here means the site just isn't reachable from this machine yet,
+ * which is a "run one command later" problem, not a reason to fail a deploy
+ * that otherwise succeeded — so it prints the exact curl to run instead.
+ */
+async function printAdminSetup(origin, adminKey) {
+  const endpoint = `${origin}/api/admin/setup/reset`;
+  const manual = () => {
+    console.log('\n' + '='.repeat(72));
+    console.log('ADMIN SETUP — could not reach the site to mint your setup link.');
+    console.log('Once the site is confirmed live, run this yourself:');
+    console.log(`\n  curl -X POST ${endpoint} -H "x-admin-key: <your ADMIN_KEY>"\n`);
+    console.log('It returns a one-time setup URL and 10 recovery codes.');
+    console.log('='.repeat(72) + '\n');
+  };
+
+  if (!(await waitForSite(origin))) return manual();
+
+  let data;
+  try {
+    const res = await fetch(endpoint, { method: 'POST', headers: { 'x-admin-key': adminKey } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    data = await res.json();
+  } catch (err) {
+    console.error(`\nCould not mint the admin setup link: ${err.message}`);
+    return manual();
+  }
+
+  console.log('\n' + '='.repeat(72));
+  console.log('ADMIN SETUP — do this now, this is the only time these are shown.');
+  console.log('='.repeat(72));
+  console.log('\n1. Open this link and create your admin login (email + password).');
+  console.log('   It works once, and expires in an hour:\n');
+  console.log(`   ${data.setupUrl}\n`);
+  console.log('2. Save these recovery codes somewhere safe — a password manager,');
+  console.log('   NOT this terminal\'s scrollback. Each one works once, and they are');
+  console.log('   how you get back in if you forget the password and email reset');
+  console.log('   is not available:\n');
+  for (const code of data.recoveryCodes ?? []) console.log(`   ${code}`);
+  console.log('\nAfter that, sign in at /admin with the email and password you just');
+  console.log('chose — same as any account on the site.');
+  console.log('='.repeat(72) + '\n');
+}
 
 function verify() {
   console.log('Verifying install.env and Wrangler CLI state...\n');
@@ -119,7 +193,7 @@ function ensureWranglerEnvBlock() {
   console.log(`✓ Added a wrangler.jsonc env block for "${env.BRAND_ID}" — fill in the real database_id after creating D1 below.`);
 }
 
-function deploy() {
+async function deploy() {
   if (!verify()) {
     console.error('\nRefusing to deploy: verification failed.');
     process.exit(1);
@@ -161,10 +235,27 @@ function deploy() {
   console.log(`\nDeploying Worker "${env.BRAND_ID}"...`);
   run('wrangler', ['deploy', '--env', env.BRAND_ID], { stdio: 'inherit', cwd: ROOT });
 
+  // ADMIN_KEY has to exist as a Worker secret before the mint call below can
+  // authenticate. Set after `deploy` because `wrangler secret put` needs the
+  // Worker script to already exist for this env.
+  const adminKey = env.ADMIN_KEY || generateAdminKey();
+  if (!env.ADMIN_KEY) console.log('\nNo ADMIN_KEY in install.env — generating one for this deployment.');
+  console.log('Setting the ADMIN_KEY secret...');
+  run('wrangler', ['secret', 'put', 'ADMIN_KEY', '--env', env.BRAND_ID], {
+    // Piped, never on the command line: an argv value would land in the
+    // shell history and in any process listing on this machine.
+    input: adminKey,
+    stdio: ['pipe', 'inherit', 'inherit'],
+    cwd: ROOT,
+  });
+
   console.log('\nDeployed. Publish content next: node packages/pipeline/publish.mjs --brand ' + env.BRAND_ID + ' --source <path>.');
+
+  console.log('\nWaiting for the site to come up so we can mint your admin setup link...');
+  await printAdminSetup(env.APP_ORIGIN, adminKey);
 }
 
-if (args.has('--deploy')) deploy();
+if (args.has('--deploy')) await deploy();
 else if (args.has('--verify') || args.size === 0) verify();
 else {
   console.error('Usage: node install.mjs --verify | --deploy --yes');
