@@ -1,0 +1,170 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Content Editing" id="storylark-admin-content-editing">
+    <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="1060" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="laneA" value="Admin portal — a browser, no repo, no CLI" style="swimlane;html=1;startSize=30;fillColor=none;strokeColor=#9673a6;fontStyle=1;verticalAlign=top;horizontal=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="1420" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="a1" value="Editor&#10;plain markdown + live preview&#10;(preview is parsed by the SAME&#10;code that publishes)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="laneA">
+          <mxGeometry x="30" y="60" width="190" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" value="PUT /api/admin/content/&#10;books/&lt;b&gt;/chapters/&lt;c&gt;&#10;{ markdown, correction,&#10;  baseContentHash }" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="laneA">
+          <mxGeometry x="260" y="60" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" value="Is baseContentHash&#10;still what is live?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="laneA">
+          <mxGeometry x="510" y="55" width="180" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="a4" value="409 stale_edit&#10;&quot;someone else saved, or a publish landed&quot;&#10;Draft is kept. Download it / load the live&#10;version / overwrite deliberately." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="laneA">
+          <mxGeometry x="740" y="35" width="250" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="a5" value="saveChapter()&#10;parse → stabilize block ids → hash&#10;chapter JSON FIRST, manifest LAST" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="laneA">
+          <mxGeometry x="740" y="145" width="250" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="a6" value="audioStale = true&#10;A Worker cannot run the TTS model.&#10;Text is live instantly; the voice&#10;catches up on the next publish." style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="laneA">
+          <mxGeometry x="1050" y="145" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="a7" value="correction?&#10;yes → libraryVersion moves, announceVersion does NOT (no phones ring)&#10;no  → both move, and subscribers are notified" style="text;html=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontSize=11;fontColor=#666666;" vertex="1" parent="laneA">
+          <mxGeometry x="1050" y="45" width="340" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="eA12" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="laneA" source="a1" target="a2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eA23" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="laneA" source="a2" target="a3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eA34" value="no" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#b85450;" edge="1" parent="laneA" source="a3" target="a4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eA35" value="yes" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;" edge="1" parent="laneA" source="a3" target="a5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eA56" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="laneA" source="a5" target="a6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eA41" value="reload, or force" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#b85450;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="laneA" source="a4" target="a1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="865" y="15" />
+              <mxPoint x="125" y="15" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="store" value="The deployment's own storage — R2, Azure Blob or a local directory. This is what made editing possible at all: since AB#7420 a publish uploads its SOURCE, so the deployment holds what it was built from." style="swimlane;html=1;startSize=46;fillColor=none;strokeColor=#82b366;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="350" width="1420" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="s1" value="books/&lt;b&gt;/source/&lt;c&gt;.md&#10;the editable source of truth&#10;(short TTL — mutable by design)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="store">
+          <mxGeometry x="30" y="60" width="240" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="s2" value="books/&lt;b&gt;/chapters/&lt;c&gt;.&lt;hash&gt;.json&#10;derived blocks, content-hashed,&#10;immutable" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="store">
+          <mxGeometry x="300" y="60" width="240" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="s3" value="books/&lt;b&gt;/revisions/&lt;c&gt;/&#10;5 text revisions, live one pinned&#10;(audio is NEVER versioned)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="store">
+          <mxGeometry x="570" y="60" width="240" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="s4" value="books/&lt;b&gt;/audio|timings/&lt;c&gt;.&lt;hash&gt;…&#10;narration + word timings,&#10;immutable" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="store">
+          <mxGeometry x="840" y="60" width="240" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="s5" value="manifest.json&#10;generated, never edited by hand.&#10;The ORDER of chapters IS the order." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="store">
+          <mxGeometry x="1110" y="60" width="270" height="75" as="geometry" />
+        </mxCell>
+
+        <mxCell id="laneB" value="publish.mjs — a laptop with the markdown, the TTS model and a deploy credential" style="swimlane;html=1;startSize=30;fillColor=none;strokeColor=#6c8ebf;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="550" width="1420" height="440" as="geometry" />
+        </mxCell>
+        <mxCell id="b1" value="books/&lt;b&gt;/NN-&lt;c&gt;.md&#10;on disk. The numeric prefix&#10;is where CLI chapter order&#10;comes from." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="laneB">
+          <mxGeometry x="30" y="60" width="180" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="b2" value="parse&#10;+ stabilize block ids&#10;(ids stay unique, so reader&#10;bookmarks survive an edit)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="laneB">
+          <mxGeometry x="250" y="60" width="180" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="b3" value="read the LIVE manifest&#10;before anything is written" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="laneB">
+          <mxGeometry x="470" y="70" width="170" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="b4" value="live == base,&#10;or live == what we&#10;are about to write?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="laneB">
+          <mxGeometry x="680" y="55" width="190" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="b5" value="CONFLICT — refuse, exit 2&#10;names every chapter, and what&#10;each of the three hashes is.&#10;--pull to reconcile, --force to win." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="laneB">
+          <mxGeometry x="920" y="45" width="250" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="b6" value="per-block narration plan&#10;blockAudioKey = hash(type + spoken text).&#10;Same hash that keeps block ids stable, so&#10;an insertion renumbers without re-narrating." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="laneB">
+          <mxGeometry x="250" y="215" width="290" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="b7" value="TTS — CHANGED BLOCKS ONLY&#10;Kokoro (local, free) or Azure Speech.&#10;Cache hits are not re-synthesized;&#10;the metered budget is charged only&#10;for what is actually sent." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="laneB">
+          <mxGeometry x="590" y="205" width="270" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="b8" value="stitch — the splice&#10;chunks re-concatenated in the chapter's&#10;CURRENT order, cached + fresh together.&#10;Every block's startMs and word timings are&#10;re-derived from measured (ffprobe) durations,&#10;so word-sync is right for where blocks now are." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="laneB">
+          <mxGeometry x="910" y="195" width="330" height="135" as="geometry" />
+        </mxCell>
+        <mxCell id="b9" value="upload artifacts, then manifest LAST&#10;audioStale cleared for what was re-narrated" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="laneB">
+          <mxGeometry x="590" y="360" width="330" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="b10" value=".storylark/work/&lt;bucket&gt;/…/blocks/&#10;&lt;blockAudioKey&gt;.mp3 + .words.json&#10;A build directory. Deleting it costs a&#10;re-narration, never a wrong one." style="rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#999999;" vertex="1" parent="laneB">
+          <mxGeometry x="30" y="215" width="190" height="105" as="geometry" />
+        </mxCell>
+
+        <mxCell id="eB12" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="laneB" source="b1" target="b2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eB23" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="laneB" source="b2" target="b3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eB34" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="laneB" source="b3" target="b4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eB45" value="no" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#b85450;" edge="1" parent="laneB" source="b4" target="b5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eB46" value="yes" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;" edge="1" parent="laneB" source="b4" target="b6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eB67" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="laneB" source="b6" target="b7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eB78" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="laneB" source="b7" target="b8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eB89" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="laneB" source="b8" target="b9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eB610" value="reuse" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#999999;startArrow=classic;startFill=1;" edge="1" parent="laneB" source="b6" target="b10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eB710" value="new chunks stored" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#999999;" edge="1" parent="laneB" source="b7" target="b10">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="725" y="340" />
+              <mxPoint x="125" y="340" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="eStoreA" value="writes" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="a5" target="store">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eStoreB" value="writes" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;" edge="1" parent="1" source="b9" target="store">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eStoreRead" value="reads the live manifest&#10;(no credential — it is public)" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#6c8ebf;" edge="1" parent="1" source="store" target="b3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ePull" value="--pull&#10;deployment → working tree.&#10;Explicit, never automatic:&#10;a publish that silently rewrote&#10;your files would be worse than&#10;the problem it solves." style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#d79b00;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="store" target="b1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="20" y="430" />
+              <mxPoint x="20" y="667" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="note" value="The one rule the conflict check rests on: a chapter conflicts when the LIVE content differs BOTH from what this machine last published AND from what it is about to publish.&#10;• live == base → nobody has touched the deployment; publishing over it loses nothing (the ordinary case, and it stays silent).&#10;• live == local → the deployment already holds this exact text, which is what --pull leaves behind — so the documented reconciliation is never refused by the check that recommended it.&#10;Compared by contentHash, not by timestamp: both writers compute it with code proven equivalent (packages/worker/test/md-parity.test.mjs), and a clock comparison across a laptop and a datacentre is a bug waiting for a daylight-saving change." style="text;html=1;align=left;verticalAlign=top;fillColor=#f5f5f5;strokeColor=#999999;fontSize=11;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1005" width="1420" height="90" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

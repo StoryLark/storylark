@@ -4,10 +4,14 @@ How a chapter that is already published gets opened, edited, and republished
 from a browser — and why that required changing what a publish uploads before
 any of it was possible.
 
-**No diagram is committed for this yet.** The flow it would show is the same
-one [`content-flow.md`](content-flow.md) already diagrams, plus the two new
-keys under `books/<id>/`; a `.drawio` for it is outstanding work, not a
-deliberate omission.
+**Diagram:** [`admin-content-editing.drawio`](admin-content-editing.drawio) —
+open in [app.diagrams.net](https://app.diagrams.net) or the draw.io desktop
+app. It shows both writers side by side over the one storage they share: the
+portal's edit → conflict check → revision → manifest path along the top, the
+CLI's parse → conflict check → per-block re-narration → splice → manifest path
+along the bottom, and `--pull` closing the loop between them. *No PNG export is
+committed yet* — open the file once and export a PNG alongside it per the
+documentation standard.
 
 ## The blocker, which was not a UI problem
 
@@ -249,6 +253,85 @@ rather than papered over:
   publish state, so a laptop that has fallen behind can't write a version that
   goes backwards and is therefore never re-fetched.
 
-What this does **not** yet do is detect the conflict for you: a publish without
-`--pull` still overwrites, and nothing warns. That is the honest limit of this
-iteration.
+- **Conflict detection refuses the overwrite** (AB#7412). Both writers check,
+  and both use `contentHash` — which is already on every manifest entry, and
+  which both compute with code proven equivalent by
+  `packages/worker/test/md-parity.test.mjs`. No timestamps: comparing a
+  laptop's clock against a datacentre's is a bug waiting for a daylight-saving
+  change.
+
+  **CLI side.** `publish.mjs` reads the live manifest *before* it uploads
+  anything and refuses — exit 2, naming each chapter and all three hashes —
+  when the live content differs both from what this machine last published
+  *and* from what this run is about to write. Both halves matter: `live ==
+  base` is the ordinary case and stays silent, and `live == local` is exactly
+  the state `--pull` leaves behind, so the documented reconciliation is never
+  refused by the check that recommended it. A chapter that exists on the
+  deployment with no local file — almost certainly written in the portal — is
+  refused too, because regenerating the manifest without it would unpublish it.
+  `--force` publishes anyway.
+
+  Chapter ORDER and book title/author/description are warnings rather than
+  refusals: the CLI takes chapter order from the numeric filename prefixes and
+  always has, so restoring the file order is correct behaviour — and also a
+  surprise, which is why it is announced.
+
+  **Portal side.** The editor sends the `contentHash` it opened the chapter at
+  as `baseContentHash`; if the live chapter has moved past it, the save is
+  refused with `409 stale_edit` and the editor offers three honest choices —
+  download the draft, load the live version, or overwrite deliberately. Nothing
+  is thrown away by the refusal. A request that sends no base hash behaves
+  exactly as before, which is what keeps the content API and any older portal
+  bundle working.
+
+## Chapter order
+
+There is no position field, and deliberately not: **the order of
+`book.chapters` in the manifest IS the chapter order.** The app renders that
+array as it stands, `publish.mjs` builds it from the numeric filename prefixes,
+and every reader of it already agrees. An `index` field would be a second
+answer to the same question.
+
+So `PUT /api/admin/content/books/<b>/chapter-order` takes the whole order and
+checks it is a *permutation* of what the manifest holds, rather than taking a
+move instruction. A move is only meaningful relative to a list the client
+believes in, and a browser tab left open through a publish believes in a stale
+one — sending the full order is what lets the server refuse rather than let an
+omission silently delete a chapter.
+
+It is never announced. Rearranging a table of contents is not new writing;
+`libraryVersion` still moves so readers re-fetch.
+
+## Re-narration is per block, not per chapter
+
+Plan §3: *"Re-narrating a whole book because one typo changed is
+unacceptable."* It no longer is.
+
+`packages/pipeline/lib/block-audio.mjs` keeps a content-addressed cache of the
+per-block MP3 chunks the TTS providers already emit, keyed by
+`blockAudioKey(block)` — a hash of the block's **type and spoken text**, and
+nothing else. That is the same hash `stabilizeBlockIds` matches on, which is
+what makes the two agree: a block whose words are untouched keeps its id *and*
+its audio, and a block whose words changed gets new audio even if it kept its
+id. Position, block id and image `src` are excluded, so inserting a paragraph
+at the top of a chapter renumbers every block after it and re-narrates exactly
+one.
+
+The splice is not bespoke. The chunk list is rebuilt in the chapter's current
+order, mixing cache hits and fresh chunks, and handed to the same
+`stitchChapter()` as before — which re-probes each chunk's real duration and
+re-derives every block's `startMs` and word offsets from scratch. Word timings
+are stored block-relative precisely so they survive being moved, which is what
+keeps word-sync highlighting correct after a partial re-narration.
+
+Consequences worth stating:
+
+- A metered provider's character budget is charged for what is actually sent,
+  not for the chapter that contains it.
+- A revert to text that was narrated before costs nothing — orphaned chunks
+  linger within a budget rather than being deleted the moment an edit lands,
+  because "edit it, look at it, put it back" is a normal afternoon.
+- The cache lives in `.storylark/work/`, a gitignored build directory. Deleting
+  it costs a full re-narration and never a wrong one.
+- `--renarrate-all` ignores it; `publish --dry-run` reports the cost per
+  chapter before it is paid.

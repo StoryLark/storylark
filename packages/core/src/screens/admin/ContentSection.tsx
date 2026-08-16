@@ -383,11 +383,56 @@ function BookView({
 }): JSX.Element {
   const [newId, setNewId] = useState('');
   const [message, setMessage] = useState('');
+  /**
+   * A pending reorder (AB#7412 — plan §3's "add, reorder, delete"). Null means
+   * "untouched, showing the library's order".
+   *
+   * Buttons rather than drag: the rows are already buttons that open a chapter,
+   * a drag handle inside one is a reliable way to open a chapter you meant to
+   * move, and drag-and-drop has no keyboard or screen-reader story worth having
+   * without a great deal more code. Up/Down is the same interaction the Delete
+   * control next to it already uses.
+   *
+   * Held locally and saved explicitly, because a request per click on a
+   * fifteen-chapter book is fifteen manifest rewrites to move one chapter to
+   * the end.
+   */
+  const [order, setOrder] = useState<string[] | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+
+  const liveOrder = book.chapters.map((ch) => ch.id);
+  const shown = order ? (order.map((id) => book.chapters.find((ch) => ch.id === id)).filter(Boolean) as ChapterSummary[]) : book.chapters;
+  const orderDirty = order !== null && order.join(',') !== liveOrder.join(',');
+
+  function move(index: number, by: -1 | 1): void {
+    const next = shown.map((ch) => ch.id);
+    const target = index + by;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    setOrder(next);
+  }
+
+  async function saveOrder(): Promise<void> {
+    if (!order) return;
+    setSavingOrder(true);
+    setMessage('');
+    try {
+      await adminFetch(`/content/books/${book.id}/chapter-order`, { method: 'PUT', body: JSON.stringify({ order }) });
+      setOrder(null);
+      setMessage('Chapter order saved.');
+      onChanged();
+    } catch (e) {
+      setMessage(errorText(e, 'Could not save that order.'));
+    } finally {
+      setSavingOrder(false);
+    }
+  }
 
   async function remove(chapterId: string): Promise<void> {
     if (!confirm(`Delete chapter "${chapterId}"? Its source and history stay in storage, but it leaves the library.`)) return;
     try {
       await adminFetch(`/content/books/${book.id}/chapters/${chapterId}`, { method: 'DELETE' });
+      setOrder(null); // the list it was a permutation of no longer exists
       setMessage(`Deleted ${chapterId}.`);
       onChanged();
     } catch (e) {
@@ -409,7 +454,7 @@ function BookView({
 
       <h3 class="admin-subhead">Chapters</h3>
       <ul class="admin-content-list">
-        {book.chapters.map((ch) => (
+        {shown.map((ch, i) => (
           <li key={ch.id}>
             <button class="admin-content-row" onClick={() => onOpenChapter(ch.id)}>
               <span class="admin-content-row-main">
@@ -423,16 +468,55 @@ function BookView({
               <OriginBadge readOnly={ch.readOnly} />
               {ch.audioStale && <span class="admin-badge admin-badge-warn">audio out of date</span>}
             </button>
+            {/* Reordering a synced book would be undone by the next sync, and
+                the whole book moves together, so it is offered only when the
+                book itself is ours to change. */}
+            {!book.readOnly && shown.length > 1 && (
+              <>
+                <button
+                  class="btn-ghost admin-row-action"
+                  aria-label={`Move ${ch.title ?? ch.id} up`}
+                  disabled={i === 0 || savingOrder}
+                  onClick={() => move(i, -1)}
+                >
+                  ↑
+                </button>
+                <button
+                  class="btn-ghost admin-row-action"
+                  aria-label={`Move ${ch.title ?? ch.id} down`}
+                  disabled={i === shown.length - 1 || savingOrder}
+                  onClick={() => move(i, 1)}
+                >
+                  ↓
+                </button>
+              </>
+            )}
             {/* Deleting a synced chapter would only make it reappear on the next
                 sync, so the control isn't offered rather than offered and refused. */}
             {!ch.readOnly && (
-              <button class="btn-ghost admin-row-action" onClick={() => void remove(ch.id)}>
+              <button class="btn-ghost admin-row-action" disabled={orderDirty} onClick={() => void remove(ch.id)}>
                 Delete
               </button>
             )}
           </li>
         ))}
       </ul>
+
+      {orderDirty && (
+        <div class="admin-editor-actions">
+          <button class="btn" disabled={savingOrder} onClick={() => void saveOrder()}>
+            {savingOrder ? 'Saving order…' : 'Save chapter order'}
+          </button>
+          <button class="btn-ghost" disabled={savingOrder} onClick={() => setOrder(null)}>
+            Cancel
+          </button>
+          <p class="settings-note">
+            Readers see this order as soon as it's saved. The publish pipeline takes chapter order from the numeric prefixes on
+            the markdown filenames (<code>02-the-long-dark.md</code>), so rename those to match or the next{' '}
+            <code>npm run publish</code> puts the file order back — it will warn you before it does.
+          </p>
+        </div>
+      )}
 
       {!book.readOnly && (
         <form
@@ -589,6 +673,16 @@ function ChapterEditor({
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [revisions, setRevisions] = useState<Revision[]>([]);
+  /**
+   * A refused save (AB#7412 — plan §3's conflict detection). Set when the
+   * server answers 409 `stale_edit`: the chapter moved on after this editor
+   * opened it, so saving would discard someone else's newer text — another tab,
+   * or a `publish.mjs` run that landed while this one was being typed.
+   *
+   * Nothing is thrown away when this happens: the draft stays in the textarea,
+   * so it can still be downloaded, copied out, or forced through.
+   */
+  const [conflict, setConflict] = useState<{ message: string; liveContentHash?: string } | null>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const mdInput = useRef<HTMLInputElement>(null);
@@ -625,15 +719,25 @@ function ChapterEditor({
     return () => clearTimeout(t);
   }, [markdown, showPreview]);
 
-  async function save(): Promise<void> {
+  async function save(force = false): Promise<void> {
     setBusy(true);
     setMessage('');
     setError('');
     try {
       const res = await adminFetch<SaveResponse>(`/content/books/${bookId}/chapters/${chapterId}`, {
         method: 'PUT',
-        body: JSON.stringify({ markdown, correction }),
+        body: JSON.stringify({
+          markdown,
+          correction,
+          // The version this editor opened. The server refuses if the live
+          // chapter has moved past it — which is the only way a portal edit and
+          // a CLI publish racing each other can be noticed at all, since the
+          // manifest afterwards records only the winner.
+          baseContentHash: detail?.contentHash,
+          ...(force ? { force: true } : {}),
+        }),
       });
+      setConflict(null);
       setDirty(false);
       setMessage(
         [
@@ -651,7 +755,29 @@ function ChapterEditor({
       setDetail(fresh);
       setRevisions(fresh.revisions);
     } catch (e) {
-      setError(errorText(e, 'Could not save that chapter.'));
+      if (e instanceof ApiError && e.slug === 'stale_edit') {
+        setConflict({ message: e.detail || 'This chapter changed after you opened it.' });
+      } else {
+        setError(errorText(e, 'Could not save that chapter.'));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Throw the draft away and take what is actually live. */
+  async function reloadLive(): Promise<void> {
+    setBusy(true);
+    try {
+      const fresh = await adminFetch<ChapterDetail>(`/content/books/${bookId}/chapters/${chapterId}`);
+      setDetail(fresh);
+      setMarkdown(fresh.markdown);
+      setRevisions(fresh.revisions);
+      setConflict(null);
+      setDirty(false);
+      setMessage('Loaded the live version. Your draft is gone from the editor — the history has every saved version.');
+    } catch (e) {
+      setError(errorText(e, 'Could not reload that chapter.'));
     } finally {
       setBusy(false);
     }
@@ -859,6 +985,25 @@ function ChapterEditor({
         </span>
         <input type="checkbox" checked={correction} onChange={(e) => setCorrection((e.target as HTMLInputElement).checked)} />
       </label>
+
+      {conflict && (
+        <div class="settings-note admin-notice">
+          <p>
+            <strong>Not saved — this chapter changed while you were editing.</strong> {conflict.message}
+          </p>
+          <div class="admin-editor-actions">
+            <button class="btn-ghost" onClick={download}>
+              Download my draft
+            </button>
+            <button class="btn-ghost" disabled={busy} onClick={() => void reloadLive()}>
+              Discard mine, load the live version
+            </button>
+            <button class="btn-ghost" disabled={busy} onClick={() => void save(true)}>
+              Overwrite with mine
+            </button>
+          </div>
+        </div>
+      )}
 
       <button class="btn" onClick={() => void save()} disabled={busy || !markdown || problem !== null}>
         {busy ? 'Saving…' : correction ? 'Save correction' : 'Publish'}

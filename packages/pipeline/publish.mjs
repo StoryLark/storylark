@@ -28,9 +28,20 @@
 //                               the laptop instead of being silently overwritten by the next
 //                               publish. One-way and explicit on purpose — deployment → local,
 //                               only when asked, never as a side effect.
+//   --renarrate-all             ignore the per-block narration cache and re-synthesize every
+//                               block (AB#7412 — plan §3). Normally a republish re-narrates
+//                               ONLY the blocks whose spoken text changed and splices the rest
+//                               of the audio back in unchanged, which is what makes fixing a
+//                               typo affordable. Use this after changing voice settings, or if
+//                               you suspect a cached chunk is bad.
 //   --no-source                 skip uploading the source markdown (text-only artifacts, the
 //                               pre-AB#7420 behaviour). The deployment then can't be edited
 //                               from its own admin portal.
+//   --force                     publish even when the deployment holds content this working
+//                               tree doesn't know about (AB#7412). Without it, a publish that
+//                               would overwrite an admin-portal edit — or delete a chapter
+//                               written there — REFUSES and exits 2, naming each conflict.
+//                               `--pull` is the other way out, and the one that keeps both.
 //   --origin <portal|cli|sync>  what to record as this content's ORIGIN in the manifest
 //                               (AB#7422 — plan §8). Default: whatever the live manifest
 //                               already says, falling back to `cli`. Set to `sync` by
@@ -63,6 +74,7 @@ import { isKokoroVoice } from './tts-kokoro.mjs';
 import { stitchChapter } from './stitch.mjs';
 import { resolveProvider } from './storage.mjs';
 import { contentHash } from './lib/md.mjs';
+import { describeChapterAudio, planChapterAudio, synthesizeChapterIncremental } from './lib/block-audio.mjs';
 
 // The pipeline is site-agnostic: it runs from a site repo's root (cwd), which
 // owns brands/, content, and publish state. Nothing resolves relative to this
@@ -73,7 +85,7 @@ const MONTHLY_CHAR_BUDGET = 450_000; // hard stop below the F0 500K limit
 const args = parseArgs(process.argv.slice(2));
 const brandId = args.brand;
 const USAGE =
-  'Usage: node packages/pipeline/publish.mjs --brand <id> --source <path> [--parser <module>] [--book <id>] [--no-audio] [--no-source] [--pull] [--local <dir>] [--dry-run] [--storage r2|azure-blob] [--bucket <name>]';
+  'Usage: node packages/pipeline/publish.mjs --brand <id> --source <path> [--parser <module>] [--book <id>] [--no-audio] [--no-source] [--pull] [--force] [--renarrate-all] [--local <dir>] [--dry-run] [--storage r2|azure-blob] [--bucket <name>]';
 if (!brandId || typeof brandId !== 'string') {
   console.error(USAGE);
   process.exit(1);
@@ -176,17 +188,21 @@ function voiceDisplayName(id) {
 }
 
 /** Synthesize + stitch one chapter in one voice, working in `dir` (chunks are
- *  per-dir, so each voice gets its own) → { audioFile, timingsFile, durationMs }. */
+ *  per-dir, so each voice gets its own) → { audioFile, timingsFile, durationMs }.
+ *
+ *  Per-block incremental like the primary track (AB#7412): each voice keeps its
+ *  own block cache under its own directory, because the same words in a
+ *  different voice are different audio. */
 async function synthesizeVoiceTrack(chapter, voice, dir) {
   await mkdir(dir, { recursive: true });
-  const useKokoro = isKokoroVoice(voice);
-  const { synthesizeChapter } = useKokoro ? await import('./tts-kokoro.mjs') : await import('./tts.mjs');
-  const { chunks, blockTimings } = await synthesizeChapter(chapter, voice, dir, {
+  const { chunks, blockTimings, reused, resynthesized } = await synthesizeChapterIncremental(chapter, voice, dir, {
+    force: args['renarrate-all'] === true,
     key: process.env.AZURE_SPEECH_KEY,
     region: process.env.AZURE_SPEECH_REGION,
     onProgress: (blockId) => process.stdout.write(`\r  [${voice}] synthesized ${blockId}   `),
   });
   process.stdout.write('\n');
+  if (reused > 0) console.log(`  [${voice}] re-narrated ${resynthesized} block(s), reused ${reused}.`);
   const audioFile = join(dir, 'audio.mp3');
   const { timings, durationMs } = await stitchChapter(chunks, blockTimings, dir, audioFile);
   const timingsFile = join(dir, 'timings.json');
@@ -243,9 +259,32 @@ for (const { book, chapters } of books) {
 
 const changed = plan.filter((p) => p.changed);
 console.log(`Parsed ${plan.length} chapter(s); ${changed.length} changed since last publish.`);
+
+// ---- 1b. Conflict detection: what is LIVE that this run doesn't know about ----
+//
+// Read here, before a single object is uploaded, rather than at manifest time
+// where it used to be read — a check that runs after the chapter JSON has
+// already been overwritten is not a check.
+const liveManifest = await readLiveManifest();
+// --force downgrades the refusal to a warning; --dry-run reports without ever
+// refusing, because a dry run overwrites nothing by definition.
+reportConflicts(detectConflicts(), !args['dry-run'] && args.force !== true);
+
 if (args['dry-run']) {
   for (const p of plan) {
-    console.log(`  ${p.changed ? 'CHANGED ' : 'unchanged'} ${p.key} — ${p.chapter.blocks.length} blocks, ${p.chapter.wordCount} words, hash ${p.hash}`);
+    // Narration cost per chapter, not just "changed" (AB#7412): "this chapter
+    // changed" used to imply re-narrating all of it, and now it usually
+    // doesn't. Reported here so the cost is known before it is paid.
+    const audio = args['no-audio']
+      ? ''
+      : ` — narration: ${describeChapterAudio(
+          planChapterAudio(p.chapter.blocks, join(workRoot, p.book.id, p.chapter.id, 'blocks'), {
+            force: args['renarrate-all'] === true,
+          })
+        )}`;
+    console.log(
+      `  ${p.changed ? 'CHANGED ' : 'unchanged'} ${p.key} — ${p.chapter.blocks.length} blocks, ${p.chapter.wordCount} words, hash ${p.hash}${audio}`
+    );
   }
   process.exit(0);
 }
@@ -293,6 +332,13 @@ for (const item of args['manifest-only'] ? [] : changed) {
   const wantAudio = !args['no-audio'];
   if (wantAudio) {
     const useKokoro = isKokoroVoice(brand.tts.voice);
+    // What this chapter will ACTUALLY cost, decided before anything is spent:
+    // the per-block cache means an edited chapter usually bills for a paragraph,
+    // not for the chapter (AB#7412). The budget guard below is charged against
+    // that number rather than the whole chapter's length, because charging for
+    // characters that are never sent is how a publish gets refused for a typo
+    // fix it could easily have afforded.
+    const audioPlan = planChapterAudio(chapter.blocks, join(chapterDir, 'blocks'), { force: args['renarrate-all'] === true });
     if (!useKokoro) {
       // Azure-only guards: subscription env + the F0 monthly character budget.
       // The bundled Kokoro model is local and free — nothing to guard.
@@ -300,22 +346,36 @@ for (const item of args['manifest-only'] ? [] : changed) {
         console.error('AZURE_SPEECH_KEY / AZURE_SPEECH_REGION not set — rerun with --no-audio for a text-only publish.');
         process.exit(1);
       }
-      if (state.charLedger[month] + chapter.charLength > MONTHLY_CHAR_BUDGET) {
+      if (state.charLedger[month] + audioPlan.charCount > MONTHLY_CHAR_BUDGET) {
         console.error(
-          `Char budget: ${state.charLedger[month]} used + ${chapter.charLength} would exceed ${MONTHLY_CHAR_BUDGET} this month. ` +
+          `Char budget: ${state.charLedger[month]} used + ${audioPlan.charCount} would exceed ${MONTHLY_CHAR_BUDGET} this month. ` +
             `Skipping audio for ${key} — publish text-only with --no-audio, or wait for next month.`
         );
         process.exit(1);
       }
     }
-    console.log(`TTS (${useKokoro ? 'kokoro, local' : 'azure'}): ${key} (${chapter.charLength} chars)…`);
-    const { synthesizeChapter } = useKokoro ? await import('./tts-kokoro.mjs') : await import('./tts.mjs');
-    const { chunks, blockTimings, charCount } = await synthesizeChapter(chapter, brand.tts.voice, chapterDir, {
-      key: process.env.AZURE_SPEECH_KEY,
-      region: process.env.AZURE_SPEECH_REGION,
-      onProgress: (blockId) => process.stdout.write(`\r  synthesized ${blockId}   `),
-    });
+    console.log(`TTS (${useKokoro ? 'kokoro, local' : 'azure'}): ${key} — ${describeChapterAudio(audioPlan)}…`);
+    // Per-block, not per-chapter (AB#7412 — plan §3). Only the blocks whose
+    // spoken text actually changed are re-synthesized; the rest are spliced back
+    // in from the previous run's chunks, and stitchChapter re-derives every word
+    // timing against the real durations so word-sync survives the splice.
+    const { chunks, blockTimings, charCount, reused, resynthesized } = await synthesizeChapterIncremental(
+      chapter,
+      brand.tts.voice,
+      chapterDir,
+      {
+        force: args['renarrate-all'] === true,
+        key: process.env.AZURE_SPEECH_KEY,
+        region: process.env.AZURE_SPEECH_REGION,
+        onProgress: (blockId) => process.stdout.write(`\r  synthesized ${blockId}   `),
+      }
+    );
     process.stdout.write('\n');
+    console.log(
+      reused > 0
+        ? `  re-narrated ${resynthesized} block(s), reused ${reused} unchanged — ${charCount} chars synthesized.`
+        : `  narrated ${resynthesized} block(s) — ${charCount} chars synthesized.`
+    );
     const audioFile = join(chapterDir, 'audio.mp3');
     const { timings, durationMs } = await stitchChapter(chunks, blockTimings, chapterDir, audioFile);
     const timingsFile = join(chapterDir, 'timings.json');
@@ -528,6 +588,181 @@ async function pullSourceFromDeployment() {
   console.log(`Pulled ${pulled} chapter source file(s) from ${origin}; ${unchanged} already matched.`);
 }
 
+/**
+ * Read the deployment's own manifest — the live state this run is about to
+ * overwrite. Best effort: an unreachable origin, a first publish or a corrupt
+ * file all mean "nothing is live", which is the behaviour that existed before
+ * any of this.
+ *
+ * Read ONCE, early, and used for four separate things: conflict detection
+ * (below), the library version floor, origin preservation, and carrying through
+ * books this run doesn't own.
+ */
+async function readLiveManifest() {
+  if (args.local) {
+    // A --local publish has no origin to fetch; the "live" manifest is the one
+    // already mirrored into the local directory, and reading it keeps origin
+    // preservation and conflict detection working identically off-cloud (which
+    // is also what makes them testable without deploying anything).
+    const localManifest = join(process.env.STORYLARK_LOCAL_R2, 'manifest.json');
+    if (!existsSync(localManifest)) return null;
+    try {
+      return JSON.parse(await readFile(localManifest, 'utf8'));
+    } catch {
+      return null; // unreadable/corrupt — treat as absent, like an unreachable origin
+    }
+  }
+  if (!brand.contentOrigin) return null;
+  try {
+    const res = await fetch(`${brand.contentOrigin.replace(/\/+$/, '')}/manifest.json`, { cache: 'no-store' });
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null; // offline or no manifest yet — local state is the only source, as before
+  }
+}
+
+/**
+ * Conflict detection between a portal edit and a CLI publish (AB#7412 — plan
+ * §3's last open item).
+ *
+ * ── The failure this closes ─────────────────────────────────────────────────
+ * Since AB#7420 the deployment holds its own source and can be edited from its
+ * admin portal. `--pull` reconciles that back into a working tree WHEN ASKED,
+ * but a publish without it simply overwrote whatever the portal had, silently,
+ * with no way to notice afterwards: the manifest only records the winner.
+ *
+ * ── The rule, in one line ───────────────────────────────────────────────────
+ * A chapter conflicts when the LIVE content differs both from what this machine
+ * last published AND from what this run is about to publish.
+ *
+ * Both halves are load-bearing:
+ *
+ *   • `live === base`  — the deployment is exactly where this machine left it.
+ *     Nobody has touched it, so publishing over it loses nothing. This is the
+ *     ordinary case and it must stay silent.
+ *   • `live === local` — the deployment already holds the very text about to be
+ *     written. That is precisely the state a `--pull` leaves behind, so the
+ *     documented reconciliation must not then be refused by the check that
+ *     recommended it.
+ *
+ * Everything else — a portal edit this laptop never saw, two people editing the
+ * same chapter, a second machine publishing the same book — lands in between
+ * and is refused.
+ *
+ * ── Why contentHash and not a timestamp ─────────────────────────────────────
+ * `contentHash` is already on every manifest entry, both writers compute it
+ * with code proven equivalent (packages/worker/test/md-parity.test.mjs), and it
+ * describes the text rather than when someone's clock said they typed it. A
+ * timestamp comparison across a laptop and a datacentre is a bug waiting for a
+ * daylight-saving change; a hash comparison is not.
+ */
+function detectConflicts() {
+  const blocking = [];
+  const warnings = [];
+  if (!liveManifest) return { blocking, warnings };
+
+  const live = new Map((liveManifest.books ?? []).map((b) => [b.id, b]));
+  const planned = new Map();
+  for (const p of plan) {
+    if (!planned.has(p.book.id)) planned.set(p.book.id, []);
+    planned.get(p.book.id).push(p);
+  }
+
+  for (const [bookId, items] of planned) {
+    const liveBook = live.get(bookId);
+    if (!liveBook) continue; // never published — nothing of anyone else's here
+
+    // Content this run does not own is carried through untouched (see §5b), so
+    // it cannot be clobbered and must not be reported as if it could.
+    if ((liveBook.origin ?? 'cli') !== (declaredOrigin ?? 'cli')) continue;
+
+    const liveChapters = new Map((liveBook.chapters ?? []).map((ch) => [ch.id, ch]));
+
+    for (const p of items) {
+      const liveChapter = liveChapters.get(p.chapter.id);
+      if (!liveChapter) continue; // new here, nothing live to lose
+      const base = p.prev?.hash;
+      if (liveChapter.contentHash === base) continue; // deployment is where we left it
+      if (liveChapter.contentHash === p.hash) continue; // deployment already holds this exact text
+      blocking.push({
+        kind: 'edited',
+        key: p.key,
+        live: liveChapter.contentHash,
+        base: base ?? '(never published from this machine)',
+        local: p.hash,
+      });
+    }
+
+    // A chapter that exists live and has no local file at all. The manifest is
+    // regenerated from what was parsed, so publishing would DELETE it — and the
+    // overwhelmingly likely reason it exists is that somebody wrote it in the
+    // portal, where there is no local file to have.
+    const plannedIds = new Set(items.map((p) => p.chapter.id));
+    for (const ch of liveBook.chapters ?? []) {
+      if (plannedIds.has(ch.id)) continue;
+      blocking.push({ kind: 'orphan', key: `${bookId}/${ch.id}`, live: ch.contentHash });
+    }
+
+    // Order divergence is a warning, not a refusal. `publish.mjs` derives
+    // chapter order from the numeric filename prefixes and always has; a portal
+    // reorder is a manifest-only change. Restoring the file order is therefore
+    // the correct behaviour AND a surprise, so it is announced rather than
+    // either hidden or treated as an error.
+    const liveOrder = (liveBook.chapters ?? []).map((ch) => ch.id).filter((id) => plannedIds.has(id));
+    const localOrder = items.map((p) => p.chapter.id);
+    if (liveOrder.length === localOrder.length && liveOrder.join(' ') !== localOrder.join(' ')) {
+      warnings.push(
+        `${bookId}: the deployment's chapter order differs from your files (live: ${liveOrder.join(' → ')}; ` +
+          `publishing: ${localOrder.join(' → ')}). Order comes from the numeric filename prefixes, so this publish ` +
+          `restores the file order. Rename the files to keep a reorder made in the portal.`
+      );
+    }
+
+    // Book metadata the portal can edit and a publish would quietly revert.
+    const localBook = items[0].book;
+    for (const field of ['title', 'author', 'description']) {
+      const liveValue = liveBook[field];
+      const localValue = localBook[field];
+      if (liveValue === undefined || liveValue === localValue) continue;
+      warnings.push(`${bookId}: ${field} is "${liveValue}" on the deployment and "${localValue ?? '(unset)'}" here — publishing overwrites it.`);
+    }
+  }
+
+  return { blocking, warnings };
+}
+
+/** Say what was found, and stop before anything is overwritten. */
+function reportConflicts({ blocking, warnings }, refuse) {
+  for (const w of warnings) console.warn(`Warning: ${w}`);
+  if (blocking.length === 0) return;
+
+  const lines = ['', 'CONFLICT — the deployment holds content this publish does not know about.', ''];
+  for (const c of blocking) {
+    if (c.kind === 'orphan') {
+      lines.push(`  ${c.key}`);
+      lines.push(`      Exists on the deployment (${c.live}) and has no file in your source.`);
+      lines.push('      Almost certainly written in the admin portal. Publishing would remove it from the library.');
+    } else {
+      lines.push(`  ${c.key}`);
+      lines.push(`      live ${c.live} · last published from here ${c.base} · about to publish ${c.local}`);
+      lines.push('      The deployment changed after your last publish — an admin-portal edit, or another machine.');
+      lines.push("      Publishing would replace that text with this working tree's copy.");
+    }
+    lines.push('');
+  }
+  lines.push('Reconcile first — both are one command:');
+  lines.push('  publish --pull      fetch the deployment\'s text into this working tree, review it, then publish');
+  lines.push('  publish --force     publish anyway, overwriting what is live');
+  lines.push('');
+
+  if (!refuse) {
+    console.warn(lines.join('\n'));
+    return;
+  }
+  console.error(lines.join('\n'));
+  process.exit(2);
+}
+
 /** Where a book's cover art lives on disk, or null if it has none. */
 function coverSourceFor(book) {
   // Site-repo art (a book declares its cover path via coverSource).
@@ -557,28 +792,8 @@ function coverSourceFor(book) {
 // `sync` (and therefore stays read-only in the portal) even when this run is a
 // plain `npm run publish`, and a story written in the portal stays `portal`.
 // Only an explicit --origin overrides what is already live.
-let liveManifest = null;
-if (args.local) {
-  // A --local publish has no origin to fetch; the "live" manifest is the one
-  // already mirrored into the local directory, and reading it keeps origin
-  // preservation working identically off-cloud (which is also what makes it
-  // testable without deploying anything).
-  const localManifest = join(process.env.STORYLARK_LOCAL_R2, 'manifest.json');
-  if (existsSync(localManifest)) {
-    try {
-      liveManifest = JSON.parse(await readFile(localManifest, 'utf8'));
-    } catch {
-      // unreadable/corrupt — treat as absent, exactly like an unreachable origin
-    }
-  }
-} else if (brand.contentOrigin) {
-  try {
-    const res = await fetch(`${brand.contentOrigin.replace(/\/+$/, '')}/manifest.json`, { cache: 'no-store' });
-    if (res.ok) liveManifest = await res.json();
-  } catch {
-    // offline or no manifest yet — local state is the only source, as before
-  }
-}
+// `liveManifest` is read ONCE, early — see readLiveManifest()'s definition and
+// the conflict gate that consumes it before anything is uploaded.
 // Whatever is already published wins, local or remote: a manifest version that
 // goes backwards is a manifest no reader ever re-fetches. Two publishes into the
 // same local directory from different --bucket state files would otherwise both

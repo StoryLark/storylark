@@ -240,6 +240,11 @@ export async function contentHash(obj: unknown): Promise<string> {
  * a block from the previous publish keeps its old ID, so bookmarks and progress
  * survive an edit elsewhere in the chapter. This is what makes "fix a typo in
  * paragraph 3" not throw away every reader's place in the other 40 paragraphs.
+ *
+ * The two-pass structure and the reason ids MUST come out unique are documented
+ * on the pipeline's copy (packages/pipeline/lib/md.mjs). Both are kept in step
+ * by packages/worker/test/md-parity.test.mjs, which now asserts uniqueness
+ * across the insert-at-the-top case that used to produce two `b001`s.
  */
 export async function stabilizeBlockIds(blocks: Block[], previousBlocks?: Block[]): Promise<Block[]> {
   if (!previousBlocks?.length) return blocks;
@@ -249,19 +254,37 @@ export async function stabilizeBlockIds(blocks: Block[], previousBlocks?: Block[
     if (!prevByHash.has(h)) prevByHash.set(h, []);
     prevByHash.get(h)!.push(p.id);
   }
+
+  // Pass 1 — inherit, reserving every inherited id up front.
   const used = new Set<string>();
-  const out: Block[] = [];
+  const inherited: (string | null)[] = [];
   for (const b of blocks) {
     const h = await contentHash({ t: b.type, x: blockPlainText(b) });
     const id = (prevByHash.get(h) ?? []).find((c) => !used.has(c));
-    if (id) {
-      used.add(id);
-      out.push({ ...b, id });
-    } else {
-      out.push(b);
-    }
+    if (id) used.add(id);
+    inherited.push(id ?? null);
   }
-  return out;
+
+  // Pass 2 — keep a parsed id when it is free, otherwise take the lowest bNNN
+  // nobody is using.
+  let counter = 0;
+  const nextFreeId = (): string => {
+    let id: string;
+    do {
+      id = `b${String(++counter).padStart(3, '0')}`;
+    } while (used.has(id));
+    used.add(id);
+    return id;
+  };
+  return blocks.map((b, i) => {
+    const id = inherited[i];
+    if (id) return { ...b, id };
+    if (!used.has(b.id)) {
+      used.add(b.id);
+      return b;
+    }
+    return { ...b, id: nextFreeId() };
+  });
 }
 
 const WORDS_PER_MINUTE = 200;

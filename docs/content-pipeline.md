@@ -51,6 +51,8 @@ The two required flags:
 | `--manifest-only` | Regenerate and re-upload just the manifest (after a manifest-schema change), without re-publishing chapters. Requires all chapters to have been published before. |
 | `--pull` | **Before** parsing, fetch each chapter's source markdown back from the live deployment and write it into your source repo. This is how an edit made in the admin portal reaches your machine instead of being overwritten by this publish. One-way (deployment → local) and only when asked. See "Editing on the deployment" below. |
 | `--no-source` | Don't upload the source markdown — derived artifacts only, the pre-0.12 behaviour. The deployment then can't be edited from its own admin portal. |
+| `--force` | Publish even when the deployment holds content this working tree doesn't know about. Without it, a publish that would overwrite an admin-portal edit — or drop a chapter written there — **refuses and exits 2**, naming each conflict. See "Editing on the deployment" below. |
+| `--renarrate-all` | Ignore the per-block narration cache and re-synthesize every block. A republish normally re-narrates only the blocks whose spoken text changed and splices the rest of the audio back in unchanged; use this after changing voice settings, or if you suspect a cached chunk is bad. |
 | `--origin portal\|cli\|sync` | What to record as this content's `origin` in the manifest. Defaults to whatever the live manifest already says, falling back to `cli` — so an ordinary republish never relabels where content came from. Set to `sync` by `sync.mjs`; you should not normally pass it by hand, because `sync` makes content read-only in the admin portal. See [`content-sync.md`](content-sync.md). |
 | `--sync-kind`, `--sync-url`, `--sync-ref`, `--sync-path` | Recorded alongside `--origin sync`: which connector produced this book and where its real source of truth lives, so the portal can say "edit at source" with a link. Never a credential — the manifest is public. |
 
@@ -260,6 +262,67 @@ Two related behaviours exist for the same reason:
   date exactly when it has narration whose hash isn't the current content hash.
   That covers a `--no-audio` publish of changed text as well as a portal edit,
   and it clears itself on the run that re-narrates.
+
+### A publish that would overwrite a portal edit refuses
+
+`--pull` reconciles when you ask. What happens when you don't ask is that the
+publish **stops**, before it uploads anything:
+
+```
+CONFLICT — the deployment holds content this publish does not know about.
+
+  lamplight/full
+      live 9f2a1c04 · last published from here 8b3a9bf7 · about to publish faf50355
+      The deployment changed after your last publish — an admin-portal edit, or another machine.
+      Publishing would replace that text with this working tree's copy.
+
+Reconcile first — both are one command:
+  publish --pull      fetch the deployment's text into this working tree, review it, then publish
+  publish --force     publish anyway, overwriting what is live
+```
+
+The rule is one line: **a chapter conflicts when the live content differs both
+from what this machine last published and from what this run is about to
+publish.** So the ordinary case — nobody has touched the deployment — stays
+silent, and running `--pull` and then publishing is never refused by the check
+that recommended it, because after a pull the deployment already holds exactly
+what is about to be written.
+
+A chapter that exists on the deployment with no local file is refused for the
+same reason: the manifest is regenerated from what was parsed, so publishing
+would unpublish a story someone wrote in the portal. `--pull` brings it down as
+a local file; `--force` deletes it deliberately.
+
+Two things are **warnings** rather than refusals, because for them the overwrite
+is the correct behaviour and only the surprise needs removing: a chapter order
+that differs from your filename prefixes (the CLI takes order from the prefixes,
+so it restores them — rename the files to keep a reorder made in the portal),
+and a book title/author/description edited in the portal.
+
+### Re-narration is per block
+
+A republish re-synthesizes only the blocks whose spoken text changed, and
+splices the rest of the audio back in from the previous run:
+
+```
+TTS (kokoro, local): lamplight/full — 1 of 5 blocks need narration, 4 reused (71 chars)…
+  re-narrated 1 block(s), reused 4 unchanged — 71 chars synthesized.
+```
+
+Chunks are cached under `.storylark/work/<bucket>/<book>/<chapter>/blocks/`,
+keyed by a hash of each block's **type and spoken text** — not its id or its
+position — so inserting a paragraph at the top of a chapter renumbers every
+block after it and still costs one block of narration. Reordering paragraphs, or
+reverting to text that was narrated before, costs nothing.
+
+The stitched result is rebuilt in the chapter's current order and every block's
+word timings are re-derived from the measured chunk durations, so word-sync
+highlighting stays correct across a partial re-narration. On a metered provider
+the character budget is charged for what is actually sent.
+
+The cache is a build directory: deleting it costs a full re-narration and never
+a wrong one. `--renarrate-all` ignores it, and `--dry-run` reports the cost per
+chapter before you pay it.
 
 The bucket is named `<brand>-content`; an R2 custom domain serves the bucket root
 at the brand's `contentOrigin`, which is exactly what the app fetches from

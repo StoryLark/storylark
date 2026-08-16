@@ -210,6 +210,23 @@ export function countWords(blocks) {
  * Keeps block IDs stable across republishes: any block whose text hash matches
  * a block from the previous publish keeps its old ID, so bookmarks and
  * progress survive edits elsewhere in the chapter.
+ *
+ * ── Uniqueness is not optional (AB#7412) ────────────────────────────────────
+ * Inheriting an id can COLLIDE with a freshly-parsed one. Insert a paragraph at
+ * the top of a chapter: the new block parses as `b001` and keeps it (nothing
+ * matches), while the old first paragraph — now parsed as `b002` — inherits
+ * `b001`. Two blocks, one id.
+ *
+ * That was real and it broke three things at once: `stitch.mjs` keys word
+ * timings by block id, so the second `b001` silently took the first's timings
+ * and word-sync highlighting went wrong from there on; reader progress and
+ * bookmarks address a block by id and would land on whichever came first; and
+ * the chapter's content hash stopped being idempotent, so republishing an
+ * unchanged file produced a different hash every time.
+ *
+ * The fix is one extra pass: inherit first, then give every block that
+ * inherited nothing an id that is genuinely free. A chapter with no collisions
+ * comes out byte-for-byte as before, so no existing content re-hashes.
  */
 export function stabilizeBlockIds(blocks, previousBlocks) {
   if (!previousBlocks?.length) return blocks;
@@ -219,15 +236,34 @@ export function stabilizeBlockIds(blocks, previousBlocks) {
     if (!prevByHash.has(h)) prevByHash.set(h, []);
     prevByHash.get(h).push(p.id);
   }
+
+  // Pass 1 — inherit. Reserving every inherited id BEFORE any parsed id is
+  // kept is what makes pass 2 able to tell "free" from "about to be taken".
   const used = new Set();
-  return blocks.map((b) => {
+  const inherited = blocks.map((b) => {
     const h = contentHash({ t: b.type, x: blockPlainText(b) });
-    const candidates = prevByHash.get(h) ?? [];
-    const id = candidates.find((c) => !used.has(c));
-    if (id) {
-      used.add(id);
-      return { ...b, id };
+    const id = (prevByHash.get(h) ?? []).find((c) => !used.has(c));
+    if (id) used.add(id);
+    return id ?? null;
+  });
+
+  // Pass 2 — everything else keeps its parsed id when that id is still free,
+  // and otherwise takes the lowest bNNN nobody is using.
+  let counter = 0;
+  const nextFreeId = () => {
+    let id;
+    do {
+      id = `b${String(++counter).padStart(3, '0')}`;
+    } while (used.has(id));
+    used.add(id);
+    return id;
+  };
+  return blocks.map((b, i) => {
+    if (inherited[i]) return { ...b, id: inherited[i] };
+    if (!used.has(b.id)) {
+      used.add(b.id);
+      return b;
     }
-    return b;
+    return { ...b, id: nextFreeId() };
   });
 }

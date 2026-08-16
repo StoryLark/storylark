@@ -135,6 +135,73 @@ test('stabilizeBlockIds agrees — reader bookmarks depend on it', async () => {
   assert.deepEqual(await worker.stabilizeBlockIds(after, []), node.stabilizeBlockIds(after, []));
 });
 
+/**
+ * The bug per-block re-narration surfaced (AB#7412).
+ *
+ * Insert a paragraph at the TOP of a chapter and, before the fix, two blocks
+ * came back carrying `b001`: the new one kept its freshly-parsed id while the
+ * old first paragraph inherited the same id from the previous publish. That
+ * broke three things at once — `stitch.mjs` keys word timings by block id, so
+ * the second `b001` silently took the first's timings; reader progress and
+ * bookmarks address a block by id; and the chapter's content hash stopped being
+ * idempotent, so republishing an unchanged file produced a new hash every time
+ * (which in turn makes conflict detection fire on a publish that changed
+ * nothing).
+ *
+ * Asserted on BOTH implementations, because a portal edit and a CLI publish
+ * both go through this and both would corrupt the same ids.
+ */
+test('stabilizeBlockIds never emits a duplicate id, and is idempotent', async () => {
+  const cases = [
+    ['insert at the top', 'Alpha.\n\nBravo.\n\nCharlie.', 'Zulu.\n\nAlpha.\n\nBravo.\n\nCharlie.'],
+    ['insert two at the top', 'Alpha.\n\nBravo.', 'Yankee.\n\nZulu.\n\nAlpha.\n\nBravo.'],
+    ['move the last paragraph first', 'Alpha.\n\nBravo.\n\nCharlie.', 'Charlie.\n\nAlpha.\n\nBravo.'],
+    ['reverse everything', 'Alpha.\n\nBravo.\n\nCharlie.', 'Charlie.\n\nBravo.\n\nAlpha.'],
+    ['insert amid images and beats', 'Alpha.\n\n![Art](/i/a.png)\n\n*End of One.*', 'New opening.\n\nAlpha.\n\n![Art](/i/a.png)\n\n*End of One.*'],
+  ];
+
+  for (const [name, beforeSrc, afterSrc] of cases) {
+    const before = node.parseBlocks(beforeSrc);
+    const after = node.parseBlocks(afterSrc);
+
+    for (const [impl, run] of [
+      ['pipeline', (b, p) => node.stabilizeBlockIds(b, p)],
+      ['worker', (b, p) => worker.stabilizeBlockIds(b, p)],
+    ]) {
+      const once = await run(after, before);
+      const ids = once.map((b) => b.id);
+      assert.equal(new Set(ids).size, ids.length, `${name} (${impl}): duplicate block id in ${ids.join(', ')}`);
+
+      // Idempotent: stabilizing the same text against its own output must not
+      // move a single id, or every republish looks like a change.
+      const twice = await run(node.parseBlocks(afterSrc), once);
+      assert.deepEqual(
+        twice.map((b) => b.id),
+        ids,
+        `${name} (${impl}): a second pass moved the ids`
+      );
+      assert.equal(node.contentHash({ blocks: twice }), node.contentHash({ blocks: once }), `${name} (${impl}): hash is not idempotent`);
+    }
+
+    // …and the two implementations still agree, which is this file's whole job.
+    assert.deepEqual(await worker.stabilizeBlockIds(after, before), node.stabilizeBlockIds(after, before), name);
+  }
+});
+
+test('stabilizeBlockIds still preserves ids for an in-place edit — no content re-hashes for free', async () => {
+  // The guard on the fix itself: a chapter with no id collision must come out
+  // exactly as it did before the two-pass change, or every existing chapter in
+  // every deployment would re-hash and re-narrate on the next publish.
+  const before = node.parseBlocks('Alpha.\n\nBravo.\n\nCharlie.');
+  const after = node.parseBlocks('Alpha.\n\nBravo, reworded.\n\nCharlie.');
+  const out = node.stabilizeBlockIds(after, before);
+  assert.deepEqual(
+    out.map((b) => b.id),
+    ['b001', 'b002', 'b003']
+  );
+  assert.deepEqual(await worker.stabilizeBlockIds(after, before), out);
+});
+
 test('chapterMeta matches what markdown-import.mjs derives', async () => {
   // markdown-import.mjs owns this derivation on the CLI side; the Worker needs
   // the same numbers or an edited chapter's reading time would jump on save.
