@@ -237,6 +237,19 @@ async function deploy() {
   const databaseUrl = `postgresql://${dbAdminUser}:${env.DB_ADMIN_PASSWORD}@${outputs.postgresHost.value}:5432/storylark?sslmode=require`;
   const webAppName = `${env.BRAND_ID}-app`;
 
+  // Refresh node_modules BEFORE migrating: migrate-postgres.mjs ships as
+  // part of storylark-worker's own npm package, so its migrations-postgres/
+  // set is only as current as whatever's on disk here. A bumped
+  // package.json dependency range means nothing until an install actually
+  // pulls the new version — confirmed live: a package.json bump to
+  // ^0.8.0 with no `npm install` ran the migrate step against a stale
+  // 0.7.1 node_modules, which truthfully reported "up to date" against an
+  // incomplete migration set (missing 0007_admin_accounts.sql) while the
+  // separately-built/deployed app code was already current, leaving the
+  // database out of sync with the code that reads it.
+  console.log('\nInstalling dependencies (picks up any storylark-worker/storylark-core version bump)...');
+  run('npm', ['install'], { stdio: 'inherit', cwd: __dirname });
+
   console.log('\nApplying database migrations...');
   // migrate-postgres.mjs ships as part of storylark-worker itself (not the
   // engine-repo-only path this used to hardcode) — resolves the same way in
