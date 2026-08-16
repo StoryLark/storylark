@@ -355,6 +355,22 @@ select:focus-visible {
   gap: 0.35rem;
 }
 
+/* The update command in the admin portal's Platform update card — a command to
+   copy, so it wraps rather than scrolls sideways on a phone. */
+.admin-command {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  padding: 0.6rem 0.75rem;
+  margin: 0.5rem 0;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
 .admin-markdown-input {
   width: 100%;
   font-family: var(--font-mono);

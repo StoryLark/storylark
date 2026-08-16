@@ -91,18 +91,20 @@ async function main() {
   const envPath = writeEnvFile(platform, values);
   console.log(`\nWrote ${envPath}`);
 
-  // Best-effort: self-update.yml (self-update, AB#7403) reads this repo
-  // variable to know which platform's deploy job to run. Skips silently if
-  // gh isn't installed/authenticated or this isn't a git repo yet — the
-  // workflow's own comments document setting it by hand as a fallback.
+  // Best-effort: publish.yml (content publishing, AB#7405) reads this repo
+  // variable to know which storage flag to pass. Skips silently if gh isn't
+  // installed/authenticated or this isn't a git repo yet — the workflow's own
+  // comments document setting it by hand as a fallback. Nothing about platform
+  // *updates* depends on this: those run from your own machine via the
+  // installer's --update mode, with no CI and no GitHub credential involved.
   try {
     execFileSync('gh', ['variable', 'set', 'STORYLARK_PLATFORM', '--body', platform], {
       shell: process.platform === 'win32',
       stdio: 'pipe',
     });
-    console.log(`✓ Set the STORYLARK_PLATFORM=${platform} repo variable for self-update.yml`);
+    console.log(`✓ Set the STORYLARK_PLATFORM=${platform} repo variable for publish.yml`);
   } catch {
-    console.log(`(Skipped setting STORYLARK_PLATFORM automatically — set it by hand in your repo's Actions variables for self-update.yml to work: ${platform})`);
+    console.log(`(Skipped setting STORYLARK_PLATFORM automatically — set it by hand in your repo's Actions variables for publish.yml to work: ${platform})`);
   }
 
   const installerDir = join(__dirname, PLATFORMS[platform].dir);

@@ -19,10 +19,17 @@ export interface Env {
   GOOGLE_CLIENT_SECRET: string;
   ADMIN_KEY: string;
   VAPID_PUBLIC_KEY: string;
-  // Self-update (AB#7403): optional — the admin portal's update card degrades
-  // to "check-only" without these. GITHUB_REPO is "owner/repo" for the
-  // site's own deployment repo; GITHUB_DEPLOY_TOKEN needs Actions:write on
-  // it (a fine-grained PAT scoped to just this repo, not a broad token).
+  // Admin story upload (AB#7405): optional, and used by that one feature only
+  // — POST /api/admin/publish-story commits the markdown to the site's repo
+  // and dispatches publish.yml. GITHUB_REPO is "owner/repo"; GITHUB_DEPLOY_TOKEN
+  // needs Contents:write + Actions:write on it (a fine-grained PAT scoped to
+  // just this repo, not a broad token).
+  //
+  // Platform updates deliberately do NOT use these (AB#7403). An installed
+  // reading app has no business holding a GitHub credential to update itself;
+  // updates run from the operator's own machine via the installer's --update
+  // mode, using the platform credentials they already have. See
+  // docs/updating.md and GET /api/admin/update-status's updateCommand.
   GITHUB_REPO: string;
   GITHUB_DEPLOY_TOKEN: string;
   // Operator notifications (AB#7403/F2) — optional. Without both, the

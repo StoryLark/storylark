@@ -22,7 +22,6 @@ function requireAdminKey(c: { req: { header(name: string): string | undefined };
  * any user can exist) and POST /publish (see requireAdminOrKey below).
  */
 admin.use('/update-status', requireAdmin());
-admin.use('/update-install', requireAdmin());
 admin.use('/status', requireAdmin());
 admin.use('/publish-story', requireAdmin());
 
@@ -48,64 +47,56 @@ function requireAdminOrKey() {
 admin.use('/publish', requireAdminOrKey());
 
 /**
- * Self-update, part 1: what's running vs what's published. `current` is this
- * exact deployment's installed storylark-worker version (its own
- * package.json — reflects what's *actually* deployed, not an assumption).
- * `hasUpdate` compares against the live npm registry.
+ * Which installer the operator should reach for. Detected from the runtime,
+ * not from configuration: workerd sets navigator.userAgent to
+ * 'Cloudflare-Workers', and every other supported host today is the Node
+ * server in platforms/azure/server.mjs. Deliberately NOT a new env var — an
+ * update instruction that only works if someone remembered to set a variable
+ * is worse than useless.
+ */
+function detectPlatform(): 'cloudflare' | 'node' {
+  return typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers' ? 'cloudflare' : 'node';
+}
+
+const UPDATE_COMMANDS = {
+  cloudflare: 'node platforms/cloudflare/install.mjs --update --yes',
+  node: 'node platforms/azure/install.mjs --update --yes',
+} as const;
+
+/**
+ * Update status (AB#7403) — the notify half, and the only half that lives in
+ * the deployment at all.
+ *
+ * `current` is this exact deployment's installed storylark-worker version (its
+ * own package.json — reflects what's *actually* deployed, not an assumption);
+ * `hasUpdate` compares it against the live npm registry, unauthenticated and
+ * read-only.
+ *
+ * Installing is deliberately NOT something this deployment can do. It hands
+ * back `updateCommand`: the installer command the operator runs from their own
+ * machine, with the platform credentials they already hold. A deployment that
+ * could update itself would have to hold a standing deploy credential, and
+ * that credential — a GitHub PAT, in the version this replaced — is exactly
+ * what a reading app has no business storing. See docs/updating.md.
  */
 admin.get('/update-status', async (c) => {
   try {
     const res = await fetch('https://registry.npmjs.org/storylark-worker/latest');
     if (!res.ok) throw new Error(`registry ${res.status}`);
     const { version: latest } = (await res.json()) as { version: string };
+    const platform = detectPlatform();
     return c.json({
       current: workerPkg.version,
       latest,
       hasUpdate: latest !== workerPkg.version,
       releaseNotesUrl: 'https://storylark.org/docs/changelog.html',
-      selfUpdateConfigured: Boolean(c.env.GITHUB_REPO && c.env.GITHUB_DEPLOY_TOKEN),
+      platform,
+      updateCommand: UPDATE_COMMANDS[platform],
+      updateDocsUrl: 'https://storylark.org/docs/updating.html',
     });
   } catch {
     return c.json({ error: 'check_failed' }, 502);
   }
-});
-
-/**
- * Self-update, part 2: the click is the approval. A Worker has no
- * filesystem or build tooling to rebuild/redeploy itself — the real update
- * work (bump the pinned version, migrate, build, deploy) runs in the site's
- * own GitHub Actions (self-update.yml, provisioned by the installer/scaffold
- * — see create-storylark/template and docs/updating.md). This endpoint's
- * entire job is: confirm the caller is a signed-in operator (requireAdmin,
- * above), then dispatch that workflow.
- */
-admin.post('/update-install', async (c) => {
-  if (!c.env.GITHUB_REPO || !c.env.GITHUB_DEPLOY_TOKEN) {
-    return c.json(
-      {
-        error: 'not_configured',
-        message: 'Self-update needs the GITHUB_REPO and GITHUB_DEPLOY_TOKEN secrets set. See docs/updating.md.',
-      },
-      501
-    );
-  }
-  const res = await fetch(
-    `https://api.github.com/repos/${c.env.GITHUB_REPO}/actions/workflows/self-update.yml/dispatches`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${c.env.GITHUB_DEPLOY_TOKEN}`,
-        Accept: 'application/vnd.github+json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'storylark-admin-portal',
-      },
-      body: JSON.stringify({ ref: 'main' }),
-    }
-  );
-  if (!res.ok) {
-    return c.json({ error: 'dispatch_failed', status: res.status, detail: await res.text() }, 502);
-  }
-  return c.json({ ok: true, message: 'Update started. This rebuilds, migrates, and redeploys in the background — check back in a few minutes.' });
 });
 
 /**

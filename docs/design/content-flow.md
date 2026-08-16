@@ -12,8 +12,9 @@ alongside it per the documentation standard.
 
 `packages/pipeline/publish.mjs` is the single entry point, whether it's
 invoked from the CLI or dispatched by the admin portal's story-upload form
-(via `publish.yml` — see [`update-flow.md`](update-flow.md) for the sibling
-self-update mechanism, which uses the same dispatch pattern).
+(via `publish.yml`). Engine updates are deliberately *not* shaped this way —
+see [`update-flow.md`](update-flow.md) for why they run from the operator's
+machine instead of from the deployment.
 
 1. **Parse** — `lib/markdown-import.mjs` (the default) or a custom
    `--parser` turns your source into the canonical

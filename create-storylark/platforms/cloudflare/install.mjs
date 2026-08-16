@@ -7,9 +7,28 @@
 //   node platforms/cloudflare/install.mjs --deploy   adds the brand's wrangler env
 //                                                     block, creates D1 + R2,
 //                                                     migrates, builds, deploys
+//   node platforms/cloudflare/install.mjs --update   pulls the latest engine
+//                                                     packages, then migrates +
+//                                                     rebuilds + redeploys an
+//                                                     EXISTING deployment
 //
 // --deploy creates real Cloudflare resources. It refuses to run without
 // --yes on top of a passing verify, matching the Azure installer.
+//
+// --update (AB#7403, "platform updates must not need a GitHub token") is the
+// supported way to take a new engine release. It creates nothing: no D1, no
+// R2, no secrets, no wrangler.jsonc edits — it bumps the pinned engine
+// version, migrates, rebuilds with your brand untouched, and redeploys the
+// Worker. The only credential involved is your own `wrangler login`; nothing
+// new is ever stored in the deployment. Also needs --yes, because it
+// redeploys a live site.
+//
+// Note for this repo specifically: run inside the StoryLark engine monorepo,
+// the Worker is bundled from packages/worker/src, not from the published
+// storylark-worker package — so --update here rebuilds and redeploys your
+// working tree rather than pulling a release. --update's npm bump only does
+// real work in a standalone `npm create storylark` site, which is what a
+// customer deployment actually is.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -19,6 +38,13 @@ import { dirname, join } from 'node:path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
 const args = new Set(process.argv.slice(2));
+
+// Same two physical layouts platforms/azure/install.mjs handles: inside the
+// engine monorepo (the site lives in app/, the Worker is bundled from
+// packages/worker/src) or inside a standalone `npm create storylark` scaffold
+// (ROOT *is* the site, and both the app and the Worker come from the published
+// storylark-core/storylark-worker packages).
+const IS_MONOREPO = existsSync(join(ROOT, 'app', 'package.json'));
 
 const WIN = process.platform === 'win32';
 const q = (s) => (WIN && /[\s,]/.test(s) ? `"${s}"` : s);
@@ -118,7 +144,12 @@ async function printAdminSetup(origin, adminKey) {
   console.log('='.repeat(72) + '\n');
 }
 
-function verify() {
+/**
+ * `quiet` skips the closing "re-run with --deploy" line: --update calls this
+ * for its own preflight, and telling an operator mid-update to go run --deploy
+ * would be actively wrong advice.
+ */
+function verify(quiet = false) {
   console.log('Verifying install.env and Wrangler CLI state...\n');
   let ok = true;
 
@@ -135,10 +166,12 @@ function verify() {
     ok = false;
   }
 
-  if (env.BRAND_ID && !existsSync(join(ROOT, 'brands', env.BRAND_ID))) {
+  // brands/<id>/ is a monorepo concept — a standalone scaffolded site carries
+  // its brand at its own root, so demanding the folder there is just wrong.
+  if (IS_MONOREPO && env.BRAND_ID && !existsSync(join(ROOT, 'brands', env.BRAND_ID))) {
     console.error(`✗ brands/${env.BRAND_ID}/ doesn't exist yet. Create it first (see docs/deploy-your-own.md).`);
     ok = false;
-  } else if (env.BRAND_ID) {
+  } else if (IS_MONOREPO && env.BRAND_ID) {
     console.log(`✓ brands/${env.BRAND_ID}/ exists`);
   }
 
@@ -151,7 +184,8 @@ function verify() {
     ok = false;
   }
 
-  console.log(ok ? '\nAll checks passed. Re-run with --deploy --yes to provision.' : '\nFix the issues above before deploying.');
+  if (!ok) console.log('\nFix the issues above before deploying.');
+  else if (!quiet) console.log('\nAll checks passed. Re-run with --deploy --yes to provision.');
   return ok;
 }
 
@@ -194,6 +228,87 @@ function ensureWranglerEnvBlock() {
   console.log(`✓ Added a wrangler.jsonc env block for "${env.BRAND_ID}" — fill in the real database_id after creating D1 below.`);
 }
 
+/**
+ * Everything that is NOT provisioning: migrate, build, deploy. Shared verbatim
+ * by --deploy and --update so the two paths can never drift — an update runs
+ * the exact same app deployment the first install did, which is what makes
+ * "re-run this whenever" safe.
+ */
+function migrateBuildDeploy() {
+  console.log('\nApplying D1 migrations...');
+  run('wrangler', ['d1', 'migrations', 'apply', env.BRAND_ID, '--env', env.BRAND_ID, '--remote'], { stdio: 'inherit', cwd: ROOT });
+
+  console.log(`\nBuilding app for brand "${env.BRAND_ID}"...`);
+  const buildArgs = IS_MONOREPO ? ['run', 'build', '-w', 'app', '--', '--mode', env.BRAND_ID] : ['run', 'build'];
+  run('npm', buildArgs, { stdio: 'inherit', cwd: ROOT });
+
+  console.log(`\nDeploying Worker "${env.BRAND_ID}"...`);
+  run('wrangler', ['deploy', '--env', env.BRAND_ID], { stdio: 'inherit', cwd: ROOT });
+}
+
+/** The pinned storylark-worker version in this site's package.json, or null. */
+function pinnedEngineVersion() {
+  try {
+    return JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).dependencies?.['storylark-worker'] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * --update (AB#7403): take a new engine release on an EXISTING deployment,
+ * using only the operator's own `wrangler login`. No D1/R2 creation, no
+ * wrangler.jsonc edits, no new secrets, no GitHub anything. Safe to re-run.
+ */
+async function update() {
+  if (!verify(true)) {
+    console.error('\nRefusing to update: verification failed.');
+    process.exit(1);
+  }
+  if (!args.has('--yes')) {
+    console.error('\n--update rebuilds and redeploys a live site. Re-run with --update --yes to confirm.');
+    process.exit(1);
+  }
+
+  const before = pinnedEngineVersion();
+  if (IS_MONOREPO) {
+    console.log(
+      '\nThis is the StoryLark engine monorepo: the Worker is bundled from\n' +
+        'packages/worker/src and the app from packages/core, so there is no pinned\n' +
+        'engine package to bump here. --update will migrate, rebuild, and redeploy\n' +
+        'this working tree as it stands. (In a standalone site — what a customer\n' +
+        'deployment is — this step pulls the latest published engine from npm.)'
+    );
+  } else {
+    console.log(`\nCurrently pinned engine: storylark-worker ${before ?? '(not pinned)'}`);
+    console.log('\nFetching the latest engine packages from npm...');
+    // Mirrors self-update.yml's bump step: pin exactly, so what you deployed
+    // is reproducible rather than "whatever the range resolved to that day".
+    run('npm', ['install', '--save-exact', 'storylark-core@latest', 'storylark-worker@latest'], { stdio: 'inherit', cwd: ROOT });
+  }
+
+  migrateBuildDeploy();
+
+  const after = pinnedEngineVersion();
+  console.log('\n' + '='.repeat(72));
+  console.log('UPDATE COMPLETE');
+  console.log('='.repeat(72));
+  if (!IS_MONOREPO && before && after && before !== after) {
+    console.log(`\nEngine: storylark-worker ${before} -> ${after}`);
+  } else if (!IS_MONOREPO && after) {
+    console.log(`\nEngine: storylark-worker ${after} (already the latest — rebuilt and redeployed anyway).`);
+  } else {
+    console.log('\nEngine: rebuilt and redeployed from this working tree.');
+  }
+  console.log(`Site:   ${env.APP_ORIGIN}`);
+  console.log('\nNothing about your brand or your content was touched: no resource was');
+  console.log('created or changed, no secret was added, and nothing new is stored in');
+  console.log('the deployment. The only credential used was your own wrangler login.');
+  console.log('\nCheck it landed: open /admin on the site — the Platform update card');
+  console.log('reads the version out of the deployment itself.');
+  console.log('='.repeat(72) + '\n');
+}
+
 async function deploy() {
   if (!verify()) {
     console.error('\nRefusing to deploy: verification failed.');
@@ -227,14 +342,7 @@ async function deploy() {
   console.log(`\nCreating R2 bucket "${env.BRAND_ID}-content"...`);
   run('wrangler', ['r2', 'bucket', 'create', `${env.BRAND_ID}-content`], { stdio: 'inherit', cwd: ROOT });
 
-  console.log('\nApplying D1 migrations...');
-  run('wrangler', ['d1', 'migrations', 'apply', env.BRAND_ID, '--env', env.BRAND_ID, '--remote'], { stdio: 'inherit', cwd: ROOT });
-
-  console.log(`\nBuilding app for brand "${env.BRAND_ID}"...`);
-  run('npm', ['run', 'build', '-w', 'app', '--', '--mode', env.BRAND_ID], { stdio: 'inherit', cwd: ROOT });
-
-  console.log(`\nDeploying Worker "${env.BRAND_ID}"...`);
-  run('wrangler', ['deploy', '--env', env.BRAND_ID], { stdio: 'inherit', cwd: ROOT });
+  migrateBuildDeploy();
 
   // ADMIN_KEY has to exist as a Worker secret before the mint call below can
   // authenticate. Set after `deploy` because `wrangler secret put` needs the
@@ -257,8 +365,9 @@ async function deploy() {
 }
 
 if (args.has('--deploy')) await deploy();
+else if (args.has('--update')) await update();
 else if (args.has('--verify') || args.size === 0) verify();
 else {
-  console.error('Usage: node install.mjs --verify | --deploy --yes');
+  console.error('Usage: node install.mjs --verify | --deploy --yes | --update --yes');
   process.exit(1);
 }

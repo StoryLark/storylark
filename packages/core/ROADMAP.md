@@ -54,13 +54,13 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
   env file, runs that platform's installer. Each installer verifies everything (login state,
   config validity) before creating anything, and only provisions real resources on explicit
   confirmation
-- **The deployed solution updates itself** — a Worker or App Service process can't rebuild
-  itself, so the real mechanism is the deployment triggering its own CI: an admin-facing
-  update card shows the current vs. latest engine version, and clicking Install dispatches the
-  site's own `self-update.yml`, which bumps the pinned version, migrates (with a database
-  snapshot on the Postgres path), builds, and redeploys. The click is the only way an update
-  ever ships — the updater can only touch the pinned engine version, never a brand's theme or
-  presentation
+- **Updates you can take in one command** — a Worker or App Service process can't rebuild
+  itself, and shouldn't hold a credential that lets it try: an admin-facing update card shows
+  the current vs. latest engine version and hands you the installer command
+  (`install.mjs --update --yes`), which you run from the machine you deploy from with the
+  platform login you already have. It bumps the pinned engine version, migrates, builds, and
+  redeploys. Nothing is stored in the deployment, and the updater can only touch the pinned
+  engine version, never a brand's theme or presentation
 - **A lightweight admin portal** (`/admin`) — the update card above, a status view (library
   size, push subscriber count), and a text story-upload form that commits markdown straight to
   the site's repo and publishes through the real, unchanged pipeline (never a second copy of
@@ -91,5 +91,5 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
 Hardening toward 1.0: an automated test suite and CI quality gate, a full device/browser QA
 pass, an accessibility audit, rate-limiting across every auth endpoint, complete API
 documentation, and a final API-stability review that freezes the config, theme, and manifest
-contracts for 1.0.0 — including the database/storage adapter interfaces and the self-update
-workflow contract.
+contracts for 1.0.0 — including the database/storage adapter interfaces and the installer's
+update contract.

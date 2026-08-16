@@ -66,8 +66,7 @@ where no browser can be involved. See [`admin-guide.md`](admin-guide.md).
 | Method & path | Auth | Behavior |
 |---|---|---|
 | `GET /api/admin/status` | admin session | Brand, engine version, book/chapter counts (from the public manifest), push subscriber count. |
-| `GET /api/admin/update-status` | admin session | Installed vs. latest published `storylark-worker`, plus whether self-update is configured. |
-| `POST /api/admin/update-install` | admin session | Dispatches the site's own `self-update.yml` workflow. |
+| `GET /api/admin/update-status` | admin session | `{current, latest, hasUpdate, releaseNotesUrl, platform, updateCommand, updateDocsUrl}`. `current` is the deployment's own installed `storylark-worker` version; `latest` is an unauthenticated read of the npm registry. `updateCommand` is the installer command the *operator* runs on their own machine — there is no install endpoint, by design (see [`updating.md`](updating.md)). |
 | `POST /api/admin/publish-story` | admin session | Commits `content/books/<id>.md` via the GitHub Contents API, then dispatches `publish.yml`. |
 | `POST /api/admin/publish` | `X-Admin-Key` **or** admin session | `{version}` → updates `library_state`, fans out **payload-less** VAPID pushes in batches of 50 (`ctx.waitUntil`). 404/410 endpoints deleted; 5 consecutive failures deletes. Called by `packages/pipeline/publish.mjs` as its final step — headless CI, hence the key door. |
 | `POST /api/admin/setup` | `X-Admin-Key` header | One-shot schema bootstrap. Key-gated because it runs before any user can exist. |

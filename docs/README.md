@@ -49,8 +49,9 @@ the same codebase.
 
 - **[Admin Guide](admin-guide.md)** — running your site from `/admin`: status,
   updates, story upload.
-- **[Updating](updating.md)** — how the built-in self-update works, from the
-  operator's chair: what you'll see, what the click does, what never changes.
+- **[Updating](updating.md)** — how you take a new engine release, from the
+  operator's chair: how you find out, the one command that does it, and what
+  never changes.
 
 ## Reference (design docs)
 
@@ -60,8 +61,8 @@ the same codebase.
   Cloudflare and Azure side by side, with a diagram.
 - **[Content Flow](design/content-flow.md)** — the add-a-story pipeline end to
   end, with a diagram.
-- **[Update Flow](design/update-flow.md)** — the self-update mechanism and why
-  it's shaped the way it is, with a diagram.
+- **[Update Flow](design/update-flow.md)** — the update mechanism, why the
+  deployment deliberately can't update itself, with a diagram.
 - **[API Reference](api.md)** — every `/api/*` endpoint served by the Worker.
 - **[Data Model](data-model.md)** — database tables, on-device IndexedDB stores,
   the content storage layout, and last-writer-wins sync.

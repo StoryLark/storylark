@@ -44,7 +44,11 @@ interface UpdateStatusResponse {
   latest: string;
   hasUpdate: boolean;
   releaseNotesUrl: string;
-  selfUpdateConfigured: boolean;
+  /** Which installer the operator should run — detected from the runtime, not configured. */
+  platform: 'cloudflare' | 'node';
+  /** The command that actually performs the update, run by the operator on their own machine. */
+  updateCommand: string;
+  updateDocsUrl: string;
 }
 
 type Phase =
@@ -416,7 +420,7 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
       {error && <p class="settings-note admin-error">{error}</p>}
 
       <StatusSection status={status} />
-      <UpdateSection updateStatus={updateStatus} onChanged={refresh} />
+      <UpdateSection updateStatus={updateStatus} />
       <PublishSection onPublished={refresh} />
     </div>
   );
@@ -441,28 +445,26 @@ function StatusSection({ status }: { status: StatusResponse | null }): JSX.Eleme
   );
 }
 
-function UpdateSection({
-  updateStatus,
-  onChanged,
-}: {
-  updateStatus: UpdateStatusResponse | null;
-  onChanged: () => void;
-}): JSX.Element {
-  const [installing, setInstalling] = useState(false);
-  const [message, setMessage] = useState('');
+/**
+ * Platform update (AB#7403). This card tells you where you stand and hands you
+ * the command that does the work — it deliberately has no "install" button.
+ * The update runs from your own machine with the platform credentials you
+ * already have, so this deployment never holds a credential that could deploy
+ * on your behalf. See docs/updating.md.
+ */
+function UpdateSection({ updateStatus }: { updateStatus: UpdateStatusResponse | null }): JSX.Element {
+  const [copied, setCopied] = useState(false);
 
-  async function install() {
-    setInstalling(true);
-    setMessage('');
-    try {
-      const res = await adminFetch<{ message: string }>('/update-install', { method: 'POST' });
-      setMessage(res.message);
-      onChanged();
-    } catch (e) {
-      setMessage(errorText(e, 'Could not start the update.'));
-    } finally {
-      setInstalling(false);
-    }
+  function copy(command: string) {
+    // Clipboard access can be denied (insecure context, permissions) — the
+    // command is on screen either way, so a failure just means no confirmation.
+    navigator.clipboard
+      ?.writeText(command)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => undefined);
   }
 
   return (
@@ -486,18 +488,23 @@ function UpdateSection({
               ' — up to date.'
             )}
           </p>
-          {updateStatus.hasUpdate && !updateStatus.selfUpdateConfigured && (
-            <p class="settings-note">
-              Self-update isn't configured on this deployment yet — set the GITHUB_REPO and GITHUB_DEPLOY_TOKEN secrets to enable
-              the Install button. See docs/updating.md.
-            </p>
-          )}
-          {updateStatus.hasUpdate && updateStatus.selfUpdateConfigured && (
-            <button class="btn" onClick={install} disabled={installing}>
-              {installing ? 'Starting…' : 'Install update'}
-            </button>
-          )}
-          {message && <p class="settings-note">{message}</p>}
+          <p class="settings-note">
+            {updateStatus.hasUpdate
+              ? 'To take it, run this from your copy of the site, on the machine you deploy from:'
+              : 'When there is one, you take it by running this from your copy of the site, on the machine you deploy from:'}
+          </p>
+          <pre class="admin-command">{updateStatus.updateCommand}</pre>
+          <button class="btn-ghost" onClick={() => copy(updateStatus.updateCommand)}>
+            {copied ? 'Copied' : 'Copy command'}
+          </button>
+          <p class="settings-note">
+            It pulls the new engine, migrates, rebuilds with your brand untouched, and redeploys — using the{' '}
+            {updateStatus.platform === 'cloudflare' ? 'wrangler' : 'Azure CLI'} login you already have. This site stores no
+            credential that could update itself.{' '}
+            <a href={updateStatus.updateDocsUrl} target="_blank" rel="noreferrer">
+              How updating works
+            </a>
+          </p>
         </>
       )}
     </section>

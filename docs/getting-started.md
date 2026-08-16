@@ -31,7 +31,7 @@ nothing above assumes Cloudflare. Prerequisites differ by platform:
   TTS stitch step), regardless of platform.
 
 Full detail on all four paths, what each one produces, and what's shared
-across every path (your brand folder, CI wiring, self-update) is in
+across every path (your brand folder, CI wiring, updating) is in
 [`install.md`](install.md).
 
 ## Running the engine locally

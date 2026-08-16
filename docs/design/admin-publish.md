@@ -18,9 +18,12 @@ considered and rejected: two implementations of "how a story gets
 published" drift apart, silently, the moment either one changes. So the
 admin portal's job is deliberately narrow: **get the markdown into the
 repo, then trigger the exact same CI path an operator's own `git push`
-would trigger.** This is the same shape as [`update-flow.md`](update-flow.md)'s
-self-update mechanism — the deployed app can never do real work itself, so
-it always hands off to CI, which can.
+would trigger.** It shares one premise with
+[`update-flow.md`](update-flow.md): the deployed app can never do real work
+itself, so it always hands off. Where they differ is *who* it hands off to —
+content publishing hands off to the site's own CI (which the operator already
+has, because content lives in their repo), while engine updates hand off to
+the operator's own machine rather than store a deploy credential in the app.
 
 ## The flow
 

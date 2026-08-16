@@ -76,8 +76,11 @@ notifications. Book/chapter counts come from the public manifest; if it's
 briefly unreachable, they show as `—` rather than breaking the page.
 
 **Platform update** — current version vs. latest, a link to release notes,
-and (when configured) an **Install update** button. See
-[`updating.md`](updating.md) for exactly what happens when you click it.
+and the command that performs the update, ready to copy. There is no
+install button, on purpose: updates run from your own machine with the
+platform credentials you already have, so this deployment stores nothing
+that could deploy on your behalf. See [`updating.md`](updating.md) for the
+full flow.
 
 **Publish a story** — book id, title, author, and markdown text. See
 [`publishing-stories.md`](publishing-stories.md) for the full picture,
@@ -85,16 +88,19 @@ including why this is text-only today and how narration gets added.
 
 ## Turning features on
 
-Both the update button and story upload need the same two secrets:
+Story upload — and only story upload — needs two secrets, because it
+commits the markdown to your site's repo:
 
 | Secret | What it's for |
 |---|---|
 | `GITHUB_REPO` | `owner/repo` — your site's own GitHub repo |
-| `GITHUB_DEPLOY_TOKEN` | A fine-grained PAT scoped to just that repo, with Actions:write (for updates and publishing) and Contents:write (for story upload commits) |
+| `GITHUB_DEPLOY_TOKEN` | A fine-grained PAT scoped to just that repo, with Contents:write (for the commit) and Actions:write (to start `publish.yml`) |
 
-Without these, the portal still loads and shows status/update information
-read-only — the buttons that would trigger real actions are disabled with
-an explanation rather than silently failing.
+Without these, the portal still loads and the story upload form explains
+that it isn't configured rather than silently failing. Nothing else in the
+portal depends on them — in particular, **platform updates do not**, and
+never will again (see [`updating.md`](updating.md)). Publishing from the
+CLI doesn't need them either.
 
 For proactive email notifications when a new release exists (instead of
 having to check the portal), also set `ADMIN_EMAIL` and `RESEND_API_KEY` —
@@ -103,18 +109,18 @@ see [`updating.md`](updating.md).
 ## Under the hood, briefly
 
 Nothing in the admin portal reimplements logic that lives elsewhere. The
-update button dispatches your repo's own `self-update.yml`; the publish
-form commits to your repo and dispatches `publish.yml`, which runs the
-exact same `packages/pipeline/publish.mjs` the CLI uses. The portal is a
-front door to the real mechanisms, not a second copy of them — so there's
+publish form commits to your repo and dispatches `publish.yml`, which runs
+the exact same `packages/pipeline/publish.mjs` the CLI uses. The update
+card hands you the exact installer command the CLI documents. The portal is
+a front door to the real mechanisms, not a second copy of them — so there's
 never a question of which one is "really" correct.
 
 ## If something's not working
 
 - **"not_configured" errors** — the two GitHub secrets above aren't set on
-  this deployment.
-- **Update button doesn't appear** — you're already on the latest version;
-  that's the status card telling you there's nothing to install.
+  this deployment. They affect story upload only.
+- **Update card says you're up to date** — you are; it read the version out
+  of the running deployment and compared it against npm.
 - **Status shows `—` for book/chapter counts** — the manifest was
   unreachable when the page loaded; try refreshing.
 - **Story upload says "committed but publishing failed to start"** — the

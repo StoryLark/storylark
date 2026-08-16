@@ -77,8 +77,9 @@ Regardless of how you got here, you end up with:
 
 - A brand folder (`brands/<id>/`) — yours to edit, never touched by an
   engine update. See [`build-your-own-theme.md`](build-your-own-theme.md).
-- A CI setup (`.github/workflows/`) with `self-update.yml` and `publish.yml`
-  already wired up — see [`updating.md`](updating.md) and
-  [`admin-guide.md`](admin-guide.md).
+- A CI setup (`.github/workflows/`) with `publish.yml` already wired up, for
+  content publishing — see [`admin-guide.md`](admin-guide.md). Engine updates
+  need no CI at all: they run from your machine with one command, see
+  [`updating.md`](updating.md).
 - An empty shelf until you publish. See
   [`publishing-stories.md`](publishing-stories.md).

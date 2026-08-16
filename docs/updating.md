@@ -3,41 +3,63 @@
 How your deployed site receives platform updates — from the operator's
 chair, not the code's.
 
-## Nothing updates without your click
+## Nothing updates without you running it
 
-StoryLark never updates itself silently. There is no background process
-that changes what's running without you approving it first.
+StoryLark never updates itself. There is no background process that changes
+what's running, and — deliberately — **your deployment holds no credential
+that could deploy on your behalf.** An installed reading app has no business
+storing a GitHub token, a Cloudflare API token, or an Azure service
+principal just so it can rebuild itself. It doesn't have one.
 
-## How you find out
+So updating has exactly two parts: the site tells you a new release exists,
+and you run one command from the machine you deploy from.
 
-Two ways:
+## Part 1 — how you find out
+
+Two ways, both free of credentials:
 
 1. **Check yourself** — open `/admin` on your site. The "Platform update"
    card shows what you're running versus the latest release, with a link to
-   the release notes.
+   the release notes. The check is an unauthenticated read of the public npm
+   registry.
 2. **Get told** — if you've set `ADMIN_EMAIL` and `RESEND_API_KEY`, a daily
    check emails you when a new release exists. You never have to remember
    to look. See [`admin-guide.md`](admin-guide.md) for setting these up.
 
-## The click
+## Part 2 — the command
 
-When you're ready, click **Install update** in `/admin`. That click *is*
-the approval — here's exactly what happens next:
+From your copy of the site, on the machine you already deploy from:
 
-1. Your site's `self-update.yml` (a GitHub Actions workflow, already in
-   your repo) starts running.
-2. It bumps the pinned engine version (`storylark-core` / `storylark-worker`
-   in `package.json`) to the latest.
-3. On the Azure path, it takes a database snapshot before touching
-   anything — Postgres has no built-in undo for a bad migration the way
-   Cloudflare D1's time-travel recovery does, so this workflow makes its
-   own safety net. (On Cloudflare, D1's own point-in-time recovery covers
-   this.)
-4. It applies any pending database migrations.
-5. It rebuilds the app and redeploys.
+```bash
+# Cloudflare
+node platforms/cloudflare/install.mjs --update --yes
 
-A few minutes later, you're on the new version. The admin portal's status
-card reflects it immediately after.
+# Azure
+node platforms/azure/install.mjs --update --yes
+```
+
+The `/admin` card shows the right one for your platform, ready to copy.
+
+That command:
+
+1. Pulls the latest engine packages from npm (`storylark-core` /
+   `storylark-worker`), pinned exactly so what you deployed is reproducible.
+2. Applies any pending database migrations.
+3. Rebuilds the app — with your brand untouched.
+4. Redeploys.
+5. Prints what changed: old engine version → new engine version.
+
+It authenticates with the platform login you already have — your own
+`wrangler login` or `az login` session. It installs nothing on the
+deployment, stores no new secret, and creates no infrastructure: `--update`
+never runs `az deployment group create`, never creates D1 or R2, never
+edits `wrangler.jsonc`. It is safe to run repeatedly, including when you're
+already on the latest version (it just rebuilds and redeploys what you
+have, which is also how you repair a deployment that has drifted from its
+own source).
+
+`--update` refuses to run without `--yes`, for the same reason `--deploy`
+does: it changes a live site.
 
 ## What never changes
 
@@ -55,26 +77,55 @@ update.
 
 ## Skipping a release
 
-Nothing to do — if you don't click Install, nothing happens. There's no
-PR to close, no opt-out step; the admin portal will just keep showing you
-the newer version is available until you decide to take it (or a later one
+Nothing to do. If you don't run the command, nothing happens — no PR to
+close, no opt-out step. The admin portal will keep showing you the newer
+version is available until you decide to take it (or a later one
 supersedes it).
+
+## Before you update, on Postgres
+
+Cloudflare D1 has time-travel recovery built in, so a bad migration is
+recoverable without preparation. Azure Postgres has no in-place undo, so
+take a snapshot first if the data matters to you:
+
+```bash
+pg_dump "$DATABASE_URL" --format=custom --file="pre-update-$(date +%Y%m%d%H%M%S).dump"
+```
+
+`DATABASE_URL` is an app setting on the Web App — read it with
+`az webapp config appsettings list`. This is a deliberate manual step
+rather than something the installer does silently: where your database
+backup goes is your decision, not the installer's.
 
 ## Rolling back
 
-If an update goes wrong: the Azure path's pre-migration database snapshot
-is uploaded as a workflow artifact (30-day retention) — restore from it and
-redeploy the previous pinned version. On Cloudflare, use D1's time-travel
-recovery to restore the database, and redeploy the previous version the
-same way. Either way, `git revert` the version bump in `package.json` and
-re-run the deploy step is the fastest path back to exactly what you had.
+Re-pin the previous engine version in `package.json` (the update pins an
+exact version, so the old one is right there in your git history), then
+re-run the same `--update --yes` command — it will install exactly what's
+pinned. Restore the database from your snapshot if a migration was
+involved: on Azure, from the `pg_dump` above; on Cloudflare, with D1's
+time-travel recovery.
 
-## Setting this up
+## Running an update from CI instead
 
-Requires two secrets on your deployment: `GITHUB_REPO` (`owner/repo` for
-your site's own repo) and `GITHUB_DEPLOY_TOKEN` (a fine-grained PAT with
-Actions:write on that repo — Contents:write too if you also want the admin
-portal's story upload). Without them, `/admin` still shows update status,
-but the Install button is disabled with an explanation. See
-[`deploy-your-own.md`](deploy-your-own.md) / [`deploy-azure.md`](deploy-azure.md)
-for the full secrets list.
+Nothing stops you: the update command is an ordinary Node script, so a
+GitHub Actions job (or any other runner) can run it with a platform
+credential held as a CI secret. That's a legitimate choice if you already
+run CI — but it is *your* CI holding *your* platform credential, on a
+runner you control. It is not something the deployed site can trigger, and
+StoryLark no longer ships a workflow for it. The default path, and the one
+these docs describe, is the command above.
+
+## Why there's no "Install update" button
+
+Earlier versions of StoryLark put a button in `/admin` that dispatched a
+GitHub Actions workflow, which meant the deployment had to store a GitHub
+repo name and a GitHub token with permission to run workflows. That was the
+wrong trade: it made a GitHub account a prerequisite for owning a reading
+app, and it left a standing deploy credential sitting inside the app.
+
+A one-click in-portal update can come back later, but only on a design
+where the deployment doesn't hold a build-and-deploy credential at all —
+downloading a prebuilt release artifact rather than triggering a rebuild.
+That work is tracked separately and isn't built yet. Until it is, the
+command above is the whole story.
