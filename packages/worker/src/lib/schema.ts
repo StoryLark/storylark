@@ -1,7 +1,8 @@
 /**
  * Full current schema, mirrored from worker/migrations/*.sql (0001_init.sql +
  * 0002_passkey_credentials.sql + 0003_password_auth.sql + 0004_password_resets.sql +
- * 0005_rate_limits.sql + 0006_user_preferences.sql + 0007_admin_accounts.sql)
+ * 0005_rate_limits.sql + 0006_user_preferences.sql + 0007_admin_accounts.sql +
+ * 0008_narration_queue.sql)
  * so the worker can
  * bootstrap its own database via POST /api/admin/setup when API-token D1
  * access is unavailable. Keep in sync with the migration files — this is the
@@ -142,4 +143,35 @@ CREATE TABLE admin_recovery_codes (
   created_at INTEGER NOT NULL,
   used_at INTEGER
 );
+
+CREATE TABLE narration_batches (
+  id TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  created_by TEXT,
+  label TEXT,
+  total INTEGER NOT NULL DEFAULT 0,
+  notified_at INTEGER
+);
+
+CREATE TABLE narration_jobs (
+  id TEXT PRIMARY KEY,
+  batch_id TEXT NOT NULL,
+  book_id TEXT NOT NULL,
+  chapter_id TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  enqueued_at INTEGER NOT NULL,
+  started_at INTEGER,
+  finished_at INTEGER,
+  worker TEXT,
+  error TEXT,
+  char_length INTEGER NOT NULL DEFAULT 0,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  elapsed_ms INTEGER NOT NULL DEFAULT 0,
+  requested_by TEXT
+);
+CREATE INDEX idx_narration_jobs_status ON narration_jobs(status, enqueued_at);
+CREATE INDEX idx_narration_jobs_batch ON narration_jobs(batch_id);
+CREATE INDEX idx_narration_jobs_chapter ON narration_jobs(book_id, chapter_id, status);
 `;

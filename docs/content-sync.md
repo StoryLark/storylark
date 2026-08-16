@@ -54,9 +54,11 @@ StoryLark ships **two** pull connectors and will not grow a third:
   [folder-per-book layout](authoring-stories.md).
 - **`feed`** — your own system, over the small JSON contract documented below.
 
-A system that fits neither shape uses the content API directly (see
-[`api.md`](api.md)) — your release process calls StoryLark instead of StoryLark
-reading you. This line is deliberate: *"we'll write a connector for your CMS"* is
+A system that fits neither shape uses the **[content API](content-api.md)**
+directly — your release process calls StoryLark instead of StoryLark reading you,
+against a versioned contract you can pin. Content that arrives that way is
+read-only in the portal on exactly the same terms as content that arrives here.
+This line is deliberate: *"we'll write a connector for your CMS"* is
 an unbounded commitment, and it is the only part of this design that could never
 be finished. `sync.mjs` rejects an unknown `kind` rather than quietly ignoring it.
 

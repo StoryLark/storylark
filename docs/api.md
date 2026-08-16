@@ -166,6 +166,56 @@ The last five versions are kept (`THEME_VERSIONS` overrides it) and the live one
 is never aged out — the same shape and the same number as content's five text
 revisions per chapter.
 
+## Admin — narration queue
+
+Bulk narration (AB#7412 — plan §8 item 4). Gated by an admin session **or**
+`X-Admin-Key`, the same two-door rule `POST /api/admin/publish` uses: the thing
+that drains this queue is a headless worker. Full design, the worker command and
+the failure rules: [`narration-queue.md`](narration-queue.md).
+
+**No deployment narrates.** A Cloudflare Worker cannot run the model at all, and
+the Node entry ships no TTS dependency — the model lives in
+`packages/pipeline`. So these routes track work rather than doing it, and
+`GET /api/admin/narration` returns `runtime.canProcessInDeployment` with the
+platform's own reason and the command that does.
+
+| Method & path | Behavior |
+|---|---|
+| `GET /api/admin/narration` | `{available, runtime:{platform,canProcessInDeployment,reason,runCommand,workerAuthConfigured}, counts:{pending,running,done,failed,cancelled}, charsRemaining, charsPerSecond, estimateSeconds, jobs[], batches[]}`. `charsPerSecond`/`estimateSeconds` are measured from the last 25 completed jobs on this deployment, and are `null` until something completes. `available:false` (never a 500) when the database predates migration 0008. |
+| `POST /api/admin/narration/enqueue` | `{staleOnly?, bookIds?, chapters?, label?}` → queues chapters whose audio is missing or stale. `staleOnly:false` re-narrates regardless. Idempotent per chapter. |
+| `POST /api/admin/narration/claim` | `{worker, max}` → jobs this worker now owns, each carrying `contentKey`/`contentUrl` to read and `audioKey`/`timingsKey` to write. Atomic; several workers can drain one queue. |
+| `POST /api/admin/narration/jobs/:id/complete` | `{audio, timings, durationMs, voices?, elapsedMs?, contentHash?}` → writes the manifest entry, clears `audioStale`, records the job. `409 stale_content_hash` if the text moved while it was being narrated — the audio is discarded rather than published against words it does not match. |
+| `POST /api/admin/narration/jobs/:id/fail` | `{error}` → records the worker's own message. |
+| `POST /api/admin/narration/jobs/:id/retry` | Requeues a failed or cancelled job, keeping the attempt count. `409 not_retryable` otherwise. |
+| `DELETE /api/admin/narration/jobs/:id` | Cancels a pending job. `409 not_cancellable` for one already running. |
+
+Narration is never an announcement: a completion moves `libraryVersion` (so
+readers re-fetch and hear it) and never `announceVersion`.
+
+## The content API — the public push contract
+
+`/api/content/v1` is **not** part of the portal's surface and does not move with
+it. It is the documented, versioned contract an external publishing system
+integrates against: [`content-api.md`](content-api.md) is written for a
+third-party engineer and is the authoritative reference.
+
+Summary of the differences from `/api/admin/*`:
+
+- **Versioned in the path and in the body.** Every request states an integer
+  `contractVersion`; a missing one is `400 contract_version_required`.
+- **Key-first auth.** `X-Admin-Key`, with an admin session as the second door.
+- **Push ownership.** Content pushed here is `origin: "sync"` with
+  `syncSource.kind: "api"` by default, so the portal shows it read-only and names
+  the pushing system. `managed: false` opts out.
+- **It refuses what a pull connector owns.** A book synced from a git repo or a
+  feed answers `409 managed_externally`; the next sync would revert the push.
+- **Bulk, with an explicit policy.** `POST /api/content/v1/books` (a batch) and
+  `POST /api/content/v1/import` (a zip of the markdown-folder layout) default to
+  `best-effort` and answer `207` with a per-item report when part of a batch
+  fails. `all-or-nothing` validates everything first and writes nothing on any
+  failure.
+- **Every push queues narration** for what it wrote, and says how much.
+
 ## Error shape
 
 Errors return `{"error":"<slug>"}` with a fitting status: `unauthorized` 401, `missing_csrf_header` 403, `bad_request` 400, `not_found` 404, `internal` 500.

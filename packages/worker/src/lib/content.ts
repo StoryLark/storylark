@@ -189,12 +189,38 @@ export function effectiveOrigin(
   return originOf(book);
 }
 
-/** The book's recorded external source, when it has one. */
+/**
+ * The book's recorded external source, when it has one.
+ *
+ * Three kinds, and the list is closed: `git` and `feed` are the two PULL
+ * connectors (`packages/pipeline/sync.mjs`, and plan §8's hard scope line says
+ * there will never be a third of those), `api` means the publisher's own system
+ * pushed this in over the content API. Anything else — a manifest written by a
+ * newer engine, or a hand-edited one — reads as "no recorded source", which
+ * degrades to the generic refusal message rather than trusting a shape this
+ * code cannot describe.
+ */
 export function syncSourceOf(book: BookEntry | undefined | null): SyncSource | undefined {
   const raw = (book as { syncSource?: unknown } | undefined)?.syncSource;
   if (!raw || typeof raw !== 'object') return undefined;
   const s = raw as SyncSource;
-  return s.kind === 'git' || s.kind === 'feed' ? s : undefined;
+  return s.kind === 'git' || s.kind === 'feed' || s.kind === 'api' ? s : undefined;
+}
+
+/**
+ * True when this book is owned by one of the two PULL connectors.
+ *
+ * The distinction matters to exactly one caller: the content API
+ * (routes/content-api.ts). A pushing system owns `api` content and must be able
+ * to update it — that is the whole point of the push contract — but it must NOT
+ * be able to overwrite a book whose source of truth is a git repo or a feed,
+ * because the next `sync.mjs` run would silently revert the push and the two
+ * systems would fight. The admin portal refuses ALL of them, because a human
+ * typing in the portal owns none of them.
+ */
+export function isPullManaged(book: BookEntry | undefined | null): boolean {
+  const kind = syncSourceOf(book)?.kind;
+  return originOf(book) === 'sync' && (kind === 'git' || kind === 'feed');
 }
 
 /**
@@ -210,12 +236,106 @@ export function managedExternallyMessage(bookId: string, source: SyncSource | un
       ? `the git repository ${source.url}${source.ref ? ` (branch ${source.ref})` : ''}`
       : source?.kind === 'feed'
         ? `the system that publishes ${source.url}`
-        : 'an external source system';
+        : source?.kind === 'api'
+          ? `${source.system ? `${source.system}` : 'an external system'}${source.url ? `, at ${source.url}` : ''}, which pushes it in over the content API`
+          : 'an external source system';
+  const howItComesBack =
+    source?.kind === 'api'
+      ? `a change saved here would be overwritten the next time that system pushes. Change it there, and it arrives on the next push. (See docs/content-api.md.)`
+      : `a change saved here would be overwritten the next time the sync runs. Change it there, then re-sync. (See docs/content-sync.md.)`;
   return (
     `${what} is managed externally — edit it at source. "${bookId}" is synced into this deployment from ${where}, ` +
-    `so it is a copy, not the original: a change saved here would be overwritten the next time the sync runs. ` +
-    `Change it there, then re-sync. (See docs/content-sync.md.)`
+    `so it is a copy, not the original: ${howItComesBack}`
   );
+}
+
+/* ── Chapter order (AB#7412 — plan §3: "Chapter management — add, reorder,
+ * delete") ──────────────────────────────────────────────────────────────────
+ *
+ * There is no position field to update, and there deliberately isn't one: the
+ * ORDER OF `book.chapters` IS the chapter order. The app reads the manifest and
+ * renders that array as it stands, `publish.mjs` builds it from the numeric
+ * filename prefixes, and every reader of it — the reader UI, the next/previous
+ * links, the downloads list — already agrees on that. Adding an `index` field
+ * would create a second answer to the same question and guarantee they diverge.
+ *
+ * So reordering is a permutation of one array, and the only thing worth being
+ * careful about is that it stays a PERMUTATION.
+ */
+export function reorderChapters(
+  chapters: ChapterEntry[],
+  order: string[]
+): { ok: true; chapters: ChapterEntry[] } | { ok: false; message: string } {
+  const current = chapters.map((ch) => ch.id);
+  if (order.length !== current.length) {
+    return {
+      ok: false,
+      message:
+        `That order lists ${order.length} chapter(s) but the book has ${current.length}. ` +
+        `Reload the book — it changed since this page was opened.`,
+    };
+  }
+  const seen = new Set<string>();
+  for (const id of order) {
+    if (seen.has(id)) return { ok: false, message: `"${id}" appears more than once in the requested order.` };
+    seen.add(id);
+  }
+  const byId = new Map(chapters.map((ch) => [ch.id, ch]));
+  const missing = order.filter((id) => !byId.has(id));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      message:
+        `The requested order names chapter(s) this book doesn't have: ${missing.join(', ')}. ` +
+        `Reload the book — it changed since this page was opened.`,
+    };
+  }
+  // Reject by construction rather than by silently dropping: a reorder that
+  // omitted a chapter would DELETE it, and a stale browser tab must not be able
+  // to delete a chapter it simply hadn't heard of yet.
+  const dropped = current.filter((id) => !seen.has(id));
+  if (dropped.length > 0) {
+    return {
+      ok: false,
+      message: `The requested order leaves out ${dropped.join(', ')}. Reordering never removes a chapter; reload the book and try again.`,
+    };
+  }
+  return { ok: true, chapters: order.map((id) => byId.get(id) as ChapterEntry) };
+}
+
+/**
+ * Conflict detection, portal side (AB#7412 — plan §3's last open item).
+ *
+ * The editor opened a chapter at some `contentHash` and the operator then typed
+ * for a while. If a `publish.mjs` run — or another browser tab — landed in that
+ * window, the live chapter is no longer the one being edited, and saving would
+ * overwrite work this session never saw.
+ *
+ * The check reuses the metadata that already exists rather than inventing a
+ * lock: `contentHash` is on every manifest entry, it is what the editor is
+ * handed when it loads, and it changes on every save from either side. No
+ * timestamps (clock skew), no version column (a schema change), no lease (a
+ * deployment that can be closed mid-edit).
+ *
+ * A caller that sends no base hash is unchanged — this is opt-in per request,
+ * so the CLI, the content API and any older portal bundle keep working exactly
+ * as before.
+ */
+export function detectSaveConflict(
+  existing: ChapterEntry | undefined,
+  baseContentHash: string | undefined
+): { conflict: true; liveContentHash: string; message: string } | null {
+  if (!baseContentHash || !existing) return null;
+  if (existing.contentHash === baseContentHash) return null;
+  return {
+    conflict: true,
+    liveContentHash: existing.contentHash,
+    message:
+      `This chapter changed after you opened it — someone else saved it, or a \`publish\` run landed. ` +
+      `You are editing version ${baseContentHash}; the live version is ${existing.contentHash}. ` +
+      `Saving now would discard that newer text. Reload to see it (your draft is still in the editor and can be downloaded first), ` +
+      `or save anyway if yours is the version that should win.`,
+  };
 }
 
 export interface SaveResult {

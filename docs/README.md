@@ -44,6 +44,13 @@ the same codebase.
   lives somewhere else: pull from a git repository of markdown or from your own
   system's JSON feed, the `origin` field, and the one rule that keeps a
   deployment and a real catalogue from diverging.
+- **[Content API](content-api.md)** — the other direction: the documented,
+  versioned contract *your* system calls to push books and chapters into a
+  deployment, plus bulk import from a zip or a batch. Written for a third-party
+  integrator; nothing in it requires reading StoryLark's source.
+- **[Narration Queue](narration-queue.md)** — what happens to the audio when
+  fifty stories arrive at once: the queue, the worker that drains it, measured
+  time estimates, and why no deployment can narrate for itself.
 - **[Content Pipeline](content-pipeline.md)** — the technical reference:
   source → `packages/pipeline/publish.mjs` → chapter JSON + neural TTS MP3 + word timings →
   storage → manifest. The parser contract, flags, incremental hashing, and local mode.

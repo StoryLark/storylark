@@ -41,6 +41,7 @@ import { getText, IMMUTABLE, type ContentStore } from '../lib/content-store';
 import {
   ID_RE,
   announceVersionOf,
+  detectSaveConflict,
   effectiveOrigin,
   findBook,
   findChapter,
@@ -50,6 +51,7 @@ import {
   originOf,
   readManifest,
   readRevision,
+  reorderChapters,
   revisionLimit,
   saveChapter,
   storeOf,
@@ -60,8 +62,40 @@ import {
 import { chapterMeta, parseBlocks, readFrontmatter } from '../lib/md';
 import { sha256Bytes } from '../lib/crypto';
 import { recordPublish } from '../lib/notify';
+import { enqueue } from '../lib/narration';
 
 export const adminContent = new Hono<AppContext>();
+
+/**
+ * Queue the narration this edit just invalidated (AB#7412 — plan §8 item 4).
+ *
+ * A portal save publishes the words instantly and leaves the voice behind — that
+ * has been true and stated since AB#7420, and `audioStale` is how the reader and
+ * the portal say so. What was missing was anything TRACKING the outstanding
+ * work: the promise was "the next pipeline run re-narrates it", with no list of
+ * what was owed and no way to see it happen. This turns that promise into a row.
+ *
+ * Enqueuing is idempotent per chapter (an existing pending job is updated to the
+ * new content hash rather than duplicated), so an author saving five times while
+ * drafting leaves one job, for the text they stopped on.
+ *
+ * Deliberately non-fatal. A deployment whose database predates migration 0008
+ * has no queue tables, and an edit must not fail because a nice-to-have is
+ * missing — the text is already saved by the time this runs, and `audioStale`
+ * still tells the whole truth on its own.
+ */
+async function queueNarration(c: Context<AppContext>, bookId: string, chapterId: string, contentHash: string, wordCount: number) {
+  try {
+    const result = await enqueue(
+      c.env,
+      [{ bookId, chapterId, contentHash, charLength: Math.round((wordCount || 0) * 5.5) }],
+      { requestedBy: actor(c), label: `portal edit: ${bookId}/${chapterId}` }
+    );
+    return { queued: result.total, batchId: result.batchId };
+  } catch {
+    return { queued: 0, batchId: null };
+  }
+}
 
 adminContent.use('/*', requireAdmin());
 
@@ -300,13 +334,23 @@ adminContent.post('/content/preview', async (c) => {
  * (`true` for an existing chapter, `false` for one being created), because
  * accidentally announcing a typo fix to every subscriber is the failure worth
  * defaulting against.
+ *
+ * `baseContentHash` is conflict detection (AB#7412 — plan §3's last open item).
+ * The editor sends the hash it opened the chapter at; if the live chapter has
+ * moved on since — another tab, or a `publish.mjs` run that landed while
+ * someone was typing — this refuses with 409 rather than silently discarding
+ * the newer text. Sending nothing keeps the old behaviour exactly, which is
+ * what the content API and any older portal bundle rely on; `force: true` is
+ * the deliberate override.
  */
 adminContent.put('/content/books/:bookId/chapters/:chapterId', async (c) => {
   const r = resolve(c, true);
   if (r instanceof Response) return r;
   const { store, bookId, chapterId } = r;
 
-  const body = await c.req.json<{ markdown?: string; correction?: boolean }>().catch(() => null);
+  const body = await c.req
+    .json<{ markdown?: string; correction?: boolean; baseContentHash?: string; force?: boolean }>()
+    .catch(() => null);
   if (!body || typeof body.markdown !== 'string') {
     return c.json({ error: 'bad_request', message: 'A `markdown` string is required.' }, 400);
   }
@@ -316,6 +360,25 @@ adminContent.put('/content/books/:bookId/chapters/:chapterId', async (c) => {
   const gate = await requireWritable(c, store, bookId, chapterId);
   if (gate instanceof Response) return gate;
   const isNew = !gate.chapter;
+
+  if (body.force !== true) {
+    const conflict = detectSaveConflict(gate.chapter, typeof body.baseContentHash === 'string' ? body.baseContentHash : undefined);
+    // 409, not 412: nothing about the request is malformed and no precondition
+    // header was involved — the request conflicts with the state of the thing
+    // it addresses, which is exactly what 409 is for and what the sync refusal
+    // above already uses.
+    if (conflict) {
+      return c.json(
+        {
+          error: 'stale_edit',
+          message: conflict.message,
+          baseContentHash: body.baseContentHash,
+          liveContentHash: conflict.liveContentHash,
+        },
+        409
+      );
+    }
+  }
   const correction = typeof body.correction === 'boolean' ? body.correction : !isNew;
 
   const result = await saveChapter({
@@ -328,8 +391,9 @@ adminContent.put('/content/books/:bookId/chapters/:chapterId', async (c) => {
     savedBy: actor(c),
   });
   const notified = await recordPublish(c.env, (p) => c.executionCtx.waitUntil(p), result.libraryVersion, !correction);
+  const narration = await queueNarration(c, bookId, chapterId, result.contentHash, result.wordCount);
 
-  return c.json({ ok: true, created: isNew, ...result, notified });
+  return c.json({ ok: true, created: isNew, ...result, notified, narration });
 });
 
 /** The escape hatch: the current markdown, as a file, so an author can edit it
@@ -413,7 +477,10 @@ adminContent.post('/content/books/:bookId/chapters/:chapterId/revisions/:revisio
     revertedFrom: revisionId,
   });
   const notified = await recordPublish(c.env, (p) => c.executionCtx.waitUntil(p), result.libraryVersion, !correction);
-  return c.json({ ok: true, revertedFrom: revisionId, ...result, notified });
+  // A revert leaves the audio matching text that has just been discarded, so it
+  // needs re-narrating for exactly the reason an edit does.
+  const narration = await queueNarration(c, bookId, chapterId, result.contentHash, result.wordCount);
+  return c.json({ ok: true, revertedFrom: revisionId, ...result, notified, narration });
 });
 
 /**
@@ -470,6 +537,53 @@ adminContent.delete('/content/books/:bookId/chapters/:chapterId', async (c) => {
   await writeManifest(store, manifest);
   await recordPublish(c.env, (p) => c.executionCtx.waitUntil(p), manifest.libraryVersion, false);
   return c.json({ ok: true, deleted: chapterId, libraryVersion: manifest.libraryVersion });
+});
+
+/**
+ * Reorder a book's chapters (AB#7412 — plan §3, "Chapter management — add,
+ * reorder, delete"). Add and delete shipped; this is the missing third.
+ *
+ * The whole order is sent, not a move instruction ("chapter 4 → position 2"),
+ * for one reason: a move is only meaningful relative to a list the client
+ * believes in, and the client's list can be stale. Sending the full order lets
+ * the server check it is a PERMUTATION of what it actually holds and refuse
+ * otherwise — so a browser tab left open through a `publish` run cannot delete
+ * a chapter it never heard of by omitting it, or resurrect one that was
+ * deleted.
+ *
+ * Its own path rather than `…/chapters/order`, so it can never be confused
+ * with a chapter whose id happens to be "order".
+ *
+ * Never announced: moving chapters around is not new writing, and there is no
+ * version of "we rearranged the table of contents" worth waking a phone for.
+ * `libraryVersion` still moves, because readers must re-fetch to see it.
+ */
+adminContent.put('/content/books/:bookId/chapter-order', async (c) => {
+  const r = resolve(c, false);
+  if (r instanceof Response) return r;
+  const { store, bookId } = r;
+
+  const body = await c.req.json<{ order?: unknown }>().catch(() => null);
+  if (!body || !Array.isArray(body.order) || body.order.some((id) => typeof id !== 'string')) {
+    return c.json({ error: 'bad_request', message: 'An `order` array of chapter ids is required.' }, 400);
+  }
+
+  const gate = await requireWritable(c, store, bookId);
+  if (gate instanceof Response) return gate;
+  const { manifest, book } = gate;
+  if (!manifest || !book) return c.json({ error: 'not_found' }, 404);
+
+  const result = reorderChapters(book.chapters ?? [], body.order as string[]);
+  if (!result.ok) return c.json({ error: 'order_mismatch', message: result.message }, 409);
+
+  book.chapters = result.chapters;
+  manifest.libraryVersion = (manifest.libraryVersion ?? 0) + 1;
+  (manifest as { announceVersion?: number }).announceVersion = announceVersionOf(manifest);
+  manifest.generatedAt = new Date().toISOString();
+  await writeManifest(store, manifest);
+  await recordPublish(c.env, (p) => c.executionCtx.waitUntil(p), manifest.libraryVersion, false);
+
+  return c.json({ ok: true, order: book.chapters.map((ch) => ch.id), libraryVersion: manifest.libraryVersion });
 });
 
 /**

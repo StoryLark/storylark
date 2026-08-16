@@ -10,7 +10,9 @@ import { push } from './routes/push';
 import { admin } from './routes/admin';
 import { adminAuth } from './routes/admin-auth';
 import { adminContent } from './routes/admin-content';
+import { adminNarration } from './routes/admin-narration';
 import { adminThemes } from './routes/admin-themes';
+import { contentApi } from './routes/content-api';
 import { r2ContentStore } from './lib/content-store';
 import { readActiveTheme, readActiveCss, readActiveIcon, type ActiveTheme } from './lib/theme-store';
 import { checkForUpdateAndNotify } from './lib/update-check';
@@ -78,7 +80,26 @@ app.route('/api/admin', adminAuth);
 // would answer 401 no matter what key it sent. (Confirmed against a real
 // `wrangler dev`, not reasoned about: it did exactly that.)
 app.route('/api/admin', adminThemes);
+// The narration queue (AB#7412 — plan §8 item 4). Same /api/admin prefix, own
+// router, and registered BEFORE adminContent for exactly the reason spelled out
+// above adminThemes: it carries the same ADMIN_KEY door, because the thing that
+// drains the queue (packages/pipeline/narrate.mjs) is a headless worker with no
+// browser and no cookie, and a session-only gate mounted in front of it would
+// answer 401 whatever key it sent.
+app.route('/api/admin', adminNarration);
 app.route('/api/admin', adminContent);
+
+/**
+ * The public content API (AB#7412 — plan §8 item 1), at its own prefix and with
+ * its major version IN THE PATH.
+ *
+ * Deliberately NOT under /api/admin. Everything there is the portal's own
+ * surface and moves when the portal moves; this is a contract a publisher's
+ * release pipeline pins against, so it gets a URL that says which version it is
+ * and a shape that only changes when that number does. Underneath, both doors
+ * land in the same lib/content.ts — see routes/content-api.ts.
+ */
+app.route('/api/content', contentApi);
 
 /**
  * The PWA manifest, generated from the live brand (AB#7415 — plan §0d Phase 2).

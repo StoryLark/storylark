@@ -47,8 +47,9 @@ export type ContentOrigin = 'portal' | 'cli' | 'sync' | 'personal';
 export const DEFAULT_ORIGIN: ContentOrigin = 'cli';
 
 /**
- * Where a synced book actually lives, recorded on the book itself so the portal
- * can say "edit it HERE" with a link rather than "edit it somewhere else".
+ * Where externally-owned content actually lives, recorded on the book itself so
+ * the portal can say "edit it HERE" with a link rather than "edit it somewhere
+ * else".
  *
  * On the book rather than in deployment config on purpose: it travels with the
  * content, so a deployment fed by two different repos describes each of them
@@ -56,17 +57,43 @@ export const DEFAULT_ORIGIN: ContentOrigin = 'cli';
  *
  * No credential is ever recorded here. A private repo's token belongs to the
  * process running the sync (STORYLARK_SYNC_TOKEN), and the manifest is public.
+ *
+ * ── On `kind`, and the scope line it must not be confused with ──────────────
+ * Plan §8's hard rule is **exactly two PULL CONNECTORS, and no bespoke ones,
+ * ever** — `git` and `feed`, the two shapes `packages/pipeline/sync.mjs`
+ * implements, guarded by a test that fails if a third is added there. That rule
+ * is about code StoryLark writes to go and read somebody's system, which is the
+ * unbounded commitment.
+ *
+ * `api` is the OPPOSITE direction and is the very escape hatch that rule points
+ * at: the publisher's own system pushed this content in over the documented
+ * content API (docs/content-api.md), so StoryLark wrote no connector at all. It
+ * is recorded here for one reason — the portal has to be able to say who owns
+ * the edit button, and "an external system pushed it" is a different sentence
+ * from "we cloned it from this repo". Adding it does not widen what StoryLark
+ * has to maintain by a single line.
  */
 export interface SyncSource {
-  /** Which of the two supported connectors produced this. No third kind exists. */
-  kind: 'git' | 'feed';
-  /** Repo or feed URL, as configured — with any embedded credential stripped. */
+  /**
+   * How this content arrived. `git` and `feed` are the two pull connectors;
+   * `api` means an external system pushed it in over the content API. There is
+   * no fourth, and no third PULL kind — see the note above.
+   */
+  kind: 'git' | 'feed' | 'api';
+  /**
+   * Where the original lives, as configured — with any embedded credential
+   * stripped. Repo URL (git), feed URL (feed), or the publisher's own canonical
+   * URL for this book (api), which may be empty because a pushing system is
+   * under no obligation to have a public address.
+   */
   url: string;
   /** Git only: the branch or tag synced. */
   ref?: string;
   /** Git only: the subdirectory of the repo that holds `books/`. */
   path?: string;
-  /** When this book was last pulled from that source. */
+  /** API only: the pushing system's own name for itself, e.g. "Acme CMS". */
+  system?: string;
+  /** When this book was last pulled from — or pushed by — that source. */
   syncedAt?: string;
 }
 

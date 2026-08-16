@@ -27,7 +27,9 @@
 //           books and chapters with URLs to fetch markdown from, and it is
 //           written against nobody's specific product.
 //
-// A publisher whose system fits neither shape uses the content API directly.
+// A publisher whose system fits neither shape uses the content API directly
+// (docs/content-api.md) — a documented, versioned PUSH contract, so they call us
+// rather than us writing anything for them.
 // "We'll write a connector for your CMS" is an unbounded commitment and the one
 // part of this that could never be finished, so it is refused up front. Do not
 // add a third kind here.
@@ -155,8 +157,8 @@ async function resolveConfig(brand, cli) {
   if (kind !== 'git' && kind !== 'feed') {
     console.error(
       `Unknown sync kind "${kind}". StoryLark supports exactly two: "git" (a repo of markdown) and "feed" ` +
-        `(your own system's JSON feed). A system that fits neither uses the content API directly — ` +
-        `see docs/content-sync.md.`
+        `(your own system's JSON feed). A system that fits neither uses the content API directly, ` +
+        `pushing to /api/content/v1 — see docs/content-api.md.`
     );
     process.exit(1);
   }

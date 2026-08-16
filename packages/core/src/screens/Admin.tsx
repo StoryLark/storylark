@@ -3,6 +3,7 @@ import type { JSX } from 'preact';
 import { BRAND } from '../brand';
 import { api, call, ApiError, type AuthUser } from '../lib/api';
 import { ContentSection } from './admin/ContentSection';
+import { NarrationSection } from './admin/NarrationSection';
 import { ThemeSection } from './admin/ThemeSection';
 
 // Admin portal (AB#7404). Gated by a real account in the app's own `users`
@@ -463,6 +464,12 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
           package, edit the brand's own details, see the version history, roll
           back. Above the platform update card on purpose — changing how the
           site looks is an everyday operator job; updating the engine is not. */}
+      {/* Narration queue (AB#7412 — plan §8 item 4). Directly under the content
+          card because it is the other half of the same job: editing or importing
+          text is what puts work in this queue, and an operator who has just
+          imported fifty stories should see what that costs without scrolling
+          past the brand settings to find out. */}
+      <NarrationSection />
       <ThemeSection />
       <UpdateSection updateStatus={updateStatus} />
       <PublishSection onPublished={refresh} />

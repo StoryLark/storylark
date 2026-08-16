@@ -8,8 +8,23 @@
 | `md-parity.test.mjs` | The Worker's markdown rules agree with the pipeline's, block for block — a portal edit and a CLI publish must produce identical content. |
 | `content-origin.test.mjs` | Where content came from decides who owns its edit button, and `sync.mjs` has exactly two connectors. |
 | `postgres-numeric-parity.test.mjs` | A D1-shaped `COUNT(*)` and a Postgres-shaped one agree in type. |
+| `content-api.test.mjs` | The public push contract at `/api/content/v1` — the `contractVersion` gate, ownership (`managed`, and the refusal to overwrite what a pull connector owns), change detection, and bulk import from both a JSON batch and a **real** zip. Drives the real app over real Requests, against a real sqlite database carrying the real shipped migrations and a real content store writing files to disk. |
+| `narration-queue.test.mjs` | The bulk narration queue: enqueue de-duplication, an atomic claim two workers cannot both win, a completion refused because the text moved while it was being narrated, failure/retry/cancel, batch progress notified exactly once, and a measured — never invented — time estimate. The "worker" is the HTTP client, making the same calls `packages/pipeline/narrate.mjs` makes. Running the model itself is deliberately out (see the file header). |
+| `node-http-readonly.test.mjs` | The `409 managed_externally` rule at the HTTP level **on the Node/Azure stack** — a real PostgreSQL server, the real shipped `migrate-postgres.mjs`, the real `postgresDatabase()` driver and a real socket. This is the half AB#7422 could not do for want of a local Postgres; `./postgres-server.mjs` is how it starts one without Docker. |
 | `theme-package.test.mjs` | The theme package format, against the **real** brands in this repo: every one packages clean, build → read → build is a fixed point, and each way a package can be wrong is refused with a message that says what to fix. Also asserts the committed `themes/storylark.storylark-theme.zip` still matches `brands/storylark` byte for byte. |
 | `engine-update.test.mjs` | The prebuilt engine artifact and the one-click update. The format and every way it is refused (a brand file in it, a swapped byte, a file `engine.json` never vouched for); the download and checksum over a **real** HTTP server; D1 migrations against a **real** SQLite database writing wrangler's own `d1_migrations` table; and both platform deployers driven against local servers implementing Cloudflare's and Kudu's published contracts, asserting the exact requests. The two vendors' own servers are the one thing not proven — see the file's own header, and `docs/design/update-flow.md`. If `dist-engine/*.zip` exists it also checks the real artifact this repo produces. |
+
+## Shared harnesses (not tests themselves)
+
+- **`sqlite-env.mjs`** — a whole test deployment: the real Hono app, a real
+  `node:sqlite` database with the real shipped `migrations/*.sql` applied, a real
+  content store on disk, and a `fetch` that goes through the real router.
+- **`postgres-server.mjs`** — starts a **real** PostgreSQL for the life of a
+  test, preferring the native `embedded-postgres` binaries and falling back to
+  `@electric-sql/pglite` behind a real TCP wire-protocol server. The header
+  records the two Windows-specific things that had to be worked around; read it
+  before changing it. `STORYLARK_TEST_PG=pglite` forces the fallback so both
+  engines can be exercised on one machine.
 
 ## The two scripts that are not tests
 
