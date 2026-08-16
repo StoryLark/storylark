@@ -112,12 +112,19 @@ function scaffoldBrand(targetDir, brandId, appName) {
 }
 
 function copyPlatforms(targetDir) {
-  const src = join(ENGINE_ROOT, 'platforms');
+  // Bundled inside this package (create-storylark/platforms/, kept in sync
+  // with the engine repo's platforms/ by sync-platforms.mjs, run as a
+  // prepublishOnly step) — NOT read from ENGINE_ROOT. That used to be the
+  // source, which only worked when this script ran from inside an engine
+  // checkout; a real `npx create-storylark` install has no engine checkout
+  // anywhere nearby, so ENGINE_ROOT/platforms never existed and this
+  // silently no-op'd, leaving every scaffolded site with no installer at
+  // all (confirmed live: a real npm-published create-storylark run produced
+  // no platforms/ folder, and the documented `npm run setup` step failed
+  // outright since it shells out to platforms/wizard.mjs).
+  const src = join(PKG_ROOT, 'platforms');
   if (!existsSync(src)) return;
-  cpSync(src, join(targetDir, 'platforms'), {
-    recursive: true,
-    filter: (p) => !p.endsWith('install.env') && !p.includes('node_modules'),
-  });
+  cpSync(src, join(targetDir, 'platforms'), { recursive: true });
 }
 
 function flag(argv, name) {

@@ -1,6 +1,6 @@
 {
   "name": "create-storylark",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Scaffold a new branded StoryLark site — npm create storylark",
   "license": "Apache-2.0",
   "repository": {
@@ -12,8 +12,12 @@
   "bin": {
     "create-storylark": "./bin/create-storylark.mjs"
   },
+  "scripts": {
+    "prepublishOnly": "node sync-platforms.mjs"
+  },
   "files": [
     "bin/",
-    "template/"
+    "template/",
+    "platforms/"
   ]
 }
