@@ -7,11 +7,14 @@
     "directory": "dist",
     "binding": "ASSETS",
     // Documents run through the Worker so it can stamp this deployment's live
-    // origins / VAPID key (storylark-worker/lib/deployment) and its live brand
-    // (storylark-worker/lib/brand) into them. /assets/* and /icons/* stay on
-    // the asset router and cost no Worker invocation. The manifest is generated
-    // from the live brand.json, so it goes through the Worker too.
-    "run_worker_first": ["/*", "!/assets/*", "!/icons/*"],
+    // origins / VAPID key (storylark-worker/lib/deployment), its live brand
+    // (storylark-worker/lib/brand) and its live presentation
+    // (storylark-worker/lib/presentation) into them. The manifest is generated
+    // from the live brand.json, and /icons/* can be replaced by an installed
+    // theme package (storylark-worker/lib/theme-store), so both go through the
+    // Worker too. Only /assets/* — the hashed JS, CSS and fonts, i.e. the bulk
+    // of the site — stays on the asset router with no Worker invocation.
+    "run_worker_first": ["/*", "!/assets/*"],
     "not_found_handling": "single-page-application"
   },
   "observability": { "enabled": true },

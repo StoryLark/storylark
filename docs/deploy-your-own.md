@@ -84,10 +84,12 @@ and a `logo.svg` — supply your own equivalents if your HTML references them.)
 
 The Worker serves `app/dist` as static assets, with SPA fallback for anything
 that isn't a file. `run_worker_first` sends `/api/*`, navigations, `/admin`,
-`/sw.js`, `/theme.css` and `manifest.webmanifest` through the Worker — so it can
-stamp this deployment's live origins, VAPID key and brand into them on the way
-out (see below) — while `/assets/*` and `/icons/*` are served straight off the
-asset router with no Worker invocation.
+`/sw.js`, `/theme.css`, `manifest.webmanifest` and `/icons/*` through the
+Worker — so it can stamp this deployment's live origins, VAPID key, brand and
+presentation into them on the way out (see below), and so an installed theme
+package can replace the icons — while `/assets/*`, the hashed JS, CSS and fonts
+that are the bulk of the site, is served straight off the asset router with no
+Worker invocation.
 
 ### Changing config after deploy
 

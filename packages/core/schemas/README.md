@@ -3,6 +3,13 @@
 The three files a StoryLark deployment is described by, one JSON Schema each
 (draft 2020-12), plus the validator that reads them.
 
+> **The schema files and the validator live in `storylark-contracts`**
+> (`packages/contracts/`) since Phase 4. They moved because the package-import
+> endpoint validates uploads inside the Worker, and a Worker cannot import a
+> frontend package — see `packages/contracts/validate.mjs` for the full
+> reasoning. `storylark-core/schemas` re-exports all of it and adds
+> `readContract()`, so every import path in this repo is unchanged.
+
 | Schema | Describes | Lives at |
 |---|---|---|
 | `brand.schema.json` | Identity + look — names, tagline, author, manifest colours, default theme, fonts | `brands/<id>/brand.json` |
@@ -53,6 +60,12 @@ error and a bad file is caught by whatever emits it.
 
 - `packages/core/vite/index.mjs` — validates brand + presentation + deployment
   as it loads them for a build (non-strict).
-- `packages/pipeline/migrate-brand.mjs` — validates the files it writes (strict).
-- The packaging tool and the package-import endpoint, once those exist — the
-  schema files are plain JSON Schema so they can be handed to `ajv` unchanged.
+- `packages/core/bin/migrate-brand.mjs` — validates the files it writes (strict).
+- `packages/core/bin/package-theme.mjs` — validates a brand folder before it
+  emits a theme package (strict).
+- `packages/worker/src/lib/theme-store.ts` — validates an uploaded theme package
+  before the deployment adopts it (strict), through the same
+  `storylark-contracts/theme-package` module the packager uses.
+
+The schema files are plain JSON Schema, published at
+`storylark-contracts/schemas/*.json`, so they can be handed to `ajv` unchanged.

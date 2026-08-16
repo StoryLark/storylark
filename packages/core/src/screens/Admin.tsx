@@ -3,6 +3,7 @@ import type { JSX } from 'preact';
 import { BRAND } from '../brand';
 import { api, call, ApiError, type AuthUser } from '../lib/api';
 import { ContentSection } from './admin/ContentSection';
+import { ThemeSection } from './admin/ThemeSection';
 
 // Admin portal (AB#7404). Gated by a real account in the app's own `users`
 // table carrying the `is_admin` flag — the same email+password, the same
@@ -435,6 +436,11 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
           different, narrower path and stays — see the note on its own
           component. */}
       <ContentSection />
+      {/* Brand & themes (AB#7417 — plan §0c/§0d Phase 4): install a theme
+          package, edit the brand's own details, see the version history, roll
+          back. Above the platform update card on purpose — changing how the
+          site looks is an everyday operator job; updating the engine is not. */}
+      <ThemeSection />
       <UpdateSection updateStatus={updateStatus} />
       <PublishSection onPublished={refresh} />
     </div>

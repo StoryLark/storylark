@@ -10,7 +10,9 @@ import { push } from './routes/push';
 import { admin } from './routes/admin';
 import { adminAuth } from './routes/admin-auth';
 import { adminContent } from './routes/admin-content';
+import { adminThemes } from './routes/admin-themes';
 import { r2ContentStore } from './lib/content-store';
+import { readActiveTheme, readActiveCss, readActiveIcon, type ActiveTheme } from './lib/theme-store';
 import { checkForUpdateAndNotify } from './lib/update-check';
 import { deploymentConfigFromEnv, injectDeploymentIntoHtml, injectDeploymentIntoScript } from './lib/deployment';
 import {
@@ -63,6 +65,18 @@ app.route('/api/admin', adminAuth);
 // router: it owns /content/* and /upload, every route in it is admin-session
 // gated as a group, and none of it shares the ADMIN_KEY exception POST
 // /publish carries.
+// Brand & theme packages (AB#7417 — plan §0c/§0d Phase 4). Same /api/admin
+// prefix, own router: it owns /themes/*, and unlike adminContent it carries the
+// same ADMIN_KEY exception POST /publish does, because the CLI import door is a
+// headless caller by definition.
+//
+// Registered BEFORE adminContent, and that order is load-bearing. Hono composes
+// every matching middleware in REGISTRATION order, and adminContent gates the
+// whole prefix with `use('/*', requireAdmin())` — so mounting it first would
+// put a session-only gate in front of these routes and the CLI's ADMIN_KEY door
+// would answer 401 no matter what key it sent. (Confirmed against a real
+// `wrangler dev`, not reasoned about: it did exactly that.)
+app.route('/api/admin', adminThemes);
 app.route('/api/admin', adminContent);
 
 /**
@@ -128,12 +142,13 @@ async function serveAsset(request: Request, env: Env): Promise<Response> {
   // from the JS bundle, so replacing dist/theme.css restyles the site with no
   // rebuild — which is the whole point of the phase.
   if (path === THEME_ASSET && /\btext\/css\b/i.test(type)) {
-    const [css, brand, registry] = await Promise.all([
+    const [built, brand, registry, installed] = await Promise.all([
       response.text(),
       liveBrand(request, env),
       fontRegistry(request, env),
+      installedCss(env),
     ]);
-    return rewritten(response, themeCssWithFonts(css, brand, registry));
+    return rewritten(response, themeCssWithFonts(installed ?? built, brand, registry));
   }
 
   if (path === '/sw.js' && /javascript|ecmascript/i.test(type)) {
@@ -148,6 +163,28 @@ async function serveAsset(request: Request, env: Env): Promise<Response> {
     let out = presentation ? injectPresentationIntoScript(js, presentation) : js;
     out = brand ? injectBrandIntoScript(out, brand) : out;
     return rewritten(response, injectDeploymentIntoScript(out, deploymentConfigFromEnv(env)));
+  }
+
+  // Icons from the installed theme (AB#7417). `run_worker_first` gained
+  // `/icons/*` in Phase 4 so these can be answered at all: Phase 2 left icon
+  // FILES as build assets precisely because swapping them "needs no code, only
+  // a file" — and a package import is that file arriving without shell access.
+  // With no theme installed this falls through to the asset router's own bytes,
+  // one Worker invocation later.
+  if (path.startsWith('/icons/') && !path.slice(7).includes('/')) {
+    const icon = await installedIcon(env, path.slice(7));
+    if (icon) {
+      return new Response(icon.body, {
+        status: 200,
+        headers: {
+          'Content-Type': icon.contentType,
+          // Short, not immutable: the URL is stable across imports, so a long
+          // TTL here is what would leave the previous brand's icon on a phone.
+          'Cache-Control': 'public, max-age=60',
+        },
+      });
+    }
+    return response;
   }
 
   if (type.includes('text/html')) {
@@ -203,6 +240,14 @@ function rewritten(response: Response, body: string): Response {
  * must never take the library down.
  */
 async function liveBrand(request: Request, env: Env): Promise<BrandIdentity | undefined> {
+  // An imported theme (AB#7417) wins over the build's asset. Deliberately
+  // routed through readBrandAsset all the same: the import already validated
+  // this object against brand.schema.json in strict mode, but the key whitelist
+  // and the value checks in ./lib/brand.ts are the ONE filter that decides what
+  // reaches a document, and a second entry point into injection would be a
+  // second answer to "which keys are brand".
+  const installed = await installedTheme(env);
+  if (installed) return readBrandAsset(JSON.stringify(installed.brand));
   const text = await assetText(request, env, BRAND_ASSET);
   return text === undefined ? undefined : readBrandAsset(text);
 }
@@ -224,8 +269,55 @@ async function liveBrand(request: Request, env: Env): Promise<BrandIdentity | un
  * that to core's defaults. A broken file must never take the library down.
  */
 async function livePresentation(request: Request, env: Env): Promise<PresentationInput | undefined> {
+  // A theme package MAY carry a presentation; most do not. When it does, it
+  // wins; when it does not, the deployment keeps its own arrangement rather
+  // than silently reverting to core defaults — installing a colour scheme is
+  // not a request to rearrange the tab bar.
+  const installed = await installedTheme(env);
+  if (installed?.presentation) return readPresentationAsset(JSON.stringify(installed.presentation));
   const text = await assetText(request, env, PRESENTATION_ASSET);
   return text === undefined ? undefined : readPresentationAsset(text);
+}
+
+/**
+ * The theme this deployment has installed, or undefined for "wearing the build"
+ * (AB#7417 — plan §0d Phase 4).
+ *
+ * Read per request and not memoised, for exactly the reason liveBrand and
+ * livePresentation are: an import — or a rollback — is meant to take effect on
+ * the NEXT request, and an isolate-lifetime cache would make that "on the next
+ * cold start", which is unpredictable and untestable. The cost is one storage
+ * read of a small JSON object, issued in parallel with the document fetch it
+ * accompanies.
+ *
+ * A deployment with no writable storage bound has no installed theme by
+ * definition, and short-circuits here without touching anything.
+ */
+async function installedTheme(env: Env): Promise<ActiveTheme | undefined> {
+  const store = env.CONTENT_STORE;
+  if (!store) return undefined;
+  try {
+    return (await readActiveTheme(store)) ?? undefined;
+  } catch (err) {
+    // A storage blip must not take the site's identity down; the build's own
+    // brand is a perfectly good answer and is what every pre-Phase-4 site uses.
+    console.warn(`storylark: could not read the installed theme (${(err as Error).message}) — serving the brand this build shipped with.`);
+    return undefined;
+  }
+}
+
+/** The installed theme's stylesheet, or undefined to serve the build's. */
+async function installedCss(env: Env): Promise<string | undefined> {
+  const [store, active] = [env.CONTENT_STORE, await installedTheme(env)];
+  if (!store || !active) return undefined;
+  return (await readActiveCss(store, active)) ?? undefined;
+}
+
+/** One icon from the installed theme, or undefined to serve the build's. */
+async function installedIcon(env: Env, name: string): Promise<{ body: ArrayBuffer; contentType: string } | undefined> {
+  const [store, active] = [env.CONTENT_STORE, await installedTheme(env)];
+  if (!store || !active) return undefined;
+  return (await readActiveIcon(store, active, name)) ?? undefined;
 }
 
 /**

@@ -72,6 +72,20 @@ try {
   );
 }
 
+// Installed theme packages (AB#7417 — plan §0c / §0d Phase 4) arrived in
+// storylark-worker 0.14.0. Same dynamic-import reasoning as the three above: an
+// older worker package must keep serving the brand the build shipped with
+// rather than refuse to start. With this absent, /admin's Brand & Themes card
+// reports the API missing and every other phase behaves exactly as it did.
+let themeLib = null;
+try {
+  themeLib = await import('storylark-worker/lib/theme-store');
+} catch {
+  console.warn(
+    'storylark: this storylark-worker has no lib/theme-store (needs >= 0.14.0). Theme packages cannot be imported and the brand this build shipped with is what gets served.'
+  );
+}
+
 const required = ['DATABASE_URL', 'BRAND', 'APP_ORIGIN', 'CONTENT_ORIGIN', 'MAIL_FROM', 'APP_NAME'];
 const missing = required.filter((k) => !process.env[k]);
 if (missing.length > 0) {
@@ -114,6 +128,9 @@ const env = {
   CONTENT_STORE: contentStore,
   CONTENT_REVISIONS: process.env.CONTENT_REVISIONS ?? '',
   CONTENT_MAX_UPLOAD_BYTES: process.env.CONTENT_MAX_UPLOAD_BYTES ?? '',
+  // Theme packages (AB#7417). Same storage as content editing — an imported
+  // theme is data the deployment holds, not part of its build.
+  THEME_VERSIONS: process.env.THEME_VERSIONS ?? '',
 };
 
 // Cloudflare's ExecutionContext.waitUntil() keeps the isolate alive after
@@ -176,8 +193,33 @@ const deployment = deploymentConfigFromEnv(process.env);
  */
 async function liveBrand() {
   if (!brandLib) return undefined;
+  const installed = await installedTheme();
+  if (installed) return brandLib.readBrandAsset(JSON.stringify(installed.brand));
   const text = await readFile(`${staticRoot}/brand.json`, 'utf8').catch(() => null);
   return text === null ? undefined : brandLib.readBrandAsset(text);
+}
+
+/**
+ * The theme this deployment has installed (AB#7417 — plan §0d Phase 4), read
+ * from its own writable storage on EVERY request.
+ *
+ * The Cloudflare Worker resolves this identically (packages/worker/src/index.ts)
+ * against the same `ContentStore` seam, which is the whole reason the import
+ * endpoint could be written once. Not cached, for the same reason liveBrand()
+ * is not: an import — or a rollback — has to take effect on the next request,
+ * not on the next restart.
+ *
+ * A storage blip yields undefined and the build's own brand is served, which is
+ * exactly what every pre-Phase-4 deployment does.
+ */
+async function installedTheme() {
+  if (!themeLib || !contentStore) return undefined;
+  try {
+    return (await themeLib.readActiveTheme(contentStore)) ?? undefined;
+  } catch (err) {
+    console.warn(`storylark: could not read the installed theme (${err.message}) — serving the brand this build shipped with.`);
+    return undefined;
+  }
 }
 
 /**
@@ -191,6 +233,10 @@ async function liveBrand() {
  */
 async function livePresentation() {
   if (!presentationLib) return undefined;
+  // A theme package may carry a presentation; when it does not, the deployment
+  // keeps its own arrangement rather than reverting to core defaults.
+  const installed = await installedTheme();
+  if (installed?.presentation) return presentationLib.readPresentationAsset(JSON.stringify(installed.presentation));
   const text = await readFile(`${staticRoot}/presentation.json`, 'utf8').catch(() => null);
   return text === null ? undefined : presentationLib.readPresentationAsset(text);
 }
@@ -271,13 +317,39 @@ app.get('/sw.js', async (c) => {
 // would be the file the build wrote, and the font selection in it would be
 // whichever brand was current at build time.
 app.get('/theme.css', async (c) => {
-  const css = await readFile(`${staticRoot}/theme.css`, 'utf8').catch(() => null);
+  const built = await readFile(`${staticRoot}/theme.css`, 'utf8').catch(() => null);
+  // An installed theme (AB#7417) supplies the stylesheet instead of the build,
+  // so a site with no theme.css on disk is still styled once one is imported.
+  const installed = await installedCss();
+  const css = installed ?? built;
   if (css === null) return c.notFound();
   c.header('Content-Type', 'text/css; charset=utf-8');
   c.header('Cache-Control', 'no-store');
   if (!brandLib) return c.body(css);
   const [brand, registry] = await Promise.all([liveBrand(), fonts()]);
   return c.body(brandLib.themeCssWithFonts(css, brand, registry));
+});
+
+/** The installed theme's stylesheet, or null to serve the build's. */
+async function installedCss() {
+  const active = await installedTheme();
+  if (!active) return null;
+  return themeLib.readActiveCss(contentStore, active);
+}
+
+// Icons from the installed theme (AB#7417), claimed before serveStatic for the
+// same reason `/` and `/theme.css` are: served off disk they would be the files
+// the build copied out of brands/<id>/assets/icons/, and an imported package's
+// icons live in storage. Falls through to serveStatic when this deployment
+// overrides no icon — which is every deployment with nothing installed.
+app.get('/icons/:name', async (c, next) => {
+  const active = await installedTheme();
+  if (!active) return next();
+  const icon = await themeLib.readActiveIcon(contentStore, active, c.req.param('name'));
+  if (!icon) return next();
+  c.header('Content-Type', icon.contentType);
+  c.header('Cache-Control', 'public, max-age=60');
+  return c.body(icon.body);
 });
 
 // The PWA manifest, generated from the live brand rather than served as the

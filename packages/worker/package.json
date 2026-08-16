@@ -20,7 +20,8 @@
     "./lib/update-check": "./src/lib/update-check.ts",
     "./lib/deployment": "./src/lib/deployment.ts",
     "./lib/brand": "./src/lib/brand.ts",
-    "./lib/presentation": "./src/lib/presentation.ts"
+    "./lib/presentation": "./src/lib/presentation.ts",
+    "./lib/theme-store": "./src/lib/theme-store.ts"
   },
   "files": [
     "src/",
@@ -29,6 +30,7 @@
     "migrate-postgres.mjs"
   ],
   "dependencies": {
+    "storylark-contracts": "0.1.0",
     "@simplewebauthn/server": "^13.3.2",
     "hono": "^4.6.0",
     "pg": "^8.13.0"

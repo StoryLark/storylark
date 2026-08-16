@@ -27,7 +27,8 @@ the same codebase.
 
 - **[Build Your Own Theme](build-your-own-theme.md)** — the *branding* layer:
   the full `theme.css` token contract (light + dark), every `brand.json` field,
-  fonts, and icons.
+  fonts, icons, and **theme packages** — building one, installing it on a live
+  site from the portal or the CLI, and rolling back.
 - **[Build Your Own Presentation](build-your-own-presentation.md)** — the
   *structure* layer: what's configurable today (`layout`, `nouns`), the fixed app
   shell, and where presentation templates are headed.
@@ -52,7 +53,8 @@ the same codebase.
 ## Operate
 
 - **[Admin Guide](admin-guide.md)** — running your site from `/admin`: status,
-  updates, story upload.
+  updates, story upload, content editing, and installing or rolling back a
+  brand.
 - **[Updating](updating.md)** — how you take a new engine release, from the
   operator's chair: how you find out, the one command that does it, and what
   never changes.
@@ -68,6 +70,9 @@ the same codebase.
 - **[Runtime Brand](design/runtime-brand.md)** — why `brand.json` and
   `theme.css` are files the deployment serves rather than bundle contents, how
   fonts work, and where staleness can still bite.
+- **[Theme Packages](design/theme-packages.md)** — the package format, where an
+  installed theme lives and why it is not where the build put it, the two
+  import doors, versioning and rollback.
 - **[Presentation Contract](design/presentation-contract.md)** — every key that
   controls how a library is arranged, the two rules that keep a template working
   across core updates, and where the supported line sits.

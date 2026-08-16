@@ -19,7 +19,6 @@
       "default": "./vite/index.mjs"
     },
     "./schemas": "./schemas/validate.mjs",
-    "./schemas/*.json": "./schemas/*.json",
     "./sw": "./src/sw.ts"
   },
   "files": [
@@ -32,6 +31,7 @@
     "ROADMAP.md"
   ],
   "dependencies": {
+    "storylark-contracts": "0.1.0",
     "@fontsource/cinzel": "^5.1.0",
     "@fontsource/cormorant-garamond": "^5.1.0",
     "@fontsource/ibm-plex-mono": "^5.1.0",

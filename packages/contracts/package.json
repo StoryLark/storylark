@@ -1,0 +1,25 @@
+{
+  "name": "storylark-contracts",
+  "version": "0.1.0",
+  "description": "StoryLark's file contracts — the brand/presentation/deployment JSON Schemas, their validator, the theme-package format and a dependency-free zip codec. Shared by the build, the packaging CLI and the deployment's import endpoint so all three agree.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/StoryLark/storylark.git",
+    "directory": "packages/contracts"
+  },
+  "exports": {
+    ".": { "types": "./index.d.ts", "default": "./index.mjs" },
+    "./validate": { "types": "./validate.d.ts", "default": "./validate.mjs" },
+    "./zip": { "types": "./zip.d.ts", "default": "./zip.mjs" },
+    "./theme-package": { "types": "./theme-package.d.ts", "default": "./theme-package.mjs" },
+    "./schemas/*.json": "./schemas/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": ["index.mjs", "index.d.ts", "validate.mjs", "validate.d.ts", "zip.mjs", "zip.d.ts", "theme-package.mjs", "theme-package.d.ts", "schemas/", "README.md"],
+  "dependencies": {},
+  "publishConfig": {
+    "access": "public"
+  }
+}

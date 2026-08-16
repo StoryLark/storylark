@@ -3,6 +3,15 @@ dist/
 # migrate-brand's safety copy of a pre-split brand.json — local only; git history
 # already has the original.
 *.pre-split.bak
+# Theme packages built by `npm run package-theme` (AB#7417). The DEFAULT one is
+# committed on purpose — it is the "Classic Library" artifact the gallery has
+# only ever described, and packages/worker/test/theme-package.test.mjs asserts
+# it still matches brands/storylark byte for byte. Everything else here is a
+# build output of a brand folder that is already in the repo.
+themes/*.storylark-theme.zip
+!themes/storylark.storylark-theme.zip
+dist-themes/
+
 .wrangler/
 .dev.vars
 *.local

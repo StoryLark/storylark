@@ -520,6 +520,59 @@ select:focus-visible {
   align-items: flex-start;
 }
 
+/* ---- Brand & themes (AB#7417) ---- */
+
+.admin-upload,
+.admin-revisions,
+.admin-brand-form {
+  margin-top: 1rem;
+}
+
+.admin-upload h3,
+.admin-revisions h3,
+.admin-brand-form h3 {
+  font-size: 0.95rem;
+  margin: 0 0 0.3rem;
+}
+
+.admin-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+  align-items: center;
+}
+
+/* The brand form is a stack of labelled fields; the label carries the caption
+   and the control sits under it, so a colour swatch and a select line up the
+   same way a text box does. */
+.admin-brand-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  max-width: 32rem;
+}
+
+.admin-brand-form input,
+.admin-brand-form select {
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--text);
+  background: var(--bg-sunken);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+}
+
+.admin-brand-form input[type='color'] {
+  padding: 0.15rem;
+  width: 4rem;
+  height: 2.2rem;
+}
+
 .admin-correction-hint {
   display: block;
   font-size: 0.8rem;

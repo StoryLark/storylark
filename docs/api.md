@@ -134,6 +134,38 @@ lookup, so a refusal never masquerades as a 404.
 `POST /api/admin/publish` takes the same `announce` flag (default `true`, which
 is what the CLI pipeline sends).
 
+## Admin — brand & theme packages
+
+Installing, versioning and rolling back the deployment's look (AB#7417 — a theme
+package is `brand.json` + `theme.css` + `icons/` + optionally
+`presentation.json`; see [`build-your-own-theme.md`](build-your-own-theme.md)).
+
+Gated by an admin session **or** `X-Admin-Key`, the same two-door rule
+`POST /api/admin/publish` uses — the CLI (`npm run import-theme`) is a headless
+caller by definition, and it posts to these exact routes so the portal and the
+command line cannot diverge. Needs the same writable content store content
+editing needs; without one every route answers `501 {"error":"no_content_store"}`.
+
+| Method & path | Behavior |
+|---|---|
+| `GET /api/admin/themes` | `{storeAvailable, active, builtIn:{id,appName}, versions[], versionLimit, expects:{extension,icons,maxBytes}}`. `active` is `null` when the deployment is wearing the brand its build shipped with. |
+| `POST /api/admin/themes/import` | `multipart/form-data` with a `file` part (or a raw `application/zip` body). Validates the whole package, then makes it live. `{ok, version, warnings, active}`. |
+| `POST /api/admin/themes/validate` | The same validation, applied to nothing. `{ok, manifest, brand, hasPresentation, icons, warnings}`. |
+| `POST /api/admin/themes/versions/:versionId/activate` | One-click rollback. Re-reads that version's stored files, so it restores exactly the bytes that were installed. `404 no_such_version` once one has aged out. |
+| `GET /api/admin/themes/versions/:versionId/package` | That version, rebuilt as a downloadable `.storylark-theme.zip` — including a version the portal FORM produced, which never had an archive. |
+| `DELETE /api/admin/themes/active` | Stop overriding; wear the build's brand again. The version history is untouched. |
+| `PUT /api/admin/themes/brand` | The portal's brand form. A whole `brand.json` body, validated against the schema in **strict** mode, saved as a new version that inherits the live stylesheet, icons and presentation. |
+
+**Rejection is `422 invalid_package`**, not 400: the request is a well-formed
+upload of a real file, and what failed is that file's contents against the
+contract. The body carries `errors` (every problem, not the first),
+`warnings`, and `applied: false` — nothing is ever written for a package that
+fails, so a bad import cannot half-apply.
+
+The last five versions are kept (`THEME_VERSIONS` overrides it) and the live one
+is never aged out — the same shape and the same number as content's five text
+revisions per chapter.
+
 ## Error shape
 
 Errors return `{"error":"<slug>"}` with a fitting status: `unauthorized` 401, `missing_csrf_header` 403, `bad_request` 400, `not_found` 404, `internal` 500.

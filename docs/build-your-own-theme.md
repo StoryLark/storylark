@@ -211,8 +211,15 @@ A build writes these into `app/dist`:
 | `dist/brand.json` | your identity, copied from `brands/<id>/brand.json` | **Yes** |
 | `dist/theme.css` | your theme, copied from `brands/<id>/theme.css` | **Yes** |
 | `dist/manifest.webmanifest` | generated per request from `dist/brand.json` | n/a — follows `brand.json` |
-| `dist/icons/*` | your icon files, copied from `brands/<id>/assets/icons/` | **Yes** — replace the files |
+| `dist/icons/*` | your icon files, copied from `brands/<id>/assets/icons/` | **Yes** — replace the files, or install a package |
 | `dist/fonts.json` | the curated font set this build shipped | No — engine data |
+
+> **You usually want a package instead.** Everything in this section is the
+> file-swapping mechanism underneath; installing a
+> [theme package](#theme-packages--building-installing-rolling-back) does all of
+> it for you, in one request, with validation, version history and one-click
+> rollback — and it works on Cloudflare, where there is no filesystem to swap
+> files on. Read on if you want to know what is actually happening.
 
 Replace `dist/brand.json` or `dist/theme.css` on a deployed site and the next
 request serves the new brand. The document's `<title>`, the brand data the app
@@ -262,6 +269,9 @@ build will put the old brand back.
 
 ## Swapping icons
 
+On a **live** deployment, icons travel in a theme package — see
+[Theme packages](#theme-packages--building-installing-rolling-back). In the repo:
+
 Replace the three PNGs in `brands/<your-id>/assets/icons/` (`icon-192.png`,
 `icon-512.png`, `icon-maskable-512.png` — the manifest references exactly these).
 The `storylark-core` build preset copies the whole `assets/icons/` folder to
@@ -306,19 +316,90 @@ ones under `:root[data-theme="light"]`, the opposite way round from
 runs, so on a dark-first brand the unstamped state has to already be dark or
 every cold load flashes white first.
 
-## Publishing themes (naming convention — planned)
+## Theme packages — building, installing, rolling back
 
-Today a theme is a folder you copy and edit in-repo. The direction is to make
-themes **installable packages** so a brand can consume one without vendoring it:
+A theme is also a **file**. `npm run package-theme` turns a brand folder into
+one zip that installs on any StoryLark deployment, from the portal or from a
+terminal, with no rebuild and no repo access:
 
-- Official themes: `storylark-theme-*` (e.g. `storylark-theme-daybreak`).
-- Community themes: `storylark-theme-*`.
+```
+<id>.storylark-theme.zip
+  package.json        formatVersion, id, name, version, contractVersion
+  brand.json          identity + look
+  theme.css           design tokens
+  presentation.json   optional — the screen arrangement
+  icons/…             favicon.svg, favicon-32/180.png, icon-192/512.png,
+                      icon-maskable-512.png, logo.svg
+```
 
-This packaging/distribution model is **planned**, not available today — for now,
-copy `brands/storylark/` and retune it, or start from a theme in the
-[gallery](https://gallery.storylark.dev/themes.html). The split above is the
-groundwork for it: a package is `brand.json` + `theme.css` + `assets/icons/`
-(+ optionally `presentation.json`), and never your deployment config.
+That is exactly the folder above, with `assets/icons/` flattened to `icons/`
+(where the files land in a built site).
+
+### Build one
+
+```sh
+npm run package-theme -- <your-id>          # → themes/<your-id>.storylark-theme.zip
+npm run package-theme -- --all              # every brand under brands/
+npm run package-theme -- <your-id> --check  # validate, write nothing
+npm run package-theme -- <your-id> --version 1.2.0
+```
+
+**The tool's real job is checking, not zipping.** It refuses to emit a package
+the deployment would refuse to install, using the same code the deployment uses,
+so "it packaged fine but the upload failed" cannot happen. What it catches that
+a build would not:
+
+- an unknown or missing `contractVersion`
+- anything `brand.json` states that the schema does not allow — in *strict*
+  mode, so a typo'd key is an error here even though a running site only warns
+- a **missing icon**, or an icon at the **wrong pixel size** (the failure you
+  otherwise discover weeks later, on somebody else's phone)
+- a `theme.css` missing tokens the app reads — which renders as invisible text
+  rather than as an error
+- a `theme.css` with **no alternate colour scheme**, or one for the wrong scheme:
+  a dark-first brand needs `:root[data-theme="light"]`, and getting it backwards
+  makes the theme toggle silently do nothing
+
+### Install one
+
+Two doors, one endpoint, identical results:
+
+```sh
+npm run import-theme -- --url https://your.site --key <ADMIN_KEY> themes/<id>.storylark-theme.zip
+npm run import-theme -- --url https://your.site --key <ADMIN_KEY> --check <zip>   # validate only
+npm run import-theme -- --url https://your.site --key <ADMIN_KEY> --list
+npm run import-theme -- --url https://your.site --key <ADMIN_KEY> --rollback previous
+npm run import-theme -- --url https://your.site --key <ADMIN_KEY> --revert
+```
+
+…or the **Brand & themes** card in `/admin`: upload a package, check it first,
+see the version history, roll back with one click, download any stored version,
+and edit your brand's own details (names, tagline, colours, fonts) with no
+package at all.
+
+`--key` is the deployment's `ADMIN_KEY` — the same credential the publish
+pipeline uses. `--url`/`--key` fall back to `STORYLARK_URL` /
+`STORYLARK_ADMIN_KEY`.
+
+An installed theme takes effect **on the next request**: brand, stylesheet,
+icons, PWA manifest, and the screen arrangement if the package carries one. It
+lives in the deployment's own storage (the R2 bucket or blob container it
+already has), *not* in the build — so `brands/<id>/` and `dist/` are untouched,
+and "revert" puts the built-in brand back instantly.
+
+### Versions and rollback
+
+Every install is a version. The last **five** are kept (`THEME_VERSIONS`
+overrides it), the live one is never aged out, and rolling back restores exactly
+the bytes that were installed. Editing your brand in the portal form writes a
+version too — so a colour you changed on a staging site can be **downloaded as a
+package** and installed on production, rather than retyped.
+
+### What a package deliberately does not carry
+
+Your deployment config. No `appOrigin`, no `contentOrigin`, no VAPID key, no
+narration settings — those are set per install and would follow a theme into the
+wrong site. See [`deployment/README.md`](../deployment/README.md).
 
 ## Migrating an older brand
 

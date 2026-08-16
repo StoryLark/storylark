@@ -20,6 +20,8 @@ export interface Env {
   CONTENT_REVISIONS?: string;
   /** Ceiling for a portal image upload, in bytes. Default 8MB. */
   CONTENT_MAX_UPLOAD_BYTES?: string;
+  /** Theme versions kept for rollback (AB#7417 — plan §0c). Default 5; see lib/theme-store.ts. */
+  THEME_VERSIONS?: string;
   ASSETS: Fetcher;
   BRAND: string;
   APP_ORIGIN: string;

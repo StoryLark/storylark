@@ -12,7 +12,7 @@ behaves* swappable the same way.
 ## The contract
 
 One file, `presentation/<id>/presentation.json`, validated against
-[`presentation.schema.json`](../../packages/core/schemas/presentation.schema.json)
+[`presentation.schema.json`](../../packages/contracts/schemas/presentation.schema.json)
 and shipped in the build output as `dist/presentation.json`.
 
 ```jsonc

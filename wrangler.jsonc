@@ -22,7 +22,15 @@
     // from the live brand on every request, so an operator who swaps
     // brand.json gets an installable app with the new name and colours without
     // rebuilding anything.
-    "run_worker_first": ["/*", "!/assets/*", "!/icons/*"],
+    //
+    // /icons/* lost its exclusion in Phase 4 (AB#7417): an imported theme
+    // package carries its own icons, and they live in the deployment's storage
+    // rather than in the immutable asset snapshot, so the Worker has to be the
+    // one answering. With no theme installed the handler falls straight through
+    // to the asset router's own bytes — the cost is one invocation for the two
+    // or three icon requests a cold page load makes, and the alternative is a
+    // brand whose pictures can only be changed by rebuilding.
+    "run_worker_first": ["/*", "!/assets/*"],
     "not_found_handling": "single-page-application"
   },
   "observability": { "enabled": true },

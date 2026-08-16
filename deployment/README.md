@@ -73,4 +73,4 @@ database URLs, storage connection strings and the admin key are platform
 secrets (`platforms/*/install.env`, `.env`, or `wrangler secret`) and must never
 be written to these files.
 
-Schema: `packages/core/schemas/deployment.schema.json`.
+Schema: `packages/contracts/schemas/deployment.schema.json`.

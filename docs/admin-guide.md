@@ -94,6 +94,10 @@ full flow.
 content manager. Browse what's published, open any chapter, edit it as plain
 markdown with a live preview, and save. Covered in full below.
 
+**Brand & themes** — what your site looks like and what it calls itself.
+Install a theme package, edit your brand's own details, see every version
+you've installed, and roll back. Covered below.
+
 **Publish a story** — book id, title, author, and markdown text. See
 [`publishing-stories.md`](publishing-stories.md) for the full picture,
 including why this is text-only today and how narration gets added.
@@ -159,6 +163,56 @@ two different libraries. Everything you wrote here, and everything you published
 from your own markdown, stays fully editable as normal — the two can sit side by
 side. See [`content-sync.md`](content-sync.md).
 
+## Changing how your site looks
+
+The **Brand & themes** card changes your site's identity and look on a live
+deployment. No rebuild, no redeploy, no repo — the change is live on the next
+page load.
+
+Two ways in, deliberately:
+
+- **Edit brand details** — the form. Your app name, library name, tagline,
+  author, the two manifest colours, light or dark by default, and a font per
+  role picked from the set your build shipped. This is how you change one thing.
+- **Install a theme package** — a `.storylark-theme.zip` holding `brand.json`,
+  `theme.css`, `icons/` and optionally `presentation.json`. This is how you
+  install a whole look, move one between sites, or take one from the gallery.
+  Build one with `npm run package-theme`; see
+  [`build-your-own-theme.md`](build-your-own-theme.md).
+
+Both write the same thing, so both appear in the same version history, roll back
+the same way, and can be **downloaded as a package**.
+
+**A package is checked completely before anything changes.** Missing icons, an
+icon at the wrong size, missing design tokens, a `contractVersion` this engine
+doesn't read — the upload is refused with the full list of what to fix, and your
+site is left exactly as it was. A bad package is never applied in part. Use
+**Check it first** to run those same checks without installing anything.
+
+**Rolling back.** The last five versions are kept, and the live one is never
+aged out. "Roll back to this" restores exactly the bytes that were installed.
+"Revert to the built-in brand" stops overriding altogether and puts back the
+brand your build shipped with — the history survives, so you can roll forward
+again.
+
+**From a terminal**, the same operations, against the same endpoint:
+
+```sh
+npm run import-theme -- --url https://your.site --key <ADMIN_KEY> <package.zip>
+npm run import-theme -- --url https://your.site --key <ADMIN_KEY> --list
+npm run import-theme -- --url https://your.site --key <ADMIN_KEY> --rollback previous
+npm run import-theme -- --url https://your.site --key <ADMIN_KEY> --revert
+```
+
+**Two things worth knowing.**
+
+- Installing a theme needs the same writable storage content editing needs (an
+  R2 bucket on Cloudflare, `AZURE_STORAGE_CONNECTION_STRING` or
+  `STORYLARK_LOCAL_CONTENT` on Node). Without one the card says so.
+- Anyone who has **installed** your site to their home screen keeps the previous
+  name and icon until they reinstall it — the operating system owns the copy of
+  the manifest it installed with. Everything inside the app updates normally.
+
 ## Turning features on
 
 Story upload — and only story upload — needs two secrets, because it
@@ -179,6 +233,7 @@ Service, a container) set one of these:
 | `AZURE_STORAGE_CONNECTION_STRING` | Azure Blob. The container defaults to `<brand>-content`; override with `CONTENT_CONTAINER`. |
 | `STORYLARK_LOCAL_CONTENT` | A directory on disk holding the published content. Useful for local development and for a single-machine deploy with no object store. |
 | `CONTENT_REVISIONS` | How many text revisions to keep per chapter. Default 5. |
+| `THEME_VERSIONS` | How many installed theme versions to keep for rollback. Default 5. |
 | `CONTENT_MAX_UPLOAD_BYTES` | Ceiling for an uploaded image. Default 8MB. |
 
 Without any of them the site serves content exactly as before, and the content

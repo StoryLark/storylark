@@ -8,7 +8,9 @@
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
     "setup": "node platforms/wizard.mjs",
-    "publish": "node node_modules/storylark-pipeline/publish.mjs --brand __BRAND_ID__ --source content"
+    "publish": "node node_modules/storylark-pipeline/publish.mjs --brand __BRAND_ID__ --source content",
+    "package-theme": "node node_modules/storylark-core/bin/package-theme.mjs",
+    "import-theme": "node node_modules/storylark-core/bin/import-theme.mjs"
   },
   "dependencies": {
     "storylark-core": "__CORE_VERSION__",

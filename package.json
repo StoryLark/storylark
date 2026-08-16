@@ -15,7 +15,9 @@
     "publish": "node packages/pipeline/publish.mjs --brand storylark",
     "migrate-brand": "node packages/core/bin/migrate-brand.mjs",
     "typecheck": "tsc -p app/tsconfig.json --noEmit && tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/worker/tsconfig.json --noEmit",
-    "test": "node --import tsx/esm --test packages/worker/test/*.test.mjs"
+    "test": "node --import tsx/esm --test packages/worker/test/*.test.mjs",
+    "package-theme": "node packages/core/bin/package-theme.mjs",
+    "import-theme": "node packages/core/bin/import-theme.mjs"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.7.0",

@@ -83,6 +83,7 @@ On boot this server logs which storage driver it bound; with none it says so and
 | `AZURE_STORAGE_CONNECTION_STRING` | Edit through Azure Blob. Container defaults to `<BRAND>-content`; override with `CONTENT_CONTAINER`. |
 | `STORYLARK_LOCAL_CONTENT` | Edit through a directory on disk — the same layout `publish.mjs --local <dir>` produces. Takes precedence, and is how this path is developed and tested without a cloud account. |
 | `CONTENT_REVISIONS` | Text revisions kept per chapter. Default 5. |
+| `THEME_VERSIONS` | Installed theme versions kept for rollback. Default 5. |
 | `CONTENT_MAX_UPLOAD_BYTES` | Ceiling for an uploaded image. Default 8MB. |
 
 Note that after a portal edit the chapter's narration is stale — this process
