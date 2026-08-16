@@ -1,0 +1,18 @@
+{
+  "contractVersion": 1,
+  "id": "wireless",
+  "name": "The Evening Serial",
+  "appName": "Wireless",
+  "shortName": "Wireless",
+  "tagline": "Half an hour of drama, every week, on the hour.",
+  "author": "Wireless Playhouse",
+  "themeColor": "#191310",
+  "backgroundColor": "#191310",
+  "defaultTheme": "dark",
+  "fonts": {
+    "display": "Cinzel",
+    "headers": "Cinzel",
+    "body": "Newsreader",
+    "mono": "IBM Plex Mono"
+  }
+}

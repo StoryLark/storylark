@@ -1,0 +1,49 @@
+{
+  "contractVersion": 1,
+  "layout": "series",
+  "nouns": {
+    "unit": "episode",
+    "unitPlural": "episodes",
+    "Unit": "Episode",
+    "UnitPlural": "Episodes",
+    "collection": "serial",
+    "Collection": "Serial"
+  },
+  "nav": {
+    "position": "bottom",
+    "items": ["home", "nowPlaying", "library", "settings", "about"],
+    "labels": {
+      "home": "Tonight",
+      "library": "Schedule",
+      "nowPlaying": "On Air",
+      "about": "Station"
+    }
+  },
+  "home": {
+    "sections": ["continue", "allUnits"]
+  },
+  "library": {
+    "defaultSort": "order",
+    "sortOptions": ["order", "recent"],
+    "groupBy": "collection",
+    "groupOptions": ["collection"],
+    "view": "list",
+    "showSearch": true
+  },
+  "reader": {
+    "defaultMode": "listen"
+  },
+  "player": {
+    "skipSeconds": 30,
+    "showSpeed": false
+  },
+  "cover": {
+    "aspect": "square"
+  },
+  "emptyState": {
+    "library": "Nothing scheduled. The station is between {unitPlural} — try the listings again shortly.",
+    "librarySearch": "No {unitPlural} in the listings match “{query}”.",
+    "home": "Warming the valves…",
+    "nowPlaying": "Dead air."
+  }
+}

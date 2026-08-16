@@ -1,0 +1,56 @@
+/* Wireless — vintage radio drama.
+ *
+ * The object is a valve set in an unlit parlour: a bakelite and walnut
+ * cabinet, a dial glass printed in cream, and one amber lamp behind it. So the
+ * ground is a brown-black rather than a neutral one, the type colour is
+ * dial-print cream rather than white, and the accent is that lamp. The
+ * read-along highlight is the studio ON AIR red, which is the only other
+ * colour a radio station ever needed.
+ *
+ * Display and headers are Cinzel because the maker's name on a set of this
+ * period was engraved Roman capitals on a brass escutcheon — not a
+ * mid-century sans, which came later and belongs to a different cabinet.
+ *
+ * Dark sits on bare `:root` (see brands/nebula/theme.css for why); light is
+ * the other real material in this world — a duplicated script on buff
+ * foolscap, ink brown from a tired ribbon.
+ */
+:root {
+  color-scheme: dark;
+
+  --bg: #191310;          /* bakelite */
+  --bg-raised: #241B16;   /* walnut veneer */
+  --bg-sunken: #100B09;
+  --text: #F0E3CC;        /* the cream printed on the dial glass */
+  --text-muted: #B8A78C;
+  --text-faint: #8A7B65;
+  --accent: #D89A2C;      /* the dial lamp */
+  --accent-strong: #F0B851;
+  --rule: #3A2C22;
+  --link: #F0B851;
+
+  --font-display: "Cinzel", Optima, Georgia, serif;
+  --font-headers: "Cinzel", Optima, Georgia, serif;
+  --font-body: "Newsreader", Georgia, Cambria, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+
+  /* ON AIR. */
+  --highlight-word: rgba(198, 74, 52, 0.28);
+  --highlight-block: rgba(198, 74, 52, 0.5);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #EDE3D1;          /* buff foolscap — the rehearsal script */
+  --bg-raised: #F6EFE1;
+  --bg-sunken: #DFD2BA;
+  --text: #2A1F16;        /* typewriter ribbon, brown-black */
+  --text-muted: #6B5842;
+  --text-faint: #9C8A70;
+  --accent: #9A5B12;      /* burnt amber — the lamp, in daylight */
+  --accent-strong: #7A4408;
+  --rule: #D6C6A9;
+  --link: #9A5B12;
+  --highlight-word: rgba(176, 56, 38, 0.2);
+  --highlight-block: rgba(176, 56, 38, 0.42);
+}

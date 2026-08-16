@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#191310"/>
+  <!-- the yoke it hangs in -->
+  <path d="M140 132 L140 268 A 116 116 0 0 0 372 268 L372 132" fill="none" stroke="#D89A2C"
+        stroke-width="20" stroke-linecap="round" opacity="0.55"/>
+  <!-- capsule -->
+  <rect x="196" y="102" width="120" height="242" rx="60" fill="#D89A2C"/>
+  <line x1="206" y1="166" x2="306" y2="166" stroke="#191310" stroke-width="13" stroke-linecap="round"/>
+  <line x1="206" y1="200" x2="306" y2="200" stroke="#191310" stroke-width="13" stroke-linecap="round"/>
+  <line x1="206" y1="234" x2="306" y2="234" stroke="#191310" stroke-width="13" stroke-linecap="round"/>
+  <line x1="206" y1="268" x2="306" y2="268" stroke="#191310" stroke-width="13" stroke-linecap="round"/>
+  <!-- stem and base -->
+  <line x1="256" y1="384" x2="256" y2="428" stroke="#D89A2C" stroke-width="20" stroke-linecap="round"/>
+  <line x1="188" y1="432" x2="324" y2="432" stroke="#D89A2C" stroke-width="20" stroke-linecap="round"/>
+</svg>
