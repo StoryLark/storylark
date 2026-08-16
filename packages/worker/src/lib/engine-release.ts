@@ -144,9 +144,18 @@ export async function downloadEngineArtifact(
     // prebuilt artifact (cut before Phase 5, or its build step failed) —
     // there's no separate existence check anymore now that findEngineRelease
     // constructs the URL directly instead of asking GitHub's API first.
+    //
+    // TEMPORARY DIAGNOSTIC (2026-08-16): a real 404 surfaced from Azure App
+    // Service specifically, for a release confirmed reachable (200, after
+    // its 302) from every other network tested. sumRes.url (the address
+    // fetch actually landed on after following redirects) and a short body
+    // snippet distinguish "never left github.com" from "reached the signed
+    // CDN URL and that 404'd" without needing remote access to the box.
+    // Remove once that's understood — this is not meant to be permanent.
     if (sumRes.status === 404) {
+      const snippet = await sumRes.text().catch(() => '');
       throw new EngineReleaseError(
-        `There is no published prebuilt engine for "${release.tag}". That release was cut before prebuilt artifacts existed, its build step failed, or the version doesn't exist — take this update with the installer command instead.`,
+        `There is no published prebuilt engine for "${release.tag}". That release was cut before prebuilt artifacts existed, its build step failed, or the version doesn't exist — take this update with the installer command instead. [diag: landed=${sumRes.url} body=${snippet.slice(0, 200).replace(/\s+/g, ' ')}]`,
         'no_release'
       );
     }
