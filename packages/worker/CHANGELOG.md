@@ -1,5 +1,83 @@
 # storylark-worker
 
+## 0.9.0
+
+### Minor Changes
+
+- [`3c62506`](https://github.com/StoryLark/storylark/commit/3c6250617ac0d798a6f4fcc43cb7191225e38946) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - Deployment config comes from the running deployment, not from the last build (AB#7414).
+
+  Change `CONTENT_ORIGIN` in your Azure app settings or your Worker vars and the
+  API picked it up on the next request — but the frontend did not, because
+  `appOrigin`, `contentOrigin`, `vapidPublicKey` and `tts` were compiled into the
+  JS bundle. The two halves of one deployment disagreed until somebody rebuilt
+  and redeployed the site. They no longer can: the platform serving the documents
+  stamps its own current environment into them on the way out.
+
+  ```
+  index.html / admin.html   <script id="storylark-deployment">self.__STORYLARK_DEPLOYMENT__={…}</script>
+  sw.js                     the same assignment, as a prelude
+  ```
+
+  No extra round trip and no flash of a wrongly-configured UI — the script sits in
+  `<head>`, ahead of the app bundle, so the values are there before the first line
+  of app code runs. The service worker gets its own copy because it needs the
+  content origin synchronously inside its fetch handler, and it re-stamps the
+  precached app shell so an installed PWA cannot keep serving yesterday's origins
+  either.
+
+  `deployment/<id>/deployment.json` and the `STORYLARK_*` build overrides are now
+  the **fallback**, per key: they are what a build carries for contexts nothing
+  injects into (`vite dev`, `vite preview`, plain static hosting), and an unset
+  environment variable leaves the built-in value alone rather than blanking it. A
+  live value that is not a valid origin is ignored with a warning in the platform
+  log rather than shipped to readers.
+
+  **Cloudflare sites: `run_worker_first` changes.** It was `["/api/*"]`; it is now
+  `["/*", "!/assets/*", "!/icons/*", "!/manifest.webmanifest"]`, so navigations,
+  `/admin` and `/sw.js` reach the Worker and can be injected into. The Worker
+  serves them via `env.ASSETS.fetch()`, so `/admin` → `admin.html`, the `/admin/`
+  and `/admin.html` 307s, and the SPA fallback all still come from the asset
+  router unchanged. Hashed assets and icons still cost no Worker invocation.
+  Update your `wrangler.jsonc` when you update — `npm create storylark` writes the
+  new form.
+
+  **Brand config no longer carries addresses.** `Brand` (`virtual:storylark-config`)
+  lost `appOrigin`, `contentOrigin`, `vapidPublicKey` and `tts`; they are
+  `DeploymentConfig`, exported from `storylark-core` as `DEPLOYMENT`. Anything
+  reading `BRAND.contentOrigin` should read `DEPLOYMENT.contentOrigin`. Identity
+  and infrastructure are separate objects with separate lifetimes, which is the
+  point.
+
+- [`c59955f`](https://github.com/StoryLark/storylark/commit/c59955fbdb3b0a6cc50da391212df6416e072931) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - Platform updates no longer need a GitHub token, or any stored credential
+  (AB#7403).
+
+  A deployed reading app has no business holding a credential that can deploy on
+  its owner's behalf. The "Install update" button and its
+  `POST /api/admin/update-install` route — which dispatched a `self-update.yml`
+  GitHub Actions workflow and therefore required `GITHUB_REPO` +
+  `GITHUB_DEPLOY_TOKEN` on the deployment — are removed, along with the workflow
+  template.
+
+  What replaces them:
+
+  - **Detect** (unchanged): the daily check and `GET /api/admin/update-status`
+    still compare the running engine version against the public npm registry,
+    unauthenticated and read-only.
+  - **Update**: `node platforms/<platform>/install.mjs --update --yes`, run by
+    the operator from the machine they deploy from. It bumps the pinned engine
+    version, installs, migrates, rebuilds with the brand untouched, and
+    redeploys — authenticating with the operator's existing `wrangler login` /
+    `az login`. It provisions nothing, edits no config, and stores no secret, so
+    it is safe to re-run at any time.
+
+  `GET /api/admin/update-status` drops `selfUpdateConfigured` and gains
+  `platform` (detected from the runtime), `updateCommand` (the exact command to
+  run), and `updateDocsUrl`. The admin portal's Platform update card now shows
+  that command, with a copy button, instead of an install button.
+
+  `GITHUB_REPO` / `GITHUB_DEPLOY_TOKEN` remain optional and are now used by the
+  admin portal's story upload only.
+
 ## 0.8.0
 
 ### Minor Changes
