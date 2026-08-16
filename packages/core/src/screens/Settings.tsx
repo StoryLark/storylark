@@ -504,10 +504,21 @@ function SignIn(): JSX.Element {
   // An emailed "Reset password" link lands on /settings?reset=<token>. Pick the
   // token up, drop straight into the reset form, and scrub it out of the URL
   // bar so a later refresh or share doesn't leak or replay it.
+  //
+  // /settings?forgot=1 is the same landing spot minus the token: it's how the
+  // admin portal's "Forgot password?" hands off to this flow (AB#7404) instead
+  // of growing a second copy of it. Without it the hand-off would dump the
+  // operator on the "Create account" tab and make them find their own way
+  // here, which is two clicks and a wrong guess away from the thing they asked
+  // for.
   useEffect(() => {
-    const t = new URLSearchParams(location.search).get('reset');
+    const params = new URLSearchParams(location.search);
+    const t = params.get('reset');
     if (t) {
       setResetToken(t);
+      setMode('forgot');
+      history.replaceState(null, '', '/settings');
+    } else if (params.get('forgot')) {
       setMode('forgot');
       history.replaceState(null, '', '/settings');
     }

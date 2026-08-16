@@ -103,8 +103,9 @@ async function printAdminSetup(origin, adminKey) {
   const endpoint = `${origin}/api/admin/setup/reset`;
   const manual = () => {
     console.log('\n' + '='.repeat(72));
-    console.log('ADMIN SETUP — could not reach the site to mint your setup link.');
-    console.log('Once the site is confirmed live, run this yourself:');
+    console.log('ADMIN SETUP — could not mint your setup link automatically.');
+    console.log('(The site may not be reachable yet, or the key may not have');
+    console.log('propagated.) Once the site is confirmed live, run this yourself:');
     console.log(`\n  curl -X POST ${endpoint} -H "x-admin-key: <your ADMIN_KEY>"\n`);
     console.log('ADMIN_KEY is an app setting on the Web App — read it with:');
     console.log('  az webapp config appsettings list --resource-group <rg> --name <app> \\');

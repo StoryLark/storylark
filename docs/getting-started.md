@@ -90,14 +90,14 @@ After `npm run dev`, open the URL Wrangler prints. The app boots as a branded bu
 (the bundled `examples/demo` public-domain stories are the quickest way; see
 [`content-pipeline.md`](content-pipeline.md)).
 
-> **Testing secret-gated routes locally (`ADMIN_KEY` etc.):** confirmed on this
-> project's Workers+Assets setup, `.dev.vars` / `.dev.vars.<env>` / `--var`
-> do not actually reach `env` in `wrangler dev` — the startup banner claims
-> the binding exists, but the Worker never sees it (verified by dumping every
-> key on `env` at runtime: only what's declared in `wrangler.jsonc`'s `vars`
-> shows up). To test an admin route locally, temporarily add the value under
-> that env's `vars` block in `wrangler.jsonc` and remove it before
-> committing — never commit a real secret this way.
+> **Testing secret-gated routes locally (`ADMIN_KEY` etc.):** put them in
+> `.dev.vars` (gitignored) and run `wrangler dev --env <brand> --local`. This
+> works — re-verified on wrangler 4.107.0 by minting a real admin setup link
+> against a local D1 with the key set *only* in `.dev.vars`, and confirming a
+> wrong key still 401s. Earlier versions of this doc said `.dev.vars` never
+> reached `env` and told you to paste the value into `wrangler.jsonc`'s `vars`
+> block instead; that is no longer true, and you should not do it — a secret
+> in `wrangler.jsonc` is one `git add` away from being committed.
 
 ### How the brand "mode" works
 

@@ -299,7 +299,9 @@ function AdminSignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }): JSX.E
         <button class="btn" type="submit" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
-        <button type="button" class="btn-ghost signin-forgot-link" onClick={() => navigate('/settings')}>
+        {/* Hands off to the reader-side reset flow in Settings rather than
+            duplicating it — ?forgot=1 drops straight into that form. */}
+        <button type="button" class="btn-ghost signin-forgot-link" onClick={() => navigate('/settings?forgot=1')}>
           Forgot password?
         </button>
         <button type="button" class="btn-ghost signin-forgot-link" onClick={() => setMode('recover')}>

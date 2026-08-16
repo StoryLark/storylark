@@ -27,7 +27,8 @@ re-narrate the whole book.
 
 ## Admin portal upload (browser, text-only)
 
-Open your site's `/admin`, enter the admin key, and use the "Publish a
+Open your site's `/admin`, sign in with your operator account (email and
+password — see [`admin-guide.md`](admin-guide.md)), and use the "Publish a
 story" form: book id, title, author, and the markdown text. This is the
 single-chapter shorthand format — one story, no chapters to split.
 

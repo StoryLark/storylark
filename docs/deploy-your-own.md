@@ -125,7 +125,7 @@ npx wrangler secret put GOOGLE_CLIENT_SECRET --env <your-id>
 | Secret | Needed for | Notes |
 |---|---|---|
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Web push | Generate with `node packages/pipeline/gen-vapid.mjs`. Put the **public** key in `brand.json` `vapidPublicKey` *and* the Worker secret; the **private** key is Worker-only. See [`push.md`](push.md). |
-| `ADMIN_KEY` | `POST /api/admin/publish` | The publish pipeline sends this as `X-Admin-Key` to fire push notifications. Without it, publishing still works — it just skips the notify step. |
+| `ADMIN_KEY` | Minting admin setup links; `POST /api/admin/publish` | **Not** the admin login — `/admin` is gated by a normal email+password account (see [`admin-guide.md`](admin-guide.md)). This secret mints the first admin setup link and the printed recovery codes, and the publish pipeline sends it as `X-Admin-Key` to fire push notifications. Without it, publishing still works (it just skips the notify step) but you have no way to create the first operator account. |
 | `RESEND_API_KEY` | Magic-link email | Only if you enable the (currently dormant) magic-link path. See [`auth.md`](auth.md). |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in | Only if you enable the (currently dormant) Google path. |
 | `GITHUB_REPO` / `GITHUB_DEPLOY_TOKEN` | Self-update + admin-portal story upload | `GITHUB_REPO` is `owner/repo` for your site's own repo; `GITHUB_DEPLOY_TOKEN` is a fine-grained PAT with Actions:write + Contents:write on just that repo. Without these, `/admin` shows update status read-only and story upload is disabled — see [`updating.md`](updating.md) and [`admin-guide.md`](admin-guide.md). |
