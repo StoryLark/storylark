@@ -13,6 +13,7 @@
     "build": "npm run build -w app -- --mode storylark",
     "deploy": "npm run build && wrangler deploy --env storylark",
     "publish": "node packages/pipeline/publish.mjs --brand storylark",
+    "migrate-brand": "node packages/core/bin/migrate-brand.mjs",
     "typecheck": "tsc -p app/tsconfig.json --noEmit && tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/worker/tsconfig.json --noEmit"
   },
   "devDependencies": {

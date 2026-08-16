@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# migrate-brand's safety copy of a pre-split brand.json — local only; git history
+# already has the original.
+*.pre-split.bak
 .wrangler/
 .dev.vars
 *.local

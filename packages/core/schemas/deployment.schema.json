@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://storylark.dev/schemas/deployment.schema.json",
+  "title": "StoryLark deployment config",
+  "description": "Where a deployment lives and how it publishes: origins, the web-push public key, and TTS/narration settings. Set at install time and NEVER part of a portable brand or presentation package — two deployments of the same brand differ here and nowhere else. Every value can be overridden by an environment variable at build time (STORYLARK_APP_ORIGIN, STORYLARK_CONTENT_ORIGIN, STORYLARK_VAPID_PUBLIC_KEY, STORYLARK_TTS_*), which is how the platform installers set it.",
+  "type": "object",
+  "required": ["contractVersion"],
+  "additionalProperties": false,
+  "properties": {
+    "contractVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Contract major version. The engine refuses a file whose major it does not support; see SUPPORTED_CONTRACT_VERSION in validate.mjs."
+    },
+    "appOrigin": {
+      "type": "string",
+      "description": "Where the app is served. Also the base for admin publish notification, and (with the 'app.' label dropped) the marketing origin used to resolve root-relative image srcs."
+    },
+    "contentOrigin": {
+      "type": "string",
+      "description": "Where published content is served from (contentUrl() builds asset URLs from this)."
+    },
+    "vapidPublicKey": {
+      "type": "string",
+      "description": "Web-push VAPID PUBLIC key (base64url). Empty disables the push toggle. The matching PRIVATE key is a deployment secret and never appears in any file here. Changing this key orphans every existing push subscription."
+    },
+    "tts": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Narration config used by the publish pipeline.",
+      "properties": {
+        "voice": { "type": "string", "description": "Default narrator voice id — a Kokoro id (af_heart) or an Azure Speech neural voice id." },
+        "rate": { "type": "string", "description": "Speaking-rate adjustment, e.g. '0%'." },
+        "outputFormat": { "type": "string", "description": "Azure Speech output-format enum, e.g. 'Audio48Khz96KBitRateMonoMp3'." },
+        "voices": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Every voice the library offers. The default `voice` is always included."
+        }
+      }
+    }
+  }
+}

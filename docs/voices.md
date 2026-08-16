@@ -11,14 +11,15 @@ This is the default and what most brands should start with.
 
 **Premium, cloud (Azure Speech)** — optional, bring-your-own-key. Set
 `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION` and use an Azure voice id in
-`brand.json`'s `tts.voice`. Costs per character synthesized.
+your deployment config's `tts.voice`. Costs per character synthesized.
 
 Mixing is fine — your primary narrator can be Kokoro while an additional
 voice is Azure, or vice versa; the pipeline handles either per voice id.
 
 ## Picking your brand's narrator
 
-`brands/<id>/brand.json`:
+`deployment/<id>/deployment.json` (narration is deployment config, not brand
+identity — see [`build-your-own-theme.md`](build-your-own-theme.md)):
 
 ```json
 "tts": {

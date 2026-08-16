@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://storylark.dev/schemas/brand.schema.json",
+  "title": "StoryLark brand",
+  "description": "Identity and look of a StoryLark deployment: names, tagline, author, manifest colours, default theme, font families. Portable — a brand file plus theme.css and assets/icons/ is the whole brand package, and it contains nothing that is specific to where the deployment lives. Addresses, keys and publishing config belong in deployment.schema.json; library shape and nouns belong in presentation.schema.json.",
+  "type": "object",
+  "required": ["contractVersion", "id", "name", "appName"],
+  "additionalProperties": false,
+  "properties": {
+    "contractVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Contract major version. The engine refuses a file whose major it does not support; see SUPPORTED_CONTRACT_VERSION in validate.mjs."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "description": "Brand id. Must equal the folder name under brands/ and the Vite build --mode."
+    },
+    "name": {
+      "type": "string",
+      "description": "Library name, e.g. 'Story Library'. Shown as the manifest subtitle."
+    },
+    "appName": {
+      "type": "string",
+      "description": "App name — document <title> and PWA manifest name."
+    },
+    "shortName": {
+      "type": "string",
+      "description": "PWA short_name (home-screen label). Falls back to appName."
+    },
+    "tagline": {
+      "type": "string",
+      "description": "Manifest description / marketing line."
+    },
+    "author": {
+      "type": "string",
+      "description": "Author or publisher label."
+    },
+    "themeColor": {
+      "type": "string",
+      "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+      "description": "PWA manifest theme_color. Match theme.css --bg."
+    },
+    "backgroundColor": {
+      "type": "string",
+      "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+      "description": "PWA manifest background_color (splash). Match theme.css --bg."
+    },
+    "defaultTheme": {
+      "enum": ["light", "dark"],
+      "description": "Initial theme before the reader overrides it in Settings."
+    },
+    "fonts": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Family names referenced by theme.css --font-* tokens. A family with a matching @fontsource package is bundled automatically.",
+      "properties": {
+        "display": { "type": "string" },
+        "headers": { "type": "string" },
+        "body": { "type": "string" },
+        "mono": { "type": "string" }
+      }
+    }
+  }
+}

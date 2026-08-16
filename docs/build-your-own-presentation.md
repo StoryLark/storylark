@@ -4,8 +4,16 @@ Where a [theme](build-your-own-theme.md) changes how the app *looks* (colors,
 fonts, icons), the **presentation layer** is how it's *structured*: how the
 library is organized, what content units are called, and how the reader and
 player screens are composed. This page covers what's configurable today via
-`brand.json` and the direction for the future. Example presentation templates
-live in the [theme & template gallery](https://gallery.storylark.dev/templates.html).
+`presentation/<id>/presentation.json` and the direction for the future. Example
+presentation templates live in the
+[theme & template gallery](https://gallery.storylark.dev/templates.html).
+
+> **This moved out of `brand.json` (2026-08).** `layout` and `nouns` now live in
+> their own file, so that updating the StoryLark engine can never touch how your
+> library is arranged, and your arrangement can be shared separately from your
+> branding. An older single-file `brand.json` still works — the build warns and
+> points you at `npm run migrate-brand`, which splits it for you and keeps a
+> backup.
 
 ## What ships today
 
@@ -34,9 +42,44 @@ This structure is not currently
 config-driven — changing nav arrangement or screen composition means editing the
 components.
 
-## What you configure via `brand.json`
+## What you configure via `presentation.json`
 
-Two fields drive presentation without touching code:
+The file sits beside your brand folder and is selected by the same build mode:
+
+```
+brands/<your-id>/brand.json               identity + look
+presentation/<your-id>/presentation.json  shape — this file
+deployment/<your-id>/deployment.json      addresses, keys, narration settings
+```
+
+```json
+{
+  "contractVersion": 1,
+  "layout": "flat",
+  "nouns": { "unit": "story", "unitPlural": "stories",
+             "Unit": "Story", "UnitPlural": "Stories",
+             "collection": null, "Collection": null }
+}
+```
+
+### `contractVersion` — why your file keeps working
+
+The leading `"contractVersion": 1` says which version of the format you wrote
+against. It exists so that a StoryLark update can't break what you wrote:
+
+- **A field you leave out gets StoryLark's default, forever.** Everything below
+  is optional; omit `layout` and you get `flat`, omit `nouns` and you get
+  story/stories. A file written today keeps working in every future version.
+- **A field StoryLark doesn't recognise is ignored with a warning.** A template
+  written for a newer version loads on an older one instead of breaking it.
+
+So the number does *not* change when new options are added — only if the format
+is ever reshaped in a way that genuinely breaks old files, which is the one case
+the build refuses to guess about.
+
+If the file is missing entirely, the defaults apply and the app still builds.
+
+### The two fields that work today
 
 ### `layout` — flat vs series
 
@@ -58,7 +101,7 @@ whole collection downloaded.
 
 ### `nouns` — what a "unit" and "collection" are called
 
-Every user-visible content word is pulled from `brand.json` `nouns` — the app
+Every user-visible content word is pulled from `nouns` — the app
 never hardcodes "story", "chapter", or "book". Consumed via
 `packages/core/src/brand.ts` (`NOUNS`, `countUnits()`).
 
@@ -110,6 +153,16 @@ The `layout` + `nouns` fields are the first slice of a larger idea: a
 identity (colors/fonts/icons), the presentation template carries structure (nav
 arrangement, screen composition, library organization). Today the shell is fixed
 and only `layout`/`nouns` vary it.
+
+Giving presentation its own file and its own `contractVersion` is step one of
+that. The agreed v1 contract also covers `nav` (position, which tabs, their
+order), `home` (which sections and in what order), `library` (default sort,
+grouping, grid vs list, search), `reader` (default read/listen mode), `player`
+(skip seconds, speed control) and `features` (where each new engine feature
+appears). Those keys are already described by the published schema
+(`packages/core/schemas/presentation.schema.json`) and are accepted and
+validated, but **the app does not read them yet** — the screens still have to be
+taught to. Setting one today does nothing; leaving it out will always be safe.
 
 The planned distribution model mirrors themes:
 

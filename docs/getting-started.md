@@ -104,9 +104,11 @@ After `npm run dev`, open the URL Wrangler prints. The app boots as a branded bu
 The Vite build **mode is the brand id**. The `defineStorylarkConfig` preset
 (from `storylark-core/vite`, used by `app/vite.config.ts`) reads
 `--mode <brandId>`, loads `brands/<brandId>/brand.json` + `brands/<brandId>/theme.css`,
-and bakes them into the bundle:
+plus `presentation/<brandId>/presentation.json` and
+`deployment/<brandId>/deployment.json`, and bakes them into the bundle:
 
-- `brand.json` is served as the virtual module `virtual:storylark-config` and
+- The three JSON files resolve into one object served as the virtual module
+  `virtual:storylark-config` and
   read at runtime through `packages/core/src/brand.ts` (`BRAND`, `NOUNS`,
   `contentUrl()`) — the service worker consumes the same module.
 - `theme.css` is served as `virtual:storylark-theme.css`, and the brand's font
@@ -122,7 +124,9 @@ The built-in Vite modes (`development`, `production`, `test`) fall back to the
 ### Project layout
 
 ```
-brands/             per-brand config: brand.json, theme.css, assets/icons/ (and optional assets/covers/)
+brands/             per-brand identity: brand.json, theme.css, assets/icons/ (and optional assets/covers/)
+presentation/       per-brand shape: presentation.json (layout, nouns)
+deployment/         per-install config: deployment.json (origins, VAPID public key, TTS)
 app/                the base SITE — a thin consumer of storylark-core (index.html, entry.ts, vite.config.ts)
 packages/core/      storylark-core — the PWA engine (library / reader / player / settings + service worker)
                     plus the defineStorylarkConfig Vite preset that builds a site from a brand folder

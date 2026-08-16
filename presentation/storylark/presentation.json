@@ -1,0 +1,12 @@
+{
+  "contractVersion": 1,
+  "layout": "flat",
+  "nouns": {
+    "unit": "story",
+    "unitPlural": "stories",
+    "Unit": "Story",
+    "UnitPlural": "Stories",
+    "collection": null,
+    "Collection": null
+  }
+}

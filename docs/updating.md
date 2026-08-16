@@ -63,7 +63,8 @@ does: it changes a live site.
 
 ## What never changes
 
-Your brand — `brands/<id>/brand.json`, `theme.css`, icons — and your
+Your brand — `brands/<id>/brand.json`, `theme.css`, icons — your presentation
+and deployment config, and your
 content are never touched by an update, by construction: the updater only
 ever bumps the pinned engine package version and calls your platform's own
 build/deploy commands. There is no code path in the update mechanism that

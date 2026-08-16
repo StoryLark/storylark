@@ -82,33 +82,70 @@ function copyTemplate(targetDir, brandId, appName, coreVersion, workerVersion) {
   walk(join(PKG_ROOT, 'template'), targetDir);
 }
 
+/**
+ * Scaffolds the three contracts a site is described by — identity, shape, and
+ * deployment config — as three separate files, because a brand has to be
+ * portable and a deployment has to be configurable, and one file can't be both.
+ *
+ *   brands/<id>/brand.json                identity + look
+ *   presentation/<id>/presentation.json   shape (layout, nouns)
+ *   deployment/<id>/deployment.json       origins/keys/tts — filled in by the installer
+ */
 function scaffoldBrand(targetDir, brandId, appName) {
   const baseBrand = join(ENGINE_ROOT, 'brands', 'storylark');
   const destBrand = join(targetDir, 'brands', brandId);
+  const destPresentation = join(targetDir, 'presentation', brandId);
+  const writeJson = (file, value) => {
+    mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(file, JSON.stringify(value, null, 2) + '\n');
+  };
+  const defaultPresentation = {
+    contractVersion: 1,
+    layout: 'flat',
+    nouns: { unit: 'story', unitPlural: 'stories', Unit: 'Story', UnitPlural: 'Stories', collection: null, Collection: null },
+  };
+
   if (existsSync(baseBrand)) {
-    cpSync(baseBrand, destBrand, { recursive: true });
+    // Skip migrate-brand's backups — a freshly scaffolded site should not
+    // inherit the engine checkout's pre-split leftovers.
+    cpSync(baseBrand, destBrand, { recursive: true, filter: (src) => !src.endsWith('.pre-split.bak') });
     const brandJsonPath = join(destBrand, 'brand.json');
     const brand = JSON.parse(readFileSync(brandJsonPath, 'utf8'));
     brand.id = brandId;
     brand.name = appName;
     brand.appName = appName;
     brand.shortName = appName;
-    writeFileSync(brandJsonPath, JSON.stringify(brand, null, 2) + '\n');
-  } else {
-    // Published-package fallback: a minimal brand.json, no base theme to copy
-    // from (this path is for when create-storylark itself is installed from
-    // npm rather than run from an engine checkout).
-    mkdirSync(destBrand, { recursive: true });
-    writeFileSync(
-      join(destBrand, 'brand.json'),
-      JSON.stringify(
-        { id: brandId, name: appName, appName, shortName: appName, layout: 'flat', nouns: { unit: 'story', unitPlural: 'stories', Unit: 'Story', UnitPlural: 'Stories', collection: null, Collection: null } },
-        null,
-        2
-      ) + '\n'
+    writeJson(brandJsonPath, brand);
+    const basePresentation = join(ENGINE_ROOT, 'presentation', 'storylark', 'presentation.json');
+    writeJson(
+      join(destPresentation, 'presentation.json'),
+      existsSync(basePresentation) ? JSON.parse(readFileSync(basePresentation, 'utf8')) : defaultPresentation
     );
+  } else {
+    // Published-package fallback: minimal files, no base theme to copy from
+    // (this path is for when create-storylark itself is installed from npm
+    // rather than run from an engine checkout).
+    writeJson(join(destBrand, 'brand.json'), {
+      contractVersion: 1,
+      id: brandId,
+      name: appName,
+      appName,
+      shortName: appName,
+    });
+    writeJson(join(destPresentation, 'presentation.json'), defaultPresentation);
     writeFileSync(join(destBrand, 'theme.css'), '/* Add your theme tokens — see docs/build-your-own-theme.md */\n:root {}\n');
   }
+
+  // Deployment config: intentionally empty of addresses. The installer fills
+  // these in (or sets STORYLARK_APP_ORIGIN / STORYLARK_CONTENT_ORIGIN at build
+  // time) — a scaffold must never ship someone else's origins.
+  writeJson(join(targetDir, 'deployment', brandId, 'deployment.json'), {
+    contractVersion: 1,
+    appOrigin: '',
+    contentOrigin: '',
+    vapidPublicKey: '',
+    tts: { voice: 'af_heart', rate: '0%', outputFormat: 'Audio48Khz96KBitRateMonoMp3' },
+  });
 }
 
 function copyPlatforms(targetDir) {

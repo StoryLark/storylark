@@ -1,0 +1,11 @@
+{
+  "contractVersion": 1,
+  "appOrigin": "https://app.storylark.dev",
+  "contentOrigin": "https://content.storylark.dev",
+  "vapidPublicKey": "",
+  "tts": {
+    "voice": "af_heart",
+    "rate": "0%",
+    "outputFormat": "Audio48Khz96KBitRateMonoMp3"
+  }
+}

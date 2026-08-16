@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://storylark.dev/schemas/presentation.schema.json",
+  "title": "StoryLark presentation",
+  "description": "The shape of a StoryLark library: how it is organised, what a content unit is called, and how the shell is arranged. Every key is optional — an absent key takes the core default, permanently, so a template written today keeps working on every future engine. Only `layout` and `nouns` are consumed by the engine today (contract v1, Phase 0); the remaining keys are the agreed v1 contract surface and are read once the presentation layer becomes runtime data.",
+  "type": "object",
+  "required": ["contractVersion"],
+  "additionalProperties": false,
+  "properties": {
+    "contractVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Contract major version. The engine refuses a file whose major it does not support; see SUPPORTED_CONTRACT_VERSION in validate.mjs."
+    },
+    "layout": {
+      "enum": ["flat", "series"],
+      "description": "Library shape. 'flat' — standalone units in one list, no collection level. 'series' — units grouped into collections."
+    },
+    "nouns": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What a content unit and its collection are called throughout the UI. No user-visible string hardcodes 'story' or 'book'.",
+      "properties": {
+        "unit": { "type": "string", "description": "Lowercase singular, e.g. 'story'." },
+        "unitPlural": { "type": "string", "description": "Lowercase plural, e.g. 'stories'." },
+        "Unit": { "type": "string", "description": "Capitalised singular, e.g. 'Story'." },
+        "UnitPlural": { "type": "string", "description": "Capitalised plural, e.g. 'Stories'." },
+        "collection": {
+          "type": ["string", "null"],
+          "description": "The grouping level's name ('book', 'series'), or null for a flat library."
+        },
+        "Collection": {
+          "type": ["string", "null"],
+          "description": "Capitalised form of `collection`, or null."
+        }
+      }
+    },
+    "nav": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "position": { "enum": ["bottom", "side"] },
+        "items": {
+          "type": "array",
+          "items": { "enum": ["home", "library", "nowPlaying", "settings", "about"] },
+          "description": "Which navigation entries appear, and in what order."
+        },
+        "labels": {
+          "type": "object",
+          "description": "Optional per-item label override; defaults come from `nouns`.",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "home": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sections": {
+          "type": "array",
+          "items": { "enum": ["continue", "newReleases", "allUnits"] },
+          "description": "Presence in the list = shown; order = display order."
+        }
+      }
+    },
+    "library": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultSort": { "enum": ["order", "title", "author", "recent", "timeframe"] },
+        "groupBy": { "enum": ["none", "collection", "group", "timeframe"] },
+        "view": { "enum": ["grid", "list"] },
+        "showSearch": { "type": "boolean" }
+      }
+    },
+    "reader": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultMode": { "enum": ["read", "listen", "readListen"] }
+      }
+    },
+    "player": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "skipSeconds": { "type": "integer", "minimum": 1, "maximum": 120 },
+        "showSpeed": { "type": "boolean" }
+      }
+    },
+    "features": {
+      "type": "object",
+      "description": "Where every new core feature lands. An open map on purpose: a feature core has not shipped yet is not an unknown key, and a feature a template predates simply takes the core default.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "placement": { "type": "string" }
+        }
+      }
+    }
+  }
+}

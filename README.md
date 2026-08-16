@@ -28,7 +28,9 @@ by D1 and R2.
 ## Layout
 
 ```
-brands/             — per-brand config: brand.json, theme.css, manifest template, icons
+brands/             — per-brand identity: brand.json, theme.css, manifest template, icons
+presentation/       — per-brand shape: presentation.json (layout, nouns)
+deployment/         — per-install config: deployment.json (origins, VAPID public key, TTS)
 app/                — the base site: a thin consumer of storylark-core
 packages/core/      — storylark-core: the PWA engine + the defineStorylarkConfig Vite preset
 packages/worker/    — storylark-worker: Cloudflare Worker — Hono API (/api/*) + static assets
@@ -59,8 +61,9 @@ npm run publish      # node packages/pipeline/publish.mjs --brand storylark
 
 StoryLark is designed to be deployed once per brand from the same codebase:
 
-1. Add a brand under `brands/<id>/` (`brand.json` for identity/origins/TTS, `theme.css`
-   for the visual tokens, plus manifest + icons).
+1. Add a brand under `brands/<id>/` (`brand.json` for identity, `theme.css` for the
+   visual tokens, plus manifest + icons), its shape in `presentation/<id>/`, and its
+   origins/TTS/VAPID public key in `deployment/<id>/`.
 2. Provision the per-brand Cloudflare resources (D1 database, R2 bucket, secrets, custom
    domains) and point the brand's `wrangler` env at them.
 3. Publish your stories through `packages/pipeline/publish.mjs` and deploy the Worker.

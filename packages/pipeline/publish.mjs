@@ -36,7 +36,7 @@
 import { readFile, writeFile, mkdir, cp } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isKokoroVoice } from './tts-kokoro.mjs';
 import { stitchChapter } from './stitch.mjs';
@@ -71,7 +71,32 @@ if (args.local) {
   process.env.STORYLARK_LOCAL_R2 = resolve(String(args.local));
   console.log(`Local publish → ${process.env.STORYLARK_LOCAL_R2} (no remote R2).`);
 }
+// The pipeline needs identity (brands/<id>/brand.json) plus deployment config —
+// origins and `tts` — which used to live in the same file and now lives in
+// deployment/<id>/deployment.json, overridable by STORYLARK_* env vars so a
+// second deployment of the same brand publishes to its own content origin.
+// A pre-split brand.json (no contractVersion) still works: its own origins/tts
+// are used, so an un-migrated site keeps publishing exactly as before.
 const brand = JSON.parse(await readFile(join(ROOT, 'brands', brandId, 'brand.json'), 'utf8'));
+const deploymentFile = join(ROOT, 'deployment', brandId, 'deployment.json');
+const deployment = existsSync(deploymentFile) ? JSON.parse(await readFile(deploymentFile, 'utf8')) : {};
+brand.appOrigin = process.env.STORYLARK_APP_ORIGIN || deployment.appOrigin || brand.appOrigin || '';
+brand.contentOrigin = process.env.STORYLARK_CONTENT_ORIGIN || deployment.contentOrigin || brand.contentOrigin || '';
+brand.tts = { ...brand.tts, ...deployment.tts };
+if (process.env.STORYLARK_TTS_VOICE) brand.tts.voice = process.env.STORYLARK_TTS_VOICE;
+if (process.env.STORYLARK_TTS_RATE) brand.tts.rate = process.env.STORYLARK_TTS_RATE;
+if (process.env.STORYLARK_TTS_OUTPUT_FORMAT) brand.tts.outputFormat = process.env.STORYLARK_TTS_OUTPUT_FORMAT;
+if (process.env.STORYLARK_TTS_VOICES) {
+  brand.tts.voices = process.env.STORYLARK_TTS_VOICES.split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+if (!brand.tts.voice) {
+  console.error(
+    `No narrator voice configured. Set tts.voice in ${relative(ROOT, deploymentFile) || deploymentFile} (or STORYLARK_TTS_VOICE).`
+  );
+  process.exit(1);
+}
 const bucket = typeof args.bucket === 'string' && args.bucket ? args.bucket : `${brandId}-content`;
 const { putJson, putAudio, putImage } = resolveProvider(args.storage);
 const stateFile = join(ROOT, '.storylark', 'state', `${bucket}.json`);

@@ -31,7 +31,7 @@ The two required flags:
 
 | Flag | Required | Meaning |
 |---|---|---|
-| `--brand <id>` | yes | Selects `brands/<id>/brand.json` and the content bucket `<id>-content`. |
+| `--brand <id>` | yes | Selects `brands/<id>/brand.json` + `deployment/<id>/deployment.json` and the content bucket `<id>-content`. |
 | `--source <path>` | yes | Path to your content source — a `books/` folder in the [markdown format](authoring-stories.md) by default. |
 
 > The root `npm run publish` script only passes `--brand storylark`, so it will
@@ -145,7 +145,8 @@ under `covers/cover.<hash>.<ext>`; books with no art fall back to the brand icon
 ## TTS and word timings
 
 Audio is generated **at publish time**, once per chapter revision (not on
-demand). The voice named in `brand.json` `tts.voice` picks the provider:
+demand). The voice named in `deployment/<id>/deployment.json` `tts.voice` picks the
+provider:
 
 - **Bundled local voices (the default — free, no account).** Kokoro voice ids
   (`af_heart`, `bm_fable`, …) run the Apache-licensed **Kokoro-82M** model on

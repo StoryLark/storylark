@@ -269,9 +269,9 @@ function installMigrateBuildDeploy({ outputs, webAppName, brandFolder }) {
   run('node', [migrateScript, `--connection-string=${databaseUrlFrom(outputs)}`], { stdio: 'inherit' });
 
   console.log(`\nBuilding the app for brand "${brandFolder}"...`);
-  // brand.json's appOrigin/contentOrigin are fixed values (e.g. pointing at
-  // Cloudflare) — override them at build time to this deployment's real
-  // origins, so the client fetches its manifest from the Azure content it
+  // appOrigin/contentOrigin are deployment config (deployment/<id>/deployment.json),
+  // and the file's values belong to whichever deployment wrote them (e.g. pointing
+  // at Cloudflare) — override them at build time to THIS deployment's real origins, so the client fetches its manifest from the Azure content it
   // actually has instead of silently hitting a different platform's content
   // (confirmed bug: without this, the deployed app hung on "Loading the
   // library..." forever, fetching content.storylark.dev's manifest instead

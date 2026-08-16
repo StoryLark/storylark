@@ -9,17 +9,24 @@
     "directory": "packages/core"
   },
   "type": "module",
+  "bin": {
+    "storylark-migrate-brand": "bin/migrate-brand.mjs"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./vite": {
       "types": "./vite/index.d.ts",
       "default": "./vite/index.mjs"
     },
+    "./schemas": "./schemas/validate.mjs",
+    "./schemas/*.json": "./schemas/*.json",
     "./sw": "./src/sw.ts"
   },
   "files": [
     "src/",
     "vite/",
+    "schemas/",
+    "bin/",
     "CHANGELOG.md",
     "RELEASE-NOTES.md",
     "ROADMAP.md"

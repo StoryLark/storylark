@@ -240,7 +240,16 @@ function migrateBuildDeploy() {
 
   console.log(`\nBuilding app for brand "${env.BRAND_ID}"...`);
   const buildArgs = IS_MONOREPO ? ['run', 'build', '-w', 'app', '--', '--mode', env.BRAND_ID] : ['run', 'build'];
-  run('npm', buildArgs, { stdio: 'inherit', cwd: ROOT });
+  // Origins are deployment config, and install.env is where this deployment
+  // declares them — hand them to the build so the bundle can never disagree
+  // with the Worker vars set from the same file above. (Azure already did
+  // this; not doing it here meant a site whose install.env and brand file
+  // disagreed built against the file and silently served the wrong content.)
+  run('npm', buildArgs, {
+    stdio: 'inherit',
+    cwd: ROOT,
+    env: { ...process.env, STORYLARK_APP_ORIGIN: env.APP_ORIGIN, STORYLARK_CONTENT_ORIGIN: env.CONTENT_ORIGIN },
+  });
 
   console.log(`\nDeploying Worker "${env.BRAND_ID}"...`);
   run('wrangler', ['deploy', '--env', env.BRAND_ID], { stdio: 'inherit', cwd: ROOT });

@@ -23,6 +23,14 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
 import { mergeConfig } from 'vite';
+import {
+  BRAND_SCHEMA,
+  PRESENTATION_SCHEMA,
+  DEPLOYMENT_SCHEMA,
+  PRESENTATION_DEFAULTS,
+  DEPLOYMENT_DEFAULTS,
+  readContract,
+} from '../schemas/validate.mjs';
 
 const CORE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const requireFromCore = createRequire(import.meta.url);
@@ -41,6 +49,10 @@ const ADMIN_ENTRY = resolve(CORE_DIR, 'src', 'admin-entry.tsx');
  * @param {object} [options]
  * @param {string} [options.brandsRoot] Directory holding brand folders, relative
  *   to the site root (default `brands`).
+ * @param {string} [options.presentationRoot] Directory holding presentation
+ *   folders, relative to the site root (default: `presentation` beside `brandsRoot`).
+ * @param {string} [options.deploymentRoot] Directory holding deployment-config
+ *   folders, relative to the site root (default: `deployment` beside `brandsRoot`).
  * @param {string} [options.brandId]    Fixed brand id (skips mode-based selection).
  * @param {import('vite').UserConfig} [options.vite] Site-level Vite overrides,
  *   merged last.
@@ -51,18 +63,8 @@ export function defineStorylarkConfig(options = {}) {
     const siteRoot = process.cwd();
     const brandId = options.brandId ?? (mode && !BUILTIN_MODES.has(mode) ? mode : 'storylark');
     const brandDir = resolve(siteRoot, options.brandsRoot ?? 'brands', brandId);
-    const brand = JSON.parse(readFileSync(resolve(brandDir, 'brand.json'), 'utf8'));
+    const brand = loadStorylarkConfig(siteRoot, brandId, brandDir, options);
     const themeCss = readFileSync(resolve(brandDir, 'theme.css'), 'utf8');
-
-    // A brand's appOrigin/contentOrigin in brand.json is a single fixed value,
-    // but the SAME brand can be deployed to more than one platform (e.g. the
-    // base "storylark" brand running on both Cloudflare and Azure for
-    // dev/testing) — each deployment's content actually lives at a different
-    // URL. These env vars let a platform installer override just the origins
-    // at build time without needing a second brand folder. Unset = brand.json
-    // wins, unchanged from before this existed.
-    if (process.env.STORYLARK_APP_ORIGIN) brand.appOrigin = process.env.STORYLARK_APP_ORIGIN;
-    if (process.env.STORYLARK_CONTENT_ORIGIN) brand.contentOrigin = process.env.STORYLARK_CONTENT_ORIGIN;
 
     /** @type {import('vite').UserConfig} */
     const config = {
@@ -116,6 +118,140 @@ export function defineStorylarkConfig(options = {}) {
     };
     return options.vite ? mergeConfig(config, options.vite) : config;
   };
+}
+
+/**
+ * Loads the three contracts a build needs and resolves them into the single
+ * object the app sees as `virtual:storylark-config` (typed as `Brand`).
+ *
+ *   brands/<id>/brand.json                identity + look   — portable
+ *   presentation/<id>/presentation.json   shape             — portable
+ *   deployment/<id>/deployment.json       origins/keys/tts  — never portable
+ *
+ * They used to be one file, which is why an Azure deployment once served the
+ * wrong content origin: `contentOrigin` was baked into the brand every install
+ * of that brand shared. Splitting them is what makes "a core update never
+ * touches your brand" and "the same brand runs on two platforms" both true.
+ *
+ * Resolution order, per contract:
+ *   presentation — file value, else the core default (missing key = default,
+ *                  permanently; that is the compatibility promise)
+ *   deployment   — env var (STORYLARK_*), else file value, else core default.
+ *                  Env wins because that is how an installer configures a
+ *                  deployment it just provisioned.
+ *
+ * Still fully baked at build time — this function changed WHERE the data comes
+ * from, not when it is read.
+ */
+function loadStorylarkConfig(siteRoot, brandId, brandDir, options = {}) {
+  const brandFile = resolve(brandDir, 'brand.json');
+  // presentation/ and deployment/ sit beside brands/, wherever brands/ is — a
+  // site that points brandsRoot elsewhere (this repo's app/ uses '../brands')
+  // gets the other two from the same place without configuring it twice.
+  const beside = resolve(brandDir, '..', '..');
+  const presentationFile = options.presentationRoot
+    ? resolve(siteRoot, options.presentationRoot, brandId, 'presentation.json')
+    : resolve(beside, 'presentation', brandId, 'presentation.json');
+  const deploymentFile = options.deploymentRoot
+    ? resolve(siteRoot, options.deploymentRoot, brandId, 'deployment.json')
+    : resolve(beside, 'deployment', brandId, 'deployment.json');
+
+  const raw = JSON.parse(readFileSync(brandFile, 'utf8'));
+
+  // Legacy: a pre-split brand.json (no contractVersion) still builds. A core
+  // update must never break a customer's existing brand — that is the whole
+  // point of this split — so we split it in memory and tell them to migrate,
+  // rather than failing their build on a file that worked yesterday.
+  if (raw.contractVersion === undefined) {
+    console.warn(
+      `\n  storylark: ${relative(siteRoot, brandFile) || brandFile} is a pre-split brand file.\n` +
+        '  It still builds, unchanged, but identity/presentation/deployment are now separate\n' +
+        '  contracts. Run `npm run migrate-brand` to split it (it backs up the original).\n'
+    );
+    const { layout, nouns, appOrigin, contentOrigin, vapidPublicKey, tts, ...identity } = raw;
+    return resolveConfig(identity, { layout, nouns }, deploymentFromEnv({ appOrigin, contentOrigin, vapidPublicKey, tts }));
+  }
+
+  const identity = readContract(brandFile, BRAND_SCHEMA, { label: relative(siteRoot, brandFile) || brandFile });
+  const presentation = existsSync(presentationFile)
+    ? readContract(presentationFile, PRESENTATION_SCHEMA, { label: relative(siteRoot, presentationFile) })
+    : {};
+  const deployment = existsSync(deploymentFile)
+    ? readContract(deploymentFile, DEPLOYMENT_SCHEMA, { label: relative(siteRoot, deploymentFile) })
+    : {};
+
+  return resolveConfig(identity, presentation, deploymentFromEnv(deployment));
+}
+
+/**
+ * Deployment config from env, falling back to the file. The origin overrides
+ * already existed (added while fixing the Azure content bug, and still how the
+ * Azure installer points a build at the site it just provisioned); the VAPID
+ * and TTS overrides are the same idea applied to the rest of what is now
+ * deployment config, so nothing in this contract is file-only.
+ */
+function deploymentFromEnv(deployment) {
+  const env = process.env;
+  const out = { ...DEPLOYMENT_DEFAULTS, ...stripUndefined(deployment) };
+  delete out.contractVersion;
+  if (env.STORYLARK_APP_ORIGIN) out.appOrigin = env.STORYLARK_APP_ORIGIN;
+  if (env.STORYLARK_CONTENT_ORIGIN) out.contentOrigin = env.STORYLARK_CONTENT_ORIGIN;
+  if (env.STORYLARK_VAPID_PUBLIC_KEY) out.vapidPublicKey = env.STORYLARK_VAPID_PUBLIC_KEY;
+
+  const tts = { ...out.tts };
+  if (env.STORYLARK_TTS_VOICE) tts.voice = env.STORYLARK_TTS_VOICE;
+  if (env.STORYLARK_TTS_RATE) tts.rate = env.STORYLARK_TTS_RATE;
+  if (env.STORYLARK_TTS_OUTPUT_FORMAT) tts.outputFormat = env.STORYLARK_TTS_OUTPUT_FORMAT;
+  if (env.STORYLARK_TTS_VOICES) {
+    tts.voices = env.STORYLARK_TTS_VOICES.split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+  }
+  if (Object.keys(tts).length) out.tts = tts;
+  return out;
+}
+
+/**
+ * Merge the three contracts into the flat object the app already expects.
+ *
+ * The key order below is the order the single pre-split brand.json used. That
+ * is deliberate, not cosmetic: the resolved object is JSON.stringify'd into the
+ * bundle, so keeping the order makes the built output byte-identical across the
+ * split — which is how "Phase 0 changes no behaviour" gets proved rather than
+ * asserted. Presentation keys beyond layout/nouns are passed through at the end
+ * for whatever reads them later; nothing does today.
+ */
+function resolveConfig(identity, presentation, deployment) {
+  const { contractVersion: _v, layout, nouns, ...restPresentation } = presentation ?? {};
+  // Rule 2 for real: an unknown key is *ignored*, not just warned about, so it
+  // never reaches the bundle and can never be depended on by accident.
+  const known = Object.fromEntries(
+    Object.entries(restPresentation).filter(([k]) => k in (PRESENTATION_SCHEMA.properties ?? {}))
+  );
+  return stripUndefined({
+    id: identity.id,
+    name: identity.name,
+    appName: identity.appName,
+    shortName: identity.shortName,
+    tagline: identity.tagline,
+    appOrigin: deployment.appOrigin,
+    contentOrigin: deployment.contentOrigin,
+    themeColor: identity.themeColor,
+    backgroundColor: identity.backgroundColor,
+    defaultTheme: identity.defaultTheme,
+    author: identity.author,
+    layout: layout ?? PRESENTATION_DEFAULTS.layout,
+    nouns: { ...PRESENTATION_DEFAULTS.nouns, ...stripUndefined(nouns ?? {}) },
+    tts: deployment.tts,
+    vapidPublicKey: deployment.vapidPublicKey,
+    fonts: identity.fonts,
+    ...stripUndefined(known),
+  });
+}
+
+/** Drops undefined values so they never reach the bundle as explicit keys. */
+function stripUndefined(obj) {
+  return Object.fromEntries(Object.entries(obj ?? {}).filter(([, v]) => v !== undefined));
 }
 
 /**

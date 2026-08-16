@@ -18,7 +18,8 @@ Copy the base brand and give it a new id:
 cp -r brands/storylark brands/<your-id>
 ```
 
-Edit `brands/<your-id>/brand.json` (identity, origins, nouns, TTS) and
+Edit `brands/<your-id>/brand.json` (identity), `presentation/<your-id>/presentation.json`
+(layout, nouns), `deployment/<your-id>/deployment.json` (origins, TTS, VAPID public key) and
 `brands/<your-id>/theme.css` (colors + fonts). The full field-by-field reference
 is in [`build-your-own-theme.md`](build-your-own-theme.md). At minimum, set:
 
@@ -124,7 +125,7 @@ npx wrangler secret put GOOGLE_CLIENT_SECRET --env <your-id>
 
 | Secret | Needed for | Notes |
 |---|---|---|
-| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Web push | Generate with `node packages/pipeline/gen-vapid.mjs`. Put the **public** key in `brand.json` `vapidPublicKey` *and* the Worker secret; the **private** key is Worker-only. See [`push.md`](push.md). |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Web push | Generate with `node packages/pipeline/gen-vapid.mjs`. Put the **public** key in `deployment/<id>/deployment.json` `vapidPublicKey` *and* the Worker secret; the **private** key is Worker-only. See [`push.md`](push.md). |
 | `ADMIN_KEY` | Minting admin setup links; `POST /api/admin/publish` | **Not** the admin login — `/admin` is gated by a normal email+password account (see [`admin-guide.md`](admin-guide.md)). This secret mints the first admin setup link and the printed recovery codes, and the publish pipeline sends it as `X-Admin-Key` to fire push notifications. Without it, publishing still works (it just skips the notify step) but you have no way to create the first operator account. |
 | `RESEND_API_KEY` | Magic-link email | Only if you enable the (currently dormant) magic-link path. See [`auth.md`](auth.md). |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in | Only if you enable the (currently dormant) Google path. |
