@@ -1,5 +1,17 @@
-import { Pool, type QueryResultRow } from 'pg';
+import pg, { Pool, type QueryResultRow } from 'pg';
 import type { Database, PreparedStatement, ConflictInsert } from './types';
+
+// node-pg parses Postgres BIGINT (OID 20 — what COUNT(*) returns) as a
+// string by default, since a bigint can exceed Number.MAX_SAFE_INTEGER.
+// D1/SQLite has no such distinction and always hands back a JS number, so
+// without this every count/bigint column round-trips as "0" instead of 0 on
+// Postgres only — a real cross-platform response-shape divergence (confirmed
+// live: Azure's /api/admin/status reported pushSubscriptions as a string
+// while Cloudflare reported a number, same brand, same data). Our counts
+// never approach 2^53, so parsing as a plain integer here — once, for every
+// bigint column, not per-query — is what makes both drivers return
+// byte-identical JSON for identical data.
+pg.types.setTypeParser(20, (value: string) => parseInt(value, 10));
 
 /**
  * Postgres driver (AB#7399) — covers Azure Database for PostgreSQL and AWS
