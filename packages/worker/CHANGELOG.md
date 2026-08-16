@@ -1,5 +1,23 @@
 # storylark-worker
 
+## 0.15.1
+
+### Patch Changes
+
+- Fix three real bugs in the Phase 5 one-click update mechanism, found only
+  by actually triggering it against a live Cloudflare deployment:
+
+  - `findEngineRelease` no longer calls `api.github.com` (rate-limited per
+    source IP, which a Cloudflare Worker's shared outbound IP pool hits in
+    practice) — it constructs GitHub's direct release-download URL instead.
+  - The Cloudflare self-deploy swap now uses the plain script endpoint
+    (`PUT .../scripts/:name`), not `/content`, which does not exist for an
+    asset-backed Worker.
+  - Non-secret bindings are read back and resupplied on the swap (the plain
+    endpoint replaces the whole config); `secret_text` bindings are omitted
+    entirely rather than referenced, since Cloudflare preserves omitted
+    secrets automatically and rejects a referenced-with-no-value binding.
+
 ## 0.15.0
 
 ### Minor Changes
