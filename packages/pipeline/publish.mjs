@@ -21,6 +21,16 @@
 //   --dry-run                   parse + report, no TTS, no upload
 //   --manifest-only             regenerate + upload the manifest without re-publishing chapters
 //                               (use after a manifest-schema change, e.g. the UI v2 series metadata)
+//   --pull                      BEFORE parsing, fetch each chapter's source markdown back
+//                               from the live deployment (books/<id>/source/<ch>.md, which
+//                               publish is what uploads) and write it into the local source
+//                               repo. This is how an edit made in the admin portal reaches
+//                               the laptop instead of being silently overwritten by the next
+//                               publish. One-way and explicit on purpose — deployment → local,
+//                               only when asked, never as a side effect.
+//   --no-source                 skip uploading the source markdown (text-only artifacts, the
+//                               pre-AB#7420 behaviour). The deployment then can't be edited
+//                               from its own admin portal.
 //   --bucket <name>              override the content bucket/container (default: <brand>-content).
 //                               Needed when the same brand folder is deployed more than once with
 //                               different resource-naming ids (e.g. testing "storylark" on a second
@@ -33,7 +43,7 @@
 //
 // Env: AZURE_SPEECH_KEY, AZURE_SPEECH_REGION (Azure voices only), ADMIN_KEY (for notify).
 
-import { readFile, writeFile, mkdir, cp } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, cp, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve, dirname, relative } from 'node:path';
@@ -52,7 +62,7 @@ const MONTHLY_CHAR_BUDGET = 450_000; // hard stop below the F0 500K limit
 const args = parseArgs(process.argv.slice(2));
 const brandId = args.brand;
 const USAGE =
-  'Usage: node packages/pipeline/publish.mjs --brand <id> --source <path> --parser <module> [--book <id>] [--no-audio] [--local <dir>] [--dry-run] [--storage r2|azure-blob] [--bucket <name>]';
+  'Usage: node packages/pipeline/publish.mjs --brand <id> --source <path> [--parser <module>] [--book <id>] [--no-audio] [--no-source] [--pull] [--local <dir>] [--dry-run] [--storage r2|azure-blob] [--bucket <name>]';
 if (!brandId || typeof brandId !== 'string') {
   console.error(USAGE);
   process.exit(1);
@@ -98,7 +108,7 @@ if (!brand.tts.voice) {
   process.exit(1);
 }
 const bucket = typeof args.bucket === 'string' && args.bucket ? args.bucket : `${brandId}-content`;
-const { putJson, putAudio, putImage } = resolveProvider(args.storage);
+const { putJson, putAudio, putImage, putObject, SHORT } = resolveProvider(args.storage);
 const stateFile = join(ROOT, '.storylark', 'state', `${bucket}.json`);
 const workRoot = join(ROOT, '.storylark', 'work', bucket);
 await mkdir(dirname(stateFile), { recursive: true });
@@ -171,6 +181,16 @@ if (typeof parse !== 'function') {
   console.error(`--parser ${args.parser} must export a \`parse\` function (or default export).`);
   process.exit(1);
 }
+// ---- 0. Pull (optional): deployment → local, before anything is parsed ----
+//
+// Publishing now uploads the source markdown, which makes the DEPLOYMENT the
+// place a chapter can be edited (plan §3 / AB#7420). That opens a way to lose
+// work: someone fixes a typo in the admin portal, then the next `publish` from
+// a laptop parses the laptop's older copy and overwrites it. `--pull` is the
+// reconciliation, and it is explicit rather than automatic — a publish that
+// silently rewrote the operator's working tree would be worse than the problem.
+if (args.pull) await pullSourceFromDeployment();
+
 const parsed = await parse(sourceRepo, state.chapters, siteOrigin);
 // Accept the canonical shape { books: [{ book, chapters }] } (or a bare array of the same).
 let books = Array.isArray(parsed) ? parsed : parsed.books; // [{ book, chapters: [chapter] }]
@@ -325,6 +345,62 @@ if (!args['no-audio'] && !args['dry-run'] && !args['manifest-only'] && EXTRA_VOI
   }
 }
 
+// ---- 4b. Source markdown: the deployment stores what it was built from ----
+//
+// This is the change that unblocks portal editing (plan §3 / AB#7420). Until
+// now publishing was one-way — local markdown in, derived artifacts out — and
+// the source never left the operator's machine, so a deployment had no copy of
+// what it was built from and there was nothing for a browser to open and fix.
+//
+// Uploaded for EVERY chapter that has source, not just changed ones, because
+// "changed" is measured against the derived content hash: a chapter can be
+// byte-identical after parsing while its source file has never been uploaded at
+// all (every chapter, the first time this runs). Tracked separately in
+// state.sources so repeat publishes upload nothing.
+//
+// Written with a SHORT TTL, not the immutable one the hashed artifacts get:
+// this key is mutable by definition — the admin portal writes to it.
+const sourcePaths = {};
+if (!args['no-source'] && !args['dry-run']) {
+  state.sources ??= {};
+  for (const { book, chapters } of books) {
+    for (const chapter of chapters) {
+      if (typeof chapter.source !== 'string') continue; // custom parser with no markdown to give
+      const key = `${book.id}/${chapter.id}`;
+      const path = `books/${book.id}/source/${chapter.id}.md`;
+      sourcePaths[key] = path;
+      const hash = createHash('sha256').update(chapter.source).digest('hex').slice(0, 12);
+      if (state.sources[key] === hash) continue;
+      const local = join(workRoot, book.id, chapter.id, 'source.md');
+      await mkdir(dirname(local), { recursive: true });
+      await writeFile(local, chapter.source);
+      console.log(`Source: ${key} → ${bucket}/${path}`);
+      await putObject(bucket, path, local, 'text/markdown; charset=utf-8', SHORT);
+      state.sources[key] = hash;
+      await writeFile(stateFile, JSON.stringify(state, null, 2));
+    }
+  }
+
+  // Book metadata as authored, so the portal can edit title/author/description
+  // against the same file the CLI reads rather than against the manifest alone.
+  for (const { book } of books) {
+    const meta = JSON.stringify(
+      { title: book.title, author: book.author, description: book.description, order: book.order, coverSource: book.coverSource },
+      null,
+      2
+    );
+    const hash = createHash('sha256').update(meta).digest('hex').slice(0, 12);
+    state.bookMeta ??= {};
+    if (state.bookMeta[book.id] === hash) continue;
+    const local = join(workRoot, book.id, 'book.json');
+    await mkdir(dirname(local), { recursive: true });
+    await writeFile(local, meta);
+    await putJson(bucket, `books/${book.id}/source/book.json`, local, false);
+    state.bookMeta[book.id] = hash;
+    await writeFile(stateFile, JSON.stringify(state, null, 2));
+  }
+}
+
 // ---- Covers ----
 //
 // Two supported sources, checked in order by coverSourceFor():
@@ -353,6 +429,71 @@ for (const { book } of books) {
   book.cover = keyPath;
 }
 
+/**
+ * Fetch every chapter's source markdown back from the live deployment and write
+ * it into the local source repo (`--pull`).
+ *
+ * Reads the deployment's own manifest over its public content origin — no
+ * credential, because the content is public anyway and this direction only ever
+ * reads. Chapters are matched to local files by the SAME rule the importer uses
+ * to derive a chapter id from a filename (numeric prefix stripped), so
+ * `02-the-long-dark.md` is recognised as chapter `the-long-dark` and rewritten
+ * in place, keeping its ordering prefix. A chapter that exists on the
+ * deployment but has no local file — one created in the portal — lands as
+ * `books/<book>/<chapter>.md`, and the operator can rename it to give it an
+ * order.
+ */
+async function pullSourceFromDeployment() {
+  if (!brand.contentOrigin) {
+    console.error('--pull needs a contentOrigin (deployment/<id>/deployment.json or STORYLARK_CONTENT_ORIGIN).');
+    process.exit(1);
+  }
+  const origin = brand.contentOrigin.replace(/\/+$/, '');
+  const res = await fetch(`${origin}/manifest.json`, { cache: 'no-store' });
+  if (!res.ok) {
+    console.error(`--pull: could not read ${origin}/manifest.json (${res.status}).`);
+    process.exit(1);
+  }
+  const remote = await res.json();
+  const booksDir = join(sourceRepo, 'books');
+  let pulled = 0;
+  let unchanged = 0;
+
+  for (const book of remote.books ?? []) {
+    if (args.book && book.id !== args.book) continue;
+    const bookDir = join(booksDir, book.id);
+    // chapterId → existing local filename, by the importer's own naming rule.
+    const local = new Map();
+    if (existsSync(bookDir)) {
+      for (const file of (await readdir(bookDir)).filter((f) => f.endsWith('.md'))) {
+        local.set(file.replace(/\.md$/, '').replace(/^\d+[-_.]?/, '') || file.replace(/\.md$/, ''), join(bookDir, file));
+      }
+    }
+    const singleFile = join(booksDir, `${book.id}.md`);
+
+    for (const ch of book.chapters ?? []) {
+      if (!ch.source) continue; // published before source upload existed
+      const sourceRes = await fetch(`${origin}/${ch.source}`, { cache: 'no-store' });
+      if (!sourceRes.ok) {
+        console.warn(`  --pull: ${book.id}/${ch.id} source missing (${sourceRes.status}) — skipped.`);
+        continue;
+      }
+      const text = await sourceRes.text();
+      const dest = local.get(ch.id) ?? (existsSync(singleFile) && (book.chapters ?? []).length === 1 ? singleFile : join(bookDir, `${ch.id}.md`));
+      const current = existsSync(dest) ? await readFile(dest, 'utf8') : null;
+      if (current === text) {
+        unchanged++;
+        continue;
+      }
+      await mkdir(dirname(dest), { recursive: true });
+      await writeFile(dest, text);
+      console.log(`  --pull: ${book.id}/${ch.id} → ${relative(ROOT, dest) || dest}`);
+      pulled++;
+    }
+  }
+  console.log(`Pulled ${pulled} chapter source file(s) from ${origin}; ${unchanged} already matched.`);
+}
+
 /** Where a book's cover art lives on disk, or null if it has none. */
 function coverSourceFor(book) {
   // Site-repo art (a book declares its cover path via coverSource).
@@ -369,10 +510,31 @@ function coverSourceFor(book) {
 
 // ---- 5. Manifest (uploaded last) ----
 
-const newVersion = (state.libraryVersion ?? 0) + 1;
+// The library version has to beat whatever is LIVE, not just whatever this
+// laptop last wrote (AB#7420). The admin portal bumps the deployed manifest's
+// version on every edit, so a machine that has been publishing for a while can
+// easily hold a lower number — and a manifest that goes backwards is a manifest
+// no reader ever re-fetches, i.e. a publish that silently reaches nobody.
+// Best-effort: an unreachable origin (offline, first publish, --local) just
+// falls back to local state, which is the pre-existing behaviour.
+let liveVersion = 0;
+if (!args.local && brand.contentOrigin) {
+  try {
+    const res = await fetch(`${brand.contentOrigin.replace(/\/+$/, '')}/manifest.json`, { cache: 'no-store' });
+    if (res.ok) liveVersion = Number((await res.json()).libraryVersion) || 0;
+  } catch {
+    // offline or no manifest yet — local state is the only source, as before
+  }
+}
+const newVersion = Math.max(state.libraryVersion ?? 0, liveVersion) + 1;
 const manifest = {
   schemaVersion: 1,
   libraryVersion: newVersion,
+  // A CLI publish is a publication, not a correction: it announces itself.
+  // The portal's correction path is what holds this back (see
+  // packages/worker/src/lib/content.ts) — the app's "new content" badge reads
+  // this, while libraryVersion above only governs re-fetching.
+  announceVersion: newVersion,
   generatedAt: new Date().toISOString(),
   // Narrator choices the app's Settings picker offers (id → display name).
   voices:
@@ -427,6 +589,17 @@ const manifest = {
         audioDurationMs: saved.audio?.durationMs ?? 0,
         contentHash: hash,
         content: `books/${book.id}/chapters/${ch.id}.${hash}.json`,
+        // The editable source, when this publish uploaded one. Its presence is
+        // what tells the admin portal a chapter can be round-tripped as
+        // markdown — checked from the manifest so a library of two hundred
+        // short stories costs one read, not two hundred.
+        source: sourcePaths[`${book.id}/${ch.id}`],
+        // Narration that no longer matches the words, stated rather than left
+        // to be discovered. Derived, not asserted: audio is stale exactly when
+        // a chapter has audio whose hash isn't the current content hash — which
+        // covers a --no-audio publish of changed text as well as a portal edit
+        // this run has just re-narrated (and therefore cleared).
+        audioStale: hasAudio ? saved.audio.hash !== hash : false,
         audio: hasAudio ? `books/${book.id}/audio/${ch.id}.${saved.audio.hash}.mp3` : undefined,
         timings: hasAudio ? `books/${book.id}/timings/${ch.id}.${saved.audio.hash}.json` : undefined,
         voices,

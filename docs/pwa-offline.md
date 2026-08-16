@@ -6,7 +6,7 @@
 |---|---|---|
 | precache (`workbox`) | build (injectManifest) | App shell: JS/CSS/icons/HTML. New deploy = new precache, old cleaned up. The shell is re-stamped with the current deployment config and brand on its way out of the cache, so an installed app never serves a stale one. |
 | `sr-runtime` | browsing | `manifest.json` + covers: stale-while-revalidate. Hashed chapter/timing JSON: cache-first (immutable). `theme.css`: network-first, cached only as the offline floor — a swapped brand must not survive in cache. Font files: cache-first, added the first time something renders in that family. |
-| `sr-downloads` | the **Download button only** | Full copies of chapter text + timings + MP3 for offline. |
+| `sr-downloads` | the **Download button only** | Full copies of chapter text + timings + MP3 + any images the chapter references, for offline. |
 
 Navigations fall back to the cached shell (SPA), so the app opens with no network.
 
@@ -20,6 +20,7 @@ slices it manually — synthesizing a `206 Partial Content` with correct
 ## Download lifecycle
 
 1. Settings (or future long-press) → `downloadChapter`: fetches text + timings + audio full-body, `cache.put`s them, records bytes + content hash in IndexedDB.
+   1a. **Images too.** The chapter JSON is also the manifest of its own art, so once the text is fetched its `image` blocks are walked and each distinct `src` is cached as well — a downloaded story shouldn't be missing its illustrations. Best-effort per image: art can live on an origin that sends no CORS headers, and an opaque response is one `cache.put` refuses, so a single unreachable image degrades to the alt text rather than failing the whole download. The service worker serves downloaded art from any origin, not just the content origin, and a book's images are cleared once none of its chapters are downloaded any more.
 2. On every app start the records are **re-verified against the actual cache** — iOS evicts under storage pressure, and a download that silently vanished must show as not-downloaded, honestly.
 3. Remove deletes cache entries + the record. Total usage shown in Settings.
 4. A republished chapter gets a new hash → old download keeps working until the user re-downloads (the manifest points at new files; the reader falls back to network for those).

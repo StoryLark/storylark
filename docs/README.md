@@ -69,6 +69,9 @@ the same codebase.
   across core updates, and where the supported line sits.
 - **[Content Flow](design/content-flow.md)** — the add-a-story pipeline end to
   end, with a diagram.
+- **[Admin Content Editing](design/admin-content-editing.md)** — why publishing
+  had to start uploading its own source before anything could be edited in a
+  browser, the correction-vs-publication rule, revisions, and images.
 - **[Update Flow](design/update-flow.md)** — the update mechanism, why the
   deployment deliberately can't update itself, with a diagram.
 - **[API Reference](api.md)** — every `/api/*` endpoint served by the Worker.

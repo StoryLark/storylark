@@ -90,9 +90,58 @@ platform credentials you already have, so this deployment stores nothing
 that could deploy on your behalf. See [`updating.md`](updating.md) for the
 full flow.
 
+**Stories** (or **Books**, depending on how your library is arranged) — the
+content manager. Browse what's published, open any chapter, edit it as plain
+markdown with a live preview, and save. Covered in full below.
+
 **Publish a story** — book id, title, author, and markdown text. See
 [`publishing-stories.md`](publishing-stories.md) for the full picture,
 including why this is text-only today and how narration gets added.
+
+## Editing your content
+
+The portal lists your library the way it's actually arranged: a single work
+shows its books and then the chapters inside one, while a library of short
+stories shows the stories and opens straight into the one you pick.
+
+What you get on a chapter:
+
+- **A plain markdown editor with a live preview.** Not a rich-text editor, on
+  purpose: a WYSIWYG needs a two-way conversion, and that conversion is a
+  reliable source of silent content corruption. The preview is rendered by the
+  same code that publishes, so what you see is what will land.
+- **Three ways to change the text** — type, paste, or upload a `.md` file. All
+  three mean the same thing, so they're the same operation underneath.
+- **Download .md** — the mirror of upload. Pull the chapter into your own
+  editor and put it back. This is the escape hatch when a browser textarea is
+  the wrong tool.
+- **Insert image** — uploads the file and inserts the markdown reference at
+  your cursor. You never type a URL, and you never have to know where storage
+  lives. You'll be asked for alt text, which is what a reader who can't see the
+  image gets.
+- **History with one-click revert** — the last five versions of the text are
+  kept (the live one is never dropped). A revert is an ordinary save: it puts
+  the old text back and *adds* to the history rather than rewinding it, so
+  reverting a revert works.
+- **"This is a correction"** — ticked by default when you're editing something
+  that already exists. Readers get the new text either way; ticked, nobody is
+  notified. Untick it only when this is genuinely new writing worth waking a
+  phone for.
+
+**Narration doesn't happen here.** Text publishes immediately, but this
+deployment can't generate speech — that needs the publish pipeline. So after a
+text edit the chapter is marked *audio out of date* until you run:
+
+```bash
+node packages/pipeline/publish.mjs --brand <id> --source <path> --pull
+```
+
+`--pull` matters: it brings your portal edits back into your working copy
+first, so publishing doesn't overwrite them. See
+[`content-pipeline.md`](content-pipeline.md).
+
+Book-level details — title, author, description and the cover image — are on
+the book itself, above its chapters.
 
 ## Turning features on
 
@@ -103,6 +152,21 @@ commits the markdown to your site's repo:
 |---|---|
 | `GITHUB_REPO` | `owner/repo` — your site's own GitHub repo |
 | `GITHUB_DEPLOY_TOKEN` | A fine-grained PAT scoped to just that repo, with Contents:write (for the commit) and Actions:write (to start `publish.yml`) |
+
+Content editing needs writable content storage. On Cloudflare you already have
+it: the R2 bucket declared in `wrangler.jsonc` is the same storage the portal
+writes through, so there's nothing to configure. On a Node host (Azure App
+Service, a container) set one of these:
+
+| Setting | What it's for |
+|---|---|
+| `AZURE_STORAGE_CONNECTION_STRING` | Azure Blob. The container defaults to `<brand>-content`; override with `CONTENT_CONTAINER`. |
+| `STORYLARK_LOCAL_CONTENT` | A directory on disk holding the published content. Useful for local development and for a single-machine deploy with no object store. |
+| `CONTENT_REVISIONS` | How many text revisions to keep per chapter. Default 5. |
+| `CONTENT_MAX_UPLOAD_BYTES` | Ceiling for an uploaded image. Default 8MB. |
+
+Without any of them the site serves content exactly as before, and the content
+manager says so plainly instead of failing in a confusing way.
 
 Without these, the portal still loads and the story upload form explains
 that it isn't configured rather than silently failing. Nothing else in the

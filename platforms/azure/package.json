@@ -9,6 +9,7 @@
     "migrate": "node ../../packages/worker/migrate-postgres.mjs"
   },
   "dependencies": {
+    "@azure/storage-blob": "^12.26.0",
     "@hono/node-server": "^2.1.1",
     "hono": "^4.6.0",
     "storylark-worker": "^0.11.0"

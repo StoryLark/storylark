@@ -48,6 +48,13 @@ export async function downloadChapter(bookId: string, chapter: ChapterEntry): Pr
       const buf = await res.arrayBuffer();
       bytes += buf.byteLength;
       await cache.put(url, new Response(buf, { headers: { 'Content-Type': res.headers.get('Content-Type') ?? 'application/octet-stream' } }));
+      // The chapter JSON is also the manifest of its own art (AB#7421): image
+      // blocks name the files the page needs, and they are only knowable once
+      // the text has been fetched. A downloaded story missing its illustrations
+      // is the bug this closes.
+      if (url === contentUrl(chapter.content)) {
+        bytes += await cacheChapterImages(cache, buf);
+      }
     }
 
     const record: DownloadRecord = {
@@ -69,6 +76,43 @@ export async function downloadChapter(bookId: string, chapter: ChapterEntry): Pr
 }
 
 /**
+ * Cache every image a chapter references, so an offline read still has its art.
+ *
+ * Best-effort per image, deliberately: art can live on a marketing origin that
+ * sends no CORS headers, and a cross-origin fetch there comes back opaque —
+ * which `cache.put` refuses outright. Letting one such image fail the whole
+ * download would mean a story with one decorative image could never be taken
+ * offline at all. A missed image degrades to the alt text the renderer already
+ * shows as its read-along fallback; a missed chapter is a broken download.
+ *
+ * Returns the bytes actually cached, so the size shown in Settings reflects
+ * what is really stored rather than only the text and audio.
+ */
+async function cacheChapterImages(cache: Cache, chapterJson: ArrayBuffer): Promise<number> {
+  let srcs: string[];
+  try {
+    const doc = JSON.parse(new TextDecoder().decode(chapterJson)) as { blocks?: { type?: string; src?: string }[] };
+    srcs = [...new Set((doc.blocks ?? []).filter((b) => b.type === 'image' && b.src).map((b) => b.src as string))];
+  } catch {
+    return 0;
+  }
+  let bytes = 0;
+  for (const src of srcs) {
+    try {
+      const res = await fetch(src, { cache: 'no-cache' });
+      if (!res.ok || res.type === 'opaque') continue;
+      const buf = await res.arrayBuffer();
+      await cache.put(src, new Response(buf, { headers: { 'Content-Type': res.headers.get('Content-Type') ?? 'image/*' } }));
+      bytes += buf.byteLength;
+    } catch {
+      // Unreachable or cross-origin without CORS — the chapter is still offline,
+      // this one image just isn't.
+    }
+  }
+  return bytes;
+}
+
+/**
  * Remove a chapter's downloaded artifacts. Works from ids alone (no manifest
  * entry needed) by matching cached URLs, so it also clears entries whose
  * content hash has since changed in a republish.
@@ -80,6 +124,17 @@ export async function removeDownload(bookId: string, chapterId: string): Promise
     if (req.url.startsWith(prefix) && req.url.includes(`/${chapterId}.`)) await cache.delete(req);
   }
   await idb.delete('downloads', key(bookId, chapterId));
+  // Art is shared across a book's chapters and isn't named after any one of
+  // them, so it can only be dropped once nothing from this book is downloaded
+  // any more. Leaving it would quietly grow the cache a reader thinks they
+  // emptied.
+  const remaining = await idb.getAll<DownloadRecord>('downloads');
+  if (!remaining.some((r) => r.bookId === bookId)) {
+    const images = contentUrl(`books/${bookId}/images/`);
+    for (const req of await cache.keys()) {
+      if (req.url.startsWith(images)) await cache.delete(req);
+    }
+  }
   const next = new Map(downloadStates.value);
   next.delete(key(bookId, chapterId));
   downloadStates.value = next;

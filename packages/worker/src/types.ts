@@ -1,4 +1,5 @@
 import type { Database, ConflictInsert } from './db/types';
+import type { ContentStore } from './lib/content-store';
 
 export interface Env {
   // Platform-agnostic seam (AB#7399): the Cloudflare Worker entry binds this
@@ -6,6 +7,19 @@ export interface Env {
   // to the Postgres driver. Route code only ever sees this interface.
   DB: Database & ConflictInsert;
   CONTENT: R2Bucket;
+  /**
+   * Writable content storage, platform-agnostic (AB#7420). The Cloudflare entry
+   * binds it from the CONTENT R2 bucket; platforms/azure/server.mjs binds an
+   * Azure Blob or local-directory driver. Optional: a deployment without one
+   * serves content perfectly well and simply cannot be edited from the portal,
+   * which the content routes report as a 501 with an explanation rather than a
+   * confusing failure.
+   */
+  CONTENT_STORE?: ContentStore;
+  /** Text revisions kept per chapter (plan §3). Default 5; see lib/content.ts. */
+  CONTENT_REVISIONS?: string;
+  /** Ceiling for a portal image upload, in bytes. Default 8MB. */
+  CONTENT_MAX_UPLOAD_BYTES?: string;
   ASSETS: Fetcher;
   BRAND: string;
   APP_ORIGIN: string;

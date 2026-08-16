@@ -74,6 +74,45 @@ where no browser can be involved. See [`admin-guide.md`](admin-guide.md).
 | `POST /api/admin/setup/claim` | setup token | `{token, email, username?, password}` → creates/promotes the admin account, burns the token, sets the session cookie. |
 | `POST /api/admin/recover` | recovery code | `{email, code, password}` → resets that admin's password, burns the code, sets the session cookie. |
 
+## Admin — content editing
+
+Editing the deployment's own content. Every route is admin-session gated (no
+`X-Admin-Key` door — none of this is called headlessly) and needs a writable
+content store: the CONTENT R2 binding on Cloudflare, or
+`AZURE_STORAGE_CONNECTION_STRING` / `STORYLARK_LOCAL_CONTENT` on the Node entry.
+Without one, every route answers `501 {"error":"no_content_store"}` with an
+explanation. Design: [`design/admin-content-editing.md`](design/admin-content-editing.md).
+
+| Method & path | Behavior |
+|---|---|
+| `GET /api/admin/content/books` | The whole library, from `manifest.json` alone — no per-chapter storage reads. `{storeAvailable, contentOrigin, libraryVersion, announceVersion, revisionLimit, books:[{id,title,author,description,cover,chapterCount,chapters:[{id,title,label,wordCount,readingTime,hasAudio,audioStale,hasSource,contentHash,publishedAt}]}]}`. |
+| `GET /api/admin/content/books/:bookId/chapters/:chapterId` | `{bookId,chapterId,title,label,markdown,reconstructed,hasAudio,audioStale,wordCount,readingTime,contentHash,revisions[],revisionLimit}`. `reconstructed: true` means the chapter predates source upload and the markdown was rebuilt (lossily) from its published blocks. |
+| `PUT /api/admin/content/books/:bookId/chapters/:chapterId` | `{markdown, correction?}` → writes the source, re-parses, writes a new content-hashed chapter JSON, appends a revision, rewrites the manifest, records the publish. `correction` defaults to `true` for an existing chapter and `false` for a new one. Returns `{ok,created,contentHash,wordCount,readingTime,blocks,audioStale,libraryVersion,announceVersion,correction,revision,revisionCount,notified:{version,announced,subscriptions}}`. `400 invalid_markdown` with prose when validation fails — before anything is written. |
+| `DELETE /api/admin/content/books/:bookId/chapters/:chapterId` | Removes the manifest entry. The content-hashed objects, the source and the history stay, so this is recoverable. |
+| `PUT /api/admin/content/books/:bookId` | `{title?, author?, description?}` → book-level metadata. Never announces. |
+| `POST /api/admin/content/preview` | `{markdown}` → `{title,label,blocks,wordCount,charLength,readingTime,problem}`. The editor's live preview, parsed by the same code that publishes rather than by a second markdown implementation in the browser. Writes nothing. |
+| `GET /api/admin/content/books/:bookId/chapters/:chapterId/download` | The current markdown as `text/markdown` with a `Content-Disposition` attachment — the mirror of upload. |
+| `GET /api/admin/content/books/:bookId/chapters/:chapterId/revisions` | `{revisions:[{id,savedAt,savedBy,bytes,live,correction,revertedFrom?}], revisionLimit}`, newest first. |
+| `GET /api/admin/content/books/:bookId/chapters/:chapterId/revisions/:revisionId` | `{revisionId, markdown}`. `404` once a revision has aged out. |
+| `POST /api/admin/content/books/:bookId/chapters/:chapterId/revisions/:revisionId/revert` | `{correction?}` (default `true`) → puts that revision's text back **through the ordinary save path**, so it re-parses, re-publishes and appends a NEW revision. History is never rewound. |
+| `POST /api/admin/upload` | `multipart/form-data`: `file`, `bookId`, `kind` (`inline` \| `cover`), `alt?`. Validates type (PNG/JPEG/WebP/GIF/AVIF — no SVG) and size (`CONTENT_MAX_UPLOAD_BYTES`, default 8MB), writes through the storage seam under a content-hashed key, and returns `{ok,kind,key,url,bytes,contentType,markdown?}`. For `inline`, `markdown` is the exact `![alt](url)` reference for the editor to insert. For `cover`, the manifest's book entry is updated. |
+
+### The correction rule
+
+`correction` splits what used to be one event into the two it always was:
+
+- **`manifest_version` in the database always moves.** It is the freshness probe
+  `GET /api/library/version` answers, and the only thing that makes a reader
+  re-fetch the manifest. A correction that skipped it would be a correction
+  nobody receives.
+- **`announceVersion` in the manifest, and the push fan-out, move only for a
+  publication.** The app's "new content" badge compares against
+  `announceVersion` (falling back to `libraryVersion` on older manifests), so a
+  typo fix reaches every reader without badging the library or ringing a phone.
+
+`POST /api/admin/publish` takes the same `announce` flag (default `true`, which
+is what the CLI pipeline sends).
+
 ## Error shape
 
 Errors return `{"error":"<slug>"}` with a fitting status: `unauthorized` 401, `missing_csrf_header` 403, `bad_request` 400, `not_found` 404, `internal` 500.

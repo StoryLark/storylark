@@ -116,6 +116,19 @@ self.addEventListener('fetch', (event) => {
     }
   }
 
+  // Story art that was taken offline with its chapter (AB#7421). Checked ahead
+  // of the origin bail because an inline image is allowed to live anywhere the
+  // markdown pointed at — art uploaded through the admin portal lands on the
+  // content origin, but a site that references its own marketing images is
+  // still a supported shape, and a downloaded chapter must not lose its
+  // illustrations just because they came from next door. Narrow on purpose:
+  // only image requests, and only ones already in the download cache, so this
+  // costs nothing for everything else.
+  if (event.request.destination === 'image' && url.origin !== CONTENT_ORIGIN && url.origin !== APP_ORIGIN) {
+    event.respondWith(downloadedImageOrNetwork(event.request));
+    return;
+  }
+
   if (url.origin !== CONTENT_ORIGIN) return;
 
   if (url.pathname.includes('/audio/')) {
@@ -127,6 +140,13 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(cacheFirst(event.request));
   }
 });
+
+/** A downloaded image wherever it lives, else the network. Never caches on the
+ *  way past: only an explicit chapter download puts art in the download cache. */
+async function downloadedImageOrNetwork(request: Request): Promise<Response> {
+  const downloaded = await caches.match(request, { cacheName: DOWNLOAD_CACHE });
+  return downloaded ?? fetch(request);
+}
 
 async function cacheFirst(request: Request): Promise<Response> {
   const downloaded = await caches.match(request, { cacheName: DOWNLOAD_CACHE });

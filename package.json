@@ -14,11 +14,13 @@
     "deploy": "npm run build && wrangler deploy --env storylark",
     "publish": "node packages/pipeline/publish.mjs --brand storylark",
     "migrate-brand": "node packages/core/bin/migrate-brand.mjs",
-    "typecheck": "tsc -p app/tsconfig.json --noEmit && tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/worker/tsconfig.json --noEmit"
+    "typecheck": "tsc -p app/tsconfig.json --noEmit && tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/worker/tsconfig.json --noEmit",
+    "test": "node --import tsx/esm --test packages/worker/test/*.test.mjs"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.31.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "wrangler": "^4.0.0"
   }

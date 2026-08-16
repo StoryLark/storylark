@@ -26,6 +26,11 @@ export async function sha256Hex(input: string): Promise<string> {
   return bufToHex(digest);
 }
 
+/** SHA-256 over raw bytes — used to content-hash uploaded images (AB#7421). */
+export async function sha256Bytes(buf: ArrayBuffer): Promise<string> {
+  return bufToHex(await crypto.subtle.digest('SHA-256', buf));
+}
+
 export function bufToHex(buf: ArrayBuffer | Uint8Array): string {
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');

@@ -1,10 +1,9 @@
 import { Hono } from 'hono';
 import type { Context, Next } from 'hono';
 import type { AppContext } from '../types';
-import type { Database } from '../db/types';
-import { sendPush } from '../lib/vapid';
 import { INIT_SCHEMA } from '../lib/schema';
 import { requireAdmin } from '../lib/session';
+import { recordPublish } from '../lib/notify';
 import workerPkg from '../../package.json';
 
 export const admin = new Hono<AppContext>();
@@ -122,53 +121,28 @@ admin.post('/setup', async (c) => {
 });
 
 /**
- * Called by tools/publish.mjs after a successful upload: bumps the library
- * version and wakes every push subscription (payload-less — the service
+ * Called by packages/pipeline/publish.mjs after a successful upload: bumps the
+ * library version and wakes every push subscription (payload-less — the service
  * worker fetches the new manifest itself and composes the notification).
+ *
+ * `announce` (AB#7420, default true) is the correction switch. The pipeline
+ * always announces; the admin portal's editing routes call the same
+ * `recordPublish()` with `announce: false` when the operator ticked "this is a
+ * correction", which records the version so readers still receive the fix but
+ * doesn't ring anyone's phone over a typo.
  */
 admin.post('/publish', async (c) => {
-  const body = await c.req.json<{ version?: number }>().catch(() => null);
+  const body = await c.req.json<{ version?: number; announce?: boolean }>().catch(() => null);
   if (!body || typeof body.version !== 'number') return c.json({ error: 'bad_request' }, 400);
 
-  await c.env.DB.prepare('UPDATE library_state SET manifest_version = ?, updated_at = ? WHERE id = 1')
-    .bind(body.version, Date.now())
-    .run();
-
-  const { results } = await c.env.DB.prepare('SELECT endpoint, failed_count FROM push_subscriptions').all<{
-    endpoint: string;
-    failed_count: number;
-  }>();
-
-  // VAPID contact subject — derived from the app origin's registrable domain
-  // (app.example.com → example.com) so it stays brand-neutral.
-  const subject = `mailto:noreply@${new URL(c.env.APP_ORIGIN).hostname.replace(/^app\./, '')}`;
-  c.executionCtx.waitUntil(fanOut(c.env, results, subject));
-  return c.json({ ok: true, version: body.version, subscriptions: results.length });
+  const result = await recordPublish(
+    c.env,
+    (p) => c.executionCtx.waitUntil(p),
+    body.version,
+    body.announce !== false
+  );
+  return c.json({ ok: true, version: result.version, announced: result.announced, subscriptions: result.subscriptions });
 });
-
-async function fanOut(
-  env: AppContext['Bindings'],
-  subs: { endpoint: string; failed_count: number }[],
-  subject: string
-): Promise<void> {
-  const BATCH = 50;
-  for (let i = 0; i < subs.length; i += BATCH) {
-    await Promise.all(
-      subs.slice(i, i + BATCH).map(async (s) => {
-        try {
-          const status = await sendPush(s.endpoint, env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, subject);
-          if (status === 404 || status === 410) {
-            await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').bind(s.endpoint).run();
-          } else if (status >= 400) {
-            await bumpFailure(env.DB, s.endpoint, s.failed_count);
-          }
-        } catch {
-          await bumpFailure(env.DB, s.endpoint, s.failed_count);
-        }
-      })
-    );
-  }
-}
 
 /**
  * Admin portal status view: engine identity, library size (from the public
@@ -292,11 +266,3 @@ admin.post('/publish-story', async (c) => {
     message: 'Story committed and publishing started — check back in a few minutes. Narration depends on whether TTS credentials are configured in the repo.',
   });
 });
-
-async function bumpFailure(db: Database, endpoint: string, current: number): Promise<void> {
-  if (current + 1 >= 5) {
-    await db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').bind(endpoint).run();
-  } else {
-    await db.prepare('UPDATE push_subscriptions SET failed_count = failed_count + 1 WHERE endpoint = ?').bind(endpoint).run();
-  }
-}

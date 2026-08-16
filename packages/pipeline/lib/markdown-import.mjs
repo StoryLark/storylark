@@ -33,13 +33,21 @@ function chapterMeta(blocks) {
 }
 
 async function parseChapterFile(path, previous, siteOrigin, chapterId, defaultLabel) {
-  const { data, body } = readFrontmatter(await readFile(path, 'utf8'));
+  const raw = await readFile(path, 'utf8');
+  const { data, body } = readFrontmatter(raw);
   const blocks = stabilizeBlockIds(parseBlocks(body, { siteOrigin }), previous?.blocks);
   return {
     id: data.chapterId ?? chapterId,
     title: data.title,
     label: data.label ?? defaultLabel,
     blocks,
+    // The file exactly as authored (AB#7420 — plan §3). publish.mjs uploads it
+    // to books/<book>/source/<chapter>.md so the DEPLOYMENT holds the editable
+    // source of truth, which is the whole blocker under portal editing: until
+    // now the markdown never left the operator's laptop, so there was nothing
+    // for a browser to open and fix. A custom --parser that has no markdown to
+    // give simply omits this, and publish.mjs uploads no source for it.
+    source: raw,
     ...chapterMeta(blocks),
   };
 }
@@ -79,12 +87,13 @@ async function parseBookFolder(dir, bookId, previous, siteOrigin) {
 }
 
 async function parseSingleFileBook(path, bookId, previous, siteOrigin) {
-  const { data, body } = readFrontmatter(await readFile(path, 'utf8'));
+  const raw = await readFile(path, 'utf8');
+  const { data, body } = readFrontmatter(raw);
   const chapterId = data.chapterId ?? 'full';
   const blocks = stabilizeBlockIds(parseBlocks(body, { siteOrigin }), previous[`${bookId}/${chapterId}`]?.blocks);
   return {
     book: { id: data.bookId ?? bookId, title: data.title, author: data.author, description: data.description, order: data.order, coverSource: data.coverSource },
-    chapters: [{ id: data.chapterId ?? 'full', title: data.title, label: data.label ?? 'Read', blocks, ...chapterMeta(blocks) }],
+    chapters: [{ id: chapterId, title: data.title, label: data.label ?? 'Read', blocks, source: raw, ...chapterMeta(blocks) }],
   };
 }
 

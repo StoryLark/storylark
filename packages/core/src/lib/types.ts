@@ -194,6 +194,13 @@ export type PresentationInput = {
 export interface LibraryManifest {
   schemaVersion: number;
   libraryVersion: number;
+  /**
+   * The version readers are ANNOUNCED (AB#7420). Moves only for a genuine
+   * publication, while `libraryVersion` above moves for every change including
+   * a correction — see `announceVersionOf` in ./state.ts. Absent on manifests
+   * written before this existed, and then it falls back to `libraryVersion`.
+   */
+  announceVersion?: number;
   generatedAt: string;
   books: BookEntry[];
   /** Narrator voices available across the library: voice id → display name.
@@ -240,6 +247,18 @@ export interface ChapterEntry {
   voices?: Record<string, VoiceTrack>;
   hasAudio: boolean;
   publishedAt?: string;
+  /**
+   * Storage path of the chapter's editable source markdown (AB#7420). Present
+   * once a publish (or a portal save) has uploaded it; the admin portal keys
+   * "editable in place" off this.
+   */
+  source?: string;
+  /**
+   * Narration that no longer matches the words — a text edit published without
+   * re-narrating. The reader says so rather than leaving a listener to wonder
+   * why the voice and the page disagree.
+   */
+  audioStale?: boolean;
 }
 
 export type Block =

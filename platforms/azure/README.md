@@ -71,6 +71,25 @@ Requires `AZURE_STORAGE_CONNECTION_STRING` in the environment (same variable
 this server reads). See `packages/pipeline/storage.mjs` for the storage
 seam and `docs/content-pipeline.md` for the parser contract.
 
+### Editing content from the admin portal
+
+The same connection string turns on portal content editing — `infra.bicep`
+already sets it as an app setting, so a site deployed by `install.mjs` has it.
+On boot this server logs which storage driver it bound; with none it says so and
+`/admin` can read the library but not edit it.
+
+| Setting | Effect |
+|---|---|
+| `AZURE_STORAGE_CONNECTION_STRING` | Edit through Azure Blob. Container defaults to `<BRAND>-content`; override with `CONTENT_CONTAINER`. |
+| `STORYLARK_LOCAL_CONTENT` | Edit through a directory on disk — the same layout `publish.mjs --local <dir>` produces. Takes precedence, and is how this path is developed and tested without a cloud account. |
+| `CONTENT_REVISIONS` | Text revisions kept per chapter. Default 5. |
+| `CONTENT_MAX_UPLOAD_BYTES` | Ceiling for an uploaded image. Default 8MB. |
+
+Note that after a portal edit the chapter's narration is stale — this process
+can't run the TTS model any more than a Worker can. Re-run the pipeline with
+`--pull` to bring the portal's edits down and re-narrate. See
+`docs/design/admin-content-editing.md`.
+
 ## Why this runs differently from Cloudflare
 
 - **Database**: `postgresDatabase()` (`packages/worker/src/db/postgres.ts`)

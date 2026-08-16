@@ -49,6 +49,8 @@ The two required flags:
 | `--parser <module>` | Use a site-owned parser instead of the built-in markdown importer — for content that isn't plain markdown. Contract below. |
 | `--dry-run` | Parse + report the change plan only. No TTS, no upload. |
 | `--manifest-only` | Regenerate and re-upload just the manifest (after a manifest-schema change), without re-publishing chapters. Requires all chapters to have been published before. |
+| `--pull` | **Before** parsing, fetch each chapter's source markdown back from the live deployment and write it into your source repo. This is how an edit made in the admin portal reaches your machine instead of being overwritten by this publish. One-way (deployment → local) and only when asked. See "Editing on the deployment" below. |
+| `--no-source` | Don't upload the source markdown — derived artifacts only, the pre-0.12 behaviour. The deployment then can't be edited from its own admin portal. |
 
 ### Environment
 
@@ -183,11 +185,55 @@ quality.
 ```
 manifest.json                              library catalog + version (~60s cache)
 books/<bookId>/
+  source/book.json                         book metadata as authored (~60s cache)
+  source/<chapterId>.md                    the editable source markdown (~60s cache)
   chapters/<chapterId>.<hash>.json         blocks + metadata (immutable)
   audio/<chapterId>.<hash>.mp3             48kHz/96kbps mono (immutable)
   timings/<chapterId>.<hash>.json          per-word timing (immutable)
   covers/cover.<hash>.<ext>                cover art (immutable)
+  images/<name>-<hash>.<ext>               inline story art (immutable)
 ```
+
+`source/` and `images/` are what make the deployment self-describing. Until
+they existed, publishing was one-way — markdown in, artifacts out — and the
+source never left the machine that ran the publish, which is why nothing could
+be edited anywhere but there. See
+[`design/admin-content-editing.md`](design/admin-content-editing.md).
+
+## Editing on the deployment
+
+Once source markdown is uploaded, the admin portal can open, edit and republish
+any chapter without a repo, a laptop or a CI run. That creates one thing to be
+aware of: **two copies of the source now exist**, one on the deployment and one
+in your working tree, and this pipeline reads yours.
+
+`--pull` is the reconciliation, and it is explicit rather than automatic — a
+publish that silently rewrote your working tree would be worse than the problem
+it solves:
+
+```bash
+node packages/pipeline/publish.mjs --brand <id> --source <path> --pull
+```
+
+It reads the live manifest over the public content origin (no credential — the
+content is public and this direction only reads), fetches each chapter's
+`source/<chapter>.md`, and writes it into your repo, matching chapters to files
+by the same rule the importer uses to derive a chapter id from a filename. So
+`02-the-long-dark.md` is recognised as chapter `the-long-dark` and rewritten in
+place, keeping its ordering prefix. A chapter created in the portal that has no
+local file lands as `books/<book>/<chapter>.md`; rename it to give it an order.
+
+Two related behaviours exist for the same reason:
+
+- **The library version is seeded from the live manifest**, not only from local
+  publish state. The portal bumps the deployed manifest's version on every
+  edit, so a machine that has been publishing for a while can hold a lower
+  number — and a manifest whose version goes backwards is a manifest no reader
+  ever re-fetches, i.e. a publish that reaches nobody.
+- **`audioStale` is derived, not asserted.** A chapter is marked audio-out-of-
+  date exactly when it has narration whose hash isn't the current content hash.
+  That covers a `--no-audio` publish of changed text as well as a portal edit,
+  and it clears itself on the run that re-narrates.
 
 The bucket is named `<brand>-content`; an R2 custom domain serves the bucket root
 at the brand's `contentOrigin`, which is exactly what the app fetches from

@@ -9,6 +9,8 @@ import { bookmarks } from './routes/bookmarks';
 import { push } from './routes/push';
 import { admin } from './routes/admin';
 import { adminAuth } from './routes/admin-auth';
+import { adminContent } from './routes/admin-content';
+import { r2ContentStore } from './lib/content-store';
 import { checkForUpdateAndNotify } from './lib/update-check';
 import { deploymentConfigFromEnv, injectDeploymentIntoHtml, injectDeploymentIntoScript } from './lib/deployment';
 import {
@@ -57,6 +59,11 @@ app.route('/api/admin', admin);
 // already owns (/setup, /status, ...) keep their handlers; the three routes
 // here (/setup/reset, /setup/claim, /recover) don't overlap with any of them.
 app.route('/api/admin', adminAuth);
+// Content editing (AB#7420/AB#7421 — plan §3). Same /api/admin prefix, own
+// router: it owns /content/* and /upload, every route in it is admin-session
+// gated as a group, and none of it shares the ADMIN_KEY exception POST
+// /publish carries.
+app.route('/api/admin', adminContent);
 
 /**
  * The PWA manifest, generated from the live brand (AB#7415 — plan §0d Phase 2).
@@ -295,6 +302,12 @@ export default {
     // object reference the runtime already wired up everywhere.
     const raw = env as Env & { DB: D1Database };
     (raw as unknown as { DB: unknown }).DB = d1Database(raw.DB);
+    // Same in-place treatment for the content seam (AB#7420): the CONTENT R2
+    // binding this Worker already has IS its writable content storage, so the
+    // portal's editing routes need no credential and no new configuration on
+    // Cloudflare. A deployment whose wrangler config declares no bucket simply
+    // leaves this undefined and those routes report that plainly.
+    if (raw.CONTENT && !raw.CONTENT_STORE) raw.CONTENT_STORE = r2ContentStore(raw.CONTENT);
     return app.fetch(request, raw as Env, ctx);
   },
 

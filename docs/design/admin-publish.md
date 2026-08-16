@@ -73,7 +73,21 @@ silently failing.
 
 Multi-chapter books, cover images, and inline images are explicitly out of
 scope for this form — it publishes one chapter's worth of plain markdown
-per submission. Anything more structured than that goes through the CLI
-(`packages/pipeline/publish.mjs` directly against a `books/<id>/` folder)
-until the portal's editing surface grows beyond upload-only, which is
-future work, not this design.
+per submission.
+
+**That editing surface now exists** — see
+[`admin-content-editing.md`](admin-content-editing.md). It does not replace
+this path, and the two coexist deliberately:
+
+- This form's value is that the repo stays the audit log (`git log` shows who
+  published what) and that **CI can run the TTS model**, so a story published
+  here comes back narrated.
+- The editing surface needs no GitHub at all and can edit any chapter of any
+  book in place, instantly, because the deployment now stores its own source
+  markdown. What it cannot do is narrate — a Worker has no TTS model, so an
+  edit publishes text and marks the chapter *audio out of date* until the
+  pipeline catches up.
+
+Folding this path into a direct storage write was considered and rejected: it
+would delete both of the properties above. A site with a repo keeps using this
+for new work; every site, repo or not, can now fix a typo.

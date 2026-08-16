@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { BRAND } from '../brand';
 import { api, call, ApiError, type AuthUser } from '../lib/api';
+import { ContentSection } from './admin/ContentSection';
 
 // Admin portal (AB#7404). Gated by a real account in the app's own `users`
 // table carrying the `is_admin` flag — the same email+password, the same
@@ -428,6 +429,12 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
       {error && <p class="settings-note admin-error">{error}</p>}
 
       <StatusSection status={status} />
+      {/* Content management (AB#7420/AB#7421 — plan §3): list → open → edit →
+          save → republish, against the source markdown the deployment now
+          stores for itself. The GitHub-backed PublishSection below it is a
+          different, narrower path and stays — see the note on its own
+          component. */}
+      <ContentSection />
       <UpdateSection updateStatus={updateStatus} />
       <PublishSection onPublished={refresh} />
     </div>
@@ -524,6 +531,14 @@ function UpdateSection({ updateStatus }: { updateStatus: UpdateStatusResponse | 
   );
 }
 
+/**
+ * Publish a new single-chapter story through the site's GitHub repo
+ * (docs/design/admin-publish.md). Kept alongside the content manager above
+ * rather than replaced by it, because it does one thing that path cannot: CI
+ * can run the TTS model, so a story published here comes back narrated. The
+ * content manager edits any chapter of any book instantly and needs no GitHub
+ * at all, but a Worker can't generate speech — see plan §3's honest constraint.
+ */
 function PublishSection({ onPublished }: { onPublished: () => void }): JSX.Element {
   const [bookId, setBookId] = useState('');
   const [title, setTitle] = useState('');

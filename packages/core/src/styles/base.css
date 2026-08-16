@@ -384,6 +384,149 @@ select:focus-visible {
   resize: vertical;
 }
 
+/* ---- Admin content manager (AB#7420/AB#7421) ---- */
+
+.admin-subhead {
+  font-size: 1rem;
+  margin: 1.25rem 0 0.35rem;
+}
+
+.admin-content-list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.admin-content-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--rule);
+  padding: 0.35rem 0;
+}
+
+/* The whole row is the target — a story list is read with a thumb as often as
+   a mouse, so the tap area is the row, not a link inside it. */
+.admin-content-row {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0.4rem 0;
+  cursor: pointer;
+}
+
+.admin-content-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.admin-content-row-meta {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.admin-row-action {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+}
+
+.admin-badge {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  opacity: 0.85;
+}
+
+.admin-badge-warn {
+  border-color: var(--accent-strong);
+  color: var(--accent-strong);
+}
+
+.admin-notice {
+  border-left: 3px solid var(--accent-strong);
+  padding-left: 0.6rem;
+}
+
+.admin-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+}
+
+.admin-hidden-input {
+  display: none;
+}
+
+.admin-editor-pane {
+  min-width: 0;
+}
+
+/* Side by side where there's room, stacked where there isn't. The preview is
+   below the editor on a phone rather than hidden: it's the only confirmation
+   that what was typed is what will publish. */
+@media (min-width: 900px) {
+  .admin-editor-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    align-items: start;
+  }
+}
+
+.admin-preview {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  background: var(--bg-sunken);
+  max-height: 40rem;
+  overflow-y: auto;
+}
+
+.admin-preview .story-image {
+  max-width: 100%;
+  height: auto;
+}
+
+.admin-cover {
+  margin: 0.5rem 0 1rem;
+}
+
+.admin-cover-thumb {
+  display: block;
+  max-width: 120px;
+  height: auto;
+  border-radius: 6px;
+  margin-bottom: 0.4rem;
+}
+
+.admin-correction {
+  align-items: flex-start;
+}
+
+.admin-correction-hint {
+  display: block;
+  font-size: 0.8rem;
+  opacity: 0.7;
+  max-width: 46ch;
+}
+
 .signin-form {
   display: flex;
   flex-direction: column;

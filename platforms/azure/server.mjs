@@ -24,6 +24,7 @@ import { Hono } from 'hono';
 import { app as workerApp } from 'storylark-worker';
 import { postgresDatabase } from 'storylark-worker/db/postgres';
 import { checkForUpdateAndNotify } from 'storylark-worker/lib/update-check';
+import { contentStoreFromEnv } from './content-store.mjs';
 
 // Serve-time deployment config (AB#7414) arrived in storylark-worker 0.9.0.
 // This process runs its own `npm install` and can legitimately be a version
@@ -80,6 +81,13 @@ if (missing.length > 0) {
 
 const db = postgresDatabase(process.env.DATABASE_URL);
 
+const { store: contentStore, driver: contentDriver } = contentStoreFromEnv(process.env);
+console.log(
+  contentDriver
+    ? `storylark: content editing enabled — storage driver ${contentDriver}.`
+    : 'storylark: no content storage configured (set AZURE_STORAGE_CONNECTION_STRING or STORYLARK_LOCAL_CONTENT) — /admin can read the library but not edit it.'
+);
+
 const env = {
   DB: db,
   BRAND: process.env.BRAND,
@@ -98,6 +106,14 @@ const env = {
   GITHUB_REPO: process.env.GITHUB_REPO ?? '',
   GITHUB_DEPLOY_TOKEN: process.env.GITHUB_DEPLOY_TOKEN ?? '',
   ADMIN_EMAIL: process.env.ADMIN_EMAIL ?? '',
+  // Portal content editing (AB#7420/AB#7421). Optional: without a storage
+  // driver the site serves content exactly as before and the portal's content
+  // routes answer 501 with an explanation. Cloudflare binds this from its R2
+  // binding inside the worker; here the credential belongs to this process, so
+  // the binding is made here. See ./content-store.mjs.
+  CONTENT_STORE: contentStore,
+  CONTENT_REVISIONS: process.env.CONTENT_REVISIONS ?? '',
+  CONTENT_MAX_UPLOAD_BYTES: process.env.CONTENT_MAX_UPLOAD_BYTES ?? '',
 };
 
 // Cloudflare's ExecutionContext.waitUntil() keeps the isolate alive after

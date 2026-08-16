@@ -49,8 +49,27 @@ export function modeFor(bookId: string, chapterId: string): ConsumptionMode {
   return itemModes.value[progressKey(bookId, chapterId)] ?? settings.value.defaultMode;
 }
 
+/**
+ * The version a reader is TOLD about, as distinct from the one that makes the
+ * app re-fetch (AB#7420 — plan §3).
+ *
+ * `libraryVersion` moves on every change to the library, corrections included,
+ * because it is what `/api/library/version` is compared against and therefore
+ * the only thing that makes a corrected chapter reach anyone at all.
+ * `announceVersion` moves only for a genuine publication. Fixing a typo must
+ * not badge the library as having new content the way a new chapter does.
+ *
+ * Absent on a manifest written before this existed, and then this is exactly
+ * the old behaviour — which is also why `markLibrarySeen` records the same
+ * derived value rather than `libraryVersion` directly.
+ */
+export function announceVersionOf(m: LibraryManifest | null): number {
+  const v = (m as { announceVersion?: unknown } | null)?.announceVersion;
+  return typeof v === 'number' ? v : (m?.libraryVersion ?? 0);
+}
+
 export const hasNewContent = computed(
-  () => (manifest.value?.libraryVersion ?? 0) > lastSeenLibraryVersion.value && lastSeenLibraryVersion.value > 0
+  () => announceVersionOf(manifest.value) > lastSeenLibraryVersion.value && lastSeenLibraryVersion.value > 0
 );
 
 export function progressKey(bookId: string, chapterId: string): string {
@@ -153,7 +172,7 @@ export async function loadManifest(): Promise<void> {
 }
 
 export async function markLibrarySeen(): Promise<void> {
-  const v = manifest.value?.libraryVersion ?? 0;
+  const v = announceVersionOf(manifest.value);
   lastSeenLibraryVersion.value = v;
   await idb.put('kv', v, 'lastSeenLibraryVersion');
 }
