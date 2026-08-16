@@ -41,54 +41,6 @@
       // RESEND_API_KEY (wrangler secret put) to also email when a new
       // release is found; the in-portal check works either way.
       "triggers": { "crons": ["0 13 * * *"] }
-    },
-    // Example customer brands — placeholder IDs/domains on purpose; a real
-    // deployment fills in its own resources (see docs/deploy-your-own.md).
-    "gunner-the-lab": {
-      "name": "gunner-the-lab",
-      "routes": [{ "pattern": "app.example.com", "custom_domain": true }],
-      "d1_databases": [
-        {
-          "binding": "DB",
-          "database_name": "gunner-the-lab",
-          "database_id": "00000000-0000-0000-0000-000000000000",
-          "migrations_dir": "packages/worker/migrations"
-        }
-      ],
-      "r2_buckets": [
-        { "binding": "CONTENT", "bucket_name": "gunner-the-lab-content" }
-      ],
-      "vars": {
-        "BRAND": "gunner-the-lab",
-        "APP_ORIGIN": "https://app.example.com",
-        "CONTENT_ORIGIN": "https://content.example.com",
-        "MAIL_FROM": "Gunner the Lab <noreply@example.com>",
-        "APP_NAME": "StoryReader"
-      },
-      "triggers": { "crons": ["0 13 * * *"] }
-    },
-    "hold-fast-press": {
-      "name": "hold-fast-press",
-      "routes": [{ "pattern": "app.example.com", "custom_domain": true }],
-      "d1_databases": [
-        {
-          "binding": "DB",
-          "database_name": "hold-fast-press",
-          "database_id": "00000000-0000-0000-0000-000000000000",
-          "migrations_dir": "packages/worker/migrations"
-        }
-      ],
-      "r2_buckets": [
-        { "binding": "CONTENT", "bucket_name": "hold-fast-press-content" }
-      ],
-      "vars": {
-        "BRAND": "hold-fast-press",
-        "APP_ORIGIN": "https://app.example.com",
-        "CONTENT_ORIGIN": "https://content.example.com",
-        "MAIL_FROM": "Holdfast Press <noreply@example.com>",
-        "APP_NAME": "StoryReader"
-      },
-      "triggers": { "crons": ["0 13 * * *"] }
     }
   }
 }

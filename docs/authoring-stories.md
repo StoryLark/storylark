@@ -8,7 +8,7 @@ it automatically; `--parser` is only for content in some other shape.
 
 ```
 <source>/books/
-  gunner-and-the-comet/
+  the-comet-chase/
     book.json
     01-liftoff.md
     02-the-long-dark.md
@@ -27,11 +27,11 @@ filename — the leading number is stripped to make the chapter id (so
 
 ```json
 {
-  "title": "Gunner and the Comet",
-  "author": "Gunner the Lab",
-  "description": "A very good dog chases a comet across three chapters.",
+  "title": "The Comet Chase",
+  "author": "Example Press",
+  "description": "A short adventure across three chapters.",
   "order": 1,
-  "coverSource": "/images/gunner-and-the-comet.jpg"
+  "coverSource": "/images/the-comet-chase.jpg"
 }
 ```
 
@@ -55,7 +55,7 @@ title: The Long Dark
 label: Chapter 2
 ---
 
-The comet's tail swallowed the last of the sunlight, and Gunner's ears
+The comet's tail swallowed the last of the sunlight, and her ears
 went flat against his head...
 ```
 
@@ -74,7 +74,7 @@ For a standalone story with no chapters to split, skip the folder — one
 ```markdown
 ---
 title: A Quiet Evening
-author: Holdfast Press
+author: Example Press
 description: Nothing happens, and it's wonderful.
 order: 4
 label: Read

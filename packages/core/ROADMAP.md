@@ -39,8 +39,6 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
 - **Opt-in updates for downstream sites** — a new release opens a pull request in a deployer's
   site repo with the release notes; merging the PR is the approval that rebuilds and redeploys.
   The live demo runs this exact flow
-- **Example customer brands in-repo** — `gunner-the-lab` and `hold-fast-press` ship alongside
-  the base brand as worked examples of the theme contract
 - **Runs on Azure, not just Cloudflare** — a database adapter (Postgres driver, also covers AWS
   RDS/Aurora) and a storage adapter (Azure Blob driver) sit behind the same interfaces the
   Cloudflare D1/R2 drivers use, so the API code is identical either way. A documented Azure

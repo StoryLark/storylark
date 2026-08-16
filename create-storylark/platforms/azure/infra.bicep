@@ -7,7 +7,7 @@
 // Deploy with the installer (install.mjs), which fills these parameters
 // from your .env file and runs `az deployment group create`.
 
-@description('Short, unique brand id — used to derive every resource name (e.g. "gunner-the-lab").')
+@description('Short, unique brand id — used to derive every resource name (e.g. "my-story-app").')
 @minLength(3)
 @maxLength(24)
 param brandId string

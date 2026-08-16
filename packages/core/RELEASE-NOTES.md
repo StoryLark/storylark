@@ -26,8 +26,6 @@ Runs anywhere, updates itself, and you can manage it from your phone.
 - **`npm create storylark`** — one command scaffolds a complete branded
   site, and a setup wizard walks you through picking a platform and
   deploying it
-- Two example customer brands, Gunner the Lab and Holdfast Press, now ship
-  in the repo as worked examples of the theme contract
 
 ## 0.5.0 (preview)
 
@@ -42,8 +40,6 @@ The considerate release: your screen stays on, and your stories stop when you do
 - For deployers: updates are now opt-in by design — each new engine release opens a pull
   request in your site repo with these release notes attached; merging it is the approval
   that rebuilds and redeploys your site. Nothing ever updates without your say-so
-- Two example customer brands — Gunner the Lab and Holdfast Press — now ship in the repo
-  alongside the base brand as worked examples of the theme contract
 
 ## 0.4.0 (preview)
 
