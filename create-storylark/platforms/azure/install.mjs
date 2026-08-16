@@ -19,7 +19,7 @@
 // app code. The only credential involved is your own `az login` session;
 // nothing new is ever stored in the deployment. Also needs --yes, because it
 // redeploys a live site.
-import { readFileSync, existsSync, mkdirSync, cpSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, cpSync, rmSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -286,7 +286,19 @@ function installMigrateBuildDeploy({ outputs, webAppName, brandFolder }) {
   console.log('\nStaging and deploying app code to App Service...');
   const stage = join(tmpdir(), `storylark-azure-deploy-${Date.now()}`);
   mkdirSync(stage, { recursive: true });
-  cpSync(join(__dirname, 'server.mjs'), join(stage, 'server.mjs'));
+  // Every runtime source file next to server.mjs, not just server.mjs itself
+  // — confirmed live: a sibling .mjs file (content-store.mjs) that server.mjs
+  // imports was left out of a hand-picked file list here, so the deployed zip
+  // was missing a module server.mjs needed and the container crashed on boot
+  // with ERR_MODULE_NOT_FOUND. install.mjs itself is excluded (it's the
+  // deploy tool, never imported at runtime); everything else `.mjs` in this
+  // directory ships, so a future runtime file added the same way as
+  // content-store.mjs can't hit this again.
+  for (const entry of readdirSync(__dirname)) {
+    if (entry.endsWith('.mjs') && entry !== 'install.mjs') {
+      cpSync(join(__dirname, entry), join(stage, entry));
+    }
+  }
   cpSync(join(__dirname, 'package.json'), join(stage, 'package.json'));
   if (existsSync(join(__dirname, 'package-lock.json'))) cpSync(join(__dirname, 'package-lock.json'), join(stage, 'package-lock.json'));
   cpSync(join(SITE_ROOT, 'dist'), join(stage, 'app', 'dist'), { recursive: true });
