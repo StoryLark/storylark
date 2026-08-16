@@ -44,11 +44,17 @@ interface UpdateStatusResponse {
   latest: string;
   hasUpdate: boolean;
   releaseNotesUrl: string;
-  /** Which installer the operator should run — detected from the runtime, not configured. */
-  platform: 'cloudflare' | 'node';
+  /**
+   * These three arrived with the AB#7403 update rework and are optional on
+   * purpose: the app bundle and the worker are separately versioned packages,
+   * so a site can legitimately be running a newer UI against a worker that
+   * predates them. Rendering "undefined" as the command an operator should
+   * type would be worse than a sensible fallback.
+   */
+  platform?: 'cloudflare' | 'node';
   /** The command that actually performs the update, run by the operator on their own machine. */
-  updateCommand: string;
-  updateDocsUrl: string;
+  updateCommand?: string;
+  updateDocsUrl?: string;
 }
 
 type Phase =
@@ -452,8 +458,14 @@ function StatusSection({ status }: { status: StatusResponse | null }): JSX.Eleme
  * already have, so this deployment never holds a credential that could deploy
  * on your behalf. See docs/updating.md.
  */
+const UPDATE_DOCS_URL = 'https://storylark.org/docs/updating.html';
+
 function UpdateSection({ updateStatus }: { updateStatus: UpdateStatusResponse | null }): JSX.Element {
   const [copied, setCopied] = useState(false);
+  // Falls back to the generic form when talking to a worker that predates
+  // AB#7403's response fields — still a correct instruction, just without the
+  // platform already filled in.
+  const command = updateStatus?.updateCommand ?? 'node platforms/<cloudflare|azure>/install.mjs --update --yes';
 
   function copy(command: string) {
     // Clipboard access can be denied (insecure context, permissions) — the
@@ -493,15 +505,14 @@ function UpdateSection({ updateStatus }: { updateStatus: UpdateStatusResponse | 
               ? 'To take it, run this from your copy of the site, on the machine you deploy from:'
               : 'When there is one, you take it by running this from your copy of the site, on the machine you deploy from:'}
           </p>
-          <pre class="admin-command">{updateStatus.updateCommand}</pre>
-          <button class="btn-ghost" onClick={() => copy(updateStatus.updateCommand)}>
+          <pre class="admin-command">{command}</pre>
+          <button class="btn-ghost" onClick={() => copy(command)}>
             {copied ? 'Copied' : 'Copy command'}
           </button>
           <p class="settings-note">
-            It pulls the new engine, migrates, rebuilds with your brand untouched, and redeploys — using the{' '}
-            {updateStatus.platform === 'cloudflare' ? 'wrangler' : 'Azure CLI'} login you already have. This site stores no
-            credential that could update itself.{' '}
-            <a href={updateStatus.updateDocsUrl} target="_blank" rel="noreferrer">
+            It pulls the new engine, migrates, rebuilds with your brand untouched, and redeploys — using the platform login
+            you already have. This site stores no credential that could update itself.{' '}
+            <a href={updateStatus.updateDocsUrl ?? UPDATE_DOCS_URL} target="_blank" rel="noreferrer">
               How updating works
             </a>
           </p>
