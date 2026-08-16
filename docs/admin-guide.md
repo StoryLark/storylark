@@ -143,6 +143,22 @@ first, so publishing doesn't overwrite them. See
 Book-level details — title, author, description and the cover image — are on
 the book itself, above its chapters.
 
+### Content you can see but can't edit
+
+If a book or chapter is labelled **synced**, its source of truth is somewhere
+else — a git repository of markdown, or your own content system — and StoryLark
+holds a copy. Opening it gives you the text, the preview, the download and the
+history, but no editor and a **Managed externally** notice naming the source and
+linking to it.
+
+That isn't a permissions problem, and it's not something to work around: a change
+saved here would be overwritten the next time the sync runs. Edit it where it
+lives, then re-sync. The rule is *whoever owns the content owns the edit button*,
+and it's what keeps this deployment and your real catalogue from quietly becoming
+two different libraries. Everything you wrote here, and everything you published
+from your own markdown, stays fully editable as normal — the two can sit side by
+side. See [`content-sync.md`](content-sync.md).
+
 ## Turning features on
 
 Story upload — and only story upload — needs two secrets, because it

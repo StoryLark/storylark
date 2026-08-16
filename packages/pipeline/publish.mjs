@@ -31,6 +31,17 @@
 //   --no-source                 skip uploading the source markdown (text-only artifacts, the
 //                               pre-AB#7420 behaviour). The deployment then can't be edited
 //                               from its own admin portal.
+//   --origin <portal|cli|sync>  what to record as this content's ORIGIN in the manifest
+//                               (AB#7422 — plan §8). Default: whatever the live manifest
+//                               already says, falling back to `cli`. Set to `sync` by
+//                               packages/pipeline/sync.mjs, which is the only thing that
+//                               should ever set it — synced content is read-only in the
+//                               admin portal, and mislabelling an operator's own markdown
+//                               as synced would lock them out of their own library.
+//   --sync-kind <git|feed>      recorded alongside --origin sync: which connector produced
+//   --sync-url <url>            this book, and where its real source of truth lives, so the
+//   --sync-ref <ref>            portal can say "edit at source" with a link instead of a
+//   --sync-path <path>          shrug. Never a credential — the manifest is public.
 //   --bucket <name>              override the content bucket/container (default: <brand>-content).
 //                               Needed when the same brand folder is deployed more than once with
 //                               different resource-naming ids (e.g. testing "storylark" on a second
@@ -77,6 +88,29 @@ if (args.parser !== undefined && typeof args.parser !== 'string') {
 }
 
 const sourceRepo = args.source;
+// Content origin (AB#7422 — plan §8). Validated here rather than trusted: an
+// invented value would be written into the manifest and read back by the portal
+// as an unknown origin, which defaults to "editable" — safe, but silently not
+// what was asked for. Better to say so now.
+const ORIGINS = ['portal', 'cli', 'sync'];
+const declaredOrigin = args.origin === undefined ? undefined : String(args.origin);
+if (declaredOrigin !== undefined && !ORIGINS.includes(declaredOrigin)) {
+  console.error(`--origin must be one of ${ORIGINS.join(', ')} (got "${declaredOrigin}").`);
+  process.exit(1);
+}
+// `personal` is deliberately not accepted: it is the seam for a reader's own
+// device-local imports (plan §5 / AB#7426), which by definition never reach a
+// deployment, so nothing published from here can legitimately claim it.
+const syncSource =
+  declaredOrigin === 'sync'
+    ? {
+        kind: args['sync-kind'] === 'feed' ? 'feed' : 'git',
+        url: typeof args['sync-url'] === 'string' ? args['sync-url'] : '',
+        ref: typeof args['sync-ref'] === 'string' ? args['sync-ref'] : undefined,
+        path: typeof args['sync-path'] === 'string' ? args['sync-path'] : undefined,
+        syncedAt: new Date().toISOString(),
+      }
+    : undefined;
 if (args.local) {
   process.env.STORYLARK_LOCAL_R2 = resolve(String(args.local));
   console.log(`Local publish → ${process.env.STORYLARK_LOCAL_R2} (no remote R2).`);
@@ -517,15 +551,50 @@ function coverSourceFor(book) {
 // no reader ever re-fetches, i.e. a publish that silently reaches nobody.
 // Best-effort: an unreachable origin (offline, first publish, --local) just
 // falls back to local state, which is the pre-existing behaviour.
-let liveVersion = 0;
-if (!args.local && brand.contentOrigin) {
+//
+// The same read also carries ORIGIN forward (AB#7422). A republish must not
+// relabel where content came from: a book synced from a publisher's repo stays
+// `sync` (and therefore stays read-only in the portal) even when this run is a
+// plain `npm run publish`, and a story written in the portal stays `portal`.
+// Only an explicit --origin overrides what is already live.
+let liveManifest = null;
+if (args.local) {
+  // A --local publish has no origin to fetch; the "live" manifest is the one
+  // already mirrored into the local directory, and reading it keeps origin
+  // preservation working identically off-cloud (which is also what makes it
+  // testable without deploying anything).
+  const localManifest = join(process.env.STORYLARK_LOCAL_R2, 'manifest.json');
+  if (existsSync(localManifest)) {
+    try {
+      liveManifest = JSON.parse(await readFile(localManifest, 'utf8'));
+    } catch {
+      // unreadable/corrupt — treat as absent, exactly like an unreachable origin
+    }
+  }
+} else if (brand.contentOrigin) {
   try {
     const res = await fetch(`${brand.contentOrigin.replace(/\/+$/, '')}/manifest.json`, { cache: 'no-store' });
-    if (res.ok) liveVersion = Number((await res.json()).libraryVersion) || 0;
+    if (res.ok) liveManifest = await res.json();
   } catch {
     // offline or no manifest yet — local state is the only source, as before
   }
 }
+// Whatever is already published wins, local or remote: a manifest version that
+// goes backwards is a manifest no reader ever re-fetches. Two publishes into the
+// same local directory from different --bucket state files would otherwise both
+// claim v1, and the second would reach nobody.
+const liveVersion = Number(liveManifest?.libraryVersion) || 0;
+
+/** origin recorded live for a book, or for one of its chapters. */
+const liveBooks = new Map((liveManifest?.books ?? []).map((b) => [b.id, b]));
+function liveOrigin(bookId, chapterId) {
+  const book = liveBooks.get(bookId);
+  if (!book) return undefined;
+  if (chapterId === undefined) return book.origin;
+  const ch = (book.chapters ?? []).find((c) => c.id === chapterId);
+  return ch?.origin ?? book.origin;
+}
+
 const newVersion = Math.max(state.libraryVersion ?? 0, liveVersion) + 1;
 const manifest = {
   schemaVersion: 1,
@@ -554,6 +623,14 @@ const manifest = {
     description: book.description,
     publishDate: book.publishDate,
     timeframe: book.timeframe, // flat libraries: in-world "YYYY-MM" for chronological sort
+    // Ownership (AB#7422 — plan §8). Explicit flag wins; otherwise whatever is
+    // already live is preserved; otherwise `cli`, which is what a publish from
+    // an operator's own markdown has always been.
+    origin: declaredOrigin ?? liveOrigin(book.id) ?? 'cli',
+    // Where a synced book's real source of truth is. Preserved from the live
+    // manifest on an ordinary republish so a `--pull`-then-publish round trip
+    // (which is how a synced library gets its narration) doesn't erase it.
+    syncSource: syncSource ?? liveBooks.get(book.id)?.syncSource,
     chapters: chapters.map((ch) => {
       const saved = state.chapters[`${book.id}/${ch.id}`];
       const hash = saved.hash;
@@ -605,10 +682,55 @@ const manifest = {
         voices,
         hasAudio,
         publishedAt: saved.publishedAt,
+        // Per chapter as well as per book: a chapter is the unit an edit is
+        // refused (or allowed) on, so it carries its own answer rather than
+        // making every reader of the manifest walk up to the book.
+        origin: declaredOrigin ?? liveOrigin(book.id, ch.id) ?? 'cli',
       };
     }),
   })),
 };
+
+// ---- 5b. Books this run does not own, carried through untouched ----
+//
+// The manifest is regenerated from what was parsed, so a book absent from the
+// source has always been dropped from the library. That is correct for content
+// this run OWNS — deleting a chapter folder should unpublish it — and wrong for
+// content that came from somewhere else (AB#7422).
+//
+// Without this, plan §8's "a deployment can carry a synced repo AND a few
+// portal-written stories side by side" is not true: a sync would silently
+// delete every story written in the portal, and a CLI publish would silently
+// delete the synced catalogue. Neither is recoverable from the manifest alone.
+//
+// The rule is narrow on purpose: **a publish only removes books it could have
+// produced.** A run publishing `sync` keeps live `portal` and `cli` books; a
+// run publishing `cli` (the default) keeps live `sync` and `portal` books.
+// Behaviour for a library that is entirely CLI-published — the only shape that
+// existed before this — is byte-for-byte unchanged.
+const runOrigin = declaredOrigin ?? 'cli';
+const publishedIds = new Set(books.map(({ book }) => book.id));
+const carried = (liveManifest?.books ?? []).filter(
+  (b) => !publishedIds.has(b.id) && (b.origin ?? 'cli') !== runOrigin
+);
+if (carried.length > 0) {
+  console.log(
+    `Carrying through ${carried.length} book(s) this run doesn't own: ` +
+      carried.map((b) => `${b.id} (${b.origin ?? 'cli'})`).join(', ')
+  );
+  manifest.books.push(...carried);
+}
+// `--book <id>` narrows the publish to one book but must not narrow the
+// LIBRARY to one book. Same-origin siblings are carried through too, because
+// the alternative is that publishing one chapter unpublishes everything else.
+if (args.book) {
+  const kept = new Set(manifest.books.map((b) => b.id));
+  const siblings = (liveManifest?.books ?? []).filter((b) => !kept.has(b.id));
+  if (siblings.length > 0) {
+    console.log(`--book ${args.book}: keeping ${siblings.length} other book(s) already in the library.`);
+    manifest.books.push(...siblings);
+  }
+}
 
 const manifestFile = join(workRoot, 'manifest.json');
 await writeFile(manifestFile, JSON.stringify(manifest, null, 2));

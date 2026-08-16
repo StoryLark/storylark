@@ -47,10 +47,13 @@ import type {
   BookEntry,
   ChapterContent,
   ChapterEntry,
+  ContentOrigin,
   LibraryManifest,
   RevisionEntry,
   RevisionIndex,
+  SyncSource,
 } from '../content-types';
+import { DEFAULT_ORIGIN } from '../content-types';
 import { getJson, getText, putJson, putText, type ContentStore } from './content-store';
 import { chapterMeta, contentHash, parseBlocks, readFrontmatter, stabilizeBlockIds } from './md';
 
@@ -132,6 +135,89 @@ export function announceVersionOf(manifest: LibraryManifest): number {
   return typeof v === 'number' ? v : manifest.libraryVersion;
 }
 
+/* ── Ownership: where content came from, and who therefore owns its edit button
+ * ───────────────────────────────────────────────────────────────────────────
+ * Plan §8's one rule. Everything below is deliberately small and in one place,
+ * because it is the difference between "a synced library is safe" and "a synced
+ * library silently diverges from the repo that owns it".
+ */
+
+const ORIGINS: ReadonlySet<string> = new Set<ContentOrigin>(['portal', 'cli', 'sync', 'personal']);
+
+/**
+ * The origin of a book or chapter entry, defaulting an absent (or nonsense)
+ * value to `cli`.
+ *
+ * The default is load-bearing and it is deliberately the WRITABLE one: every
+ * manifest written before this field existed came from the pipeline, and an
+ * older library must not become uneditable because it predates a field. An
+ * unrecognised value — a newer pipeline writing an origin this Worker has never
+ * heard of — also lands on `cli` rather than being treated as read-only, for
+ * the same reason: refusing to let an operator fix a typo is a worse failure
+ * than mislabelling where the text came from.
+ */
+export function originOf(entry: { origin?: unknown } | undefined | null): ContentOrigin {
+  const raw = entry?.origin;
+  return typeof raw === 'string' && ORIGINS.has(raw) ? (raw as ContentOrigin) : DEFAULT_ORIGIN;
+}
+
+/**
+ * Content that arrived from an external source of truth is read-only HERE.
+ *
+ * Exactly one origin is read-only, and it is stated as an explicit list rather
+ * than "anything that isn't portal" so that adding a future origin cannot
+ * accidentally lock a library.
+ */
+export function isManagedExternally(entry: { origin?: unknown } | undefined | null): boolean {
+  return originOf(entry) === 'sync';
+}
+
+/**
+ * A chapter's effective origin: its own if it states one, otherwise its book's.
+ *
+ * Chapters carry the field too (that is what a write is checked against), but a
+ * book synced as a whole is the normal case, and a chapter added to a manifest
+ * by an older writer would have no origin of its own. Inheriting from the book
+ * means a synced catalogue is protected as a unit without every entry having to
+ * repeat itself.
+ */
+export function effectiveOrigin(
+  book: { origin?: unknown } | undefined | null,
+  chapter: { origin?: unknown } | undefined | null
+): ContentOrigin {
+  if (chapter && chapter.origin !== undefined) return originOf(chapter);
+  return originOf(book);
+}
+
+/** The book's recorded external source, when it has one. */
+export function syncSourceOf(book: BookEntry | undefined | null): SyncSource | undefined {
+  const raw = (book as { syncSource?: unknown } | undefined)?.syncSource;
+  if (!raw || typeof raw !== 'object') return undefined;
+  const s = raw as SyncSource;
+  return s.kind === 'git' || s.kind === 'feed' ? s : undefined;
+}
+
+/**
+ * The refusal, in the words plan §8 asks for.
+ *
+ * Not a bare 403: an operator staring at a chapter they can see but cannot save
+ * needs to know WHY and WHERE the edit belongs instead, or they will assume the
+ * portal is broken and go looking for a permissions bug that isn't there.
+ */
+export function managedExternallyMessage(bookId: string, source: SyncSource | undefined, what: string): string {
+  const where =
+    source?.kind === 'git'
+      ? `the git repository ${source.url}${source.ref ? ` (branch ${source.ref})` : ''}`
+      : source?.kind === 'feed'
+        ? `the system that publishes ${source.url}`
+        : 'an external source system';
+  return (
+    `${what} is managed externally — edit it at source. "${bookId}" is synced into this deployment from ${where}, ` +
+    `so it is a copy, not the original: a change saved here would be overwritten the next time the sync runs. ` +
+    `Change it there, then re-sync. (See docs/content-sync.md.)`
+  );
+}
+
 export interface SaveResult {
   bookId: string;
   chapterId: string;
@@ -163,6 +249,15 @@ export interface SaveOptions {
   savedBy: string;
   /** Set when this save is the result of reverting to an earlier revision. */
   revertedFrom?: string;
+  /**
+   * Where this text came from (AB#7422). Omitted, an existing chapter KEEPS the
+   * origin it already had and a new one is `portal` — because a portal edit to
+   * a CLI-published chapter does not change where that chapter came from, it
+   * just means the deployment now holds the newer copy (which is exactly what
+   * `publish.mjs --pull` exists to reconcile). Callers never pass `sync` here:
+   * synced content is refused by the routes before it reaches this function.
+   */
+  origin?: ContentOrigin;
   store: ContentStore;
   env: Env;
 }
@@ -204,7 +299,10 @@ export async function saveChapter(opts: SaveOptions): Promise<SaveResult> {
   };
   let book = findBook(manifest, bookId);
   if (!book) {
-    book = { id: bookId, title: bookId, chapters: [] };
+    // A book that first appears through a portal save is portal-owned. A synced
+    // book never reaches here — the routes refuse before this point — so this
+    // can't quietly re-label somebody else's catalogue.
+    book = { id: bookId, title: bookId, chapters: [], origin: opts.origin ?? 'portal' };
     manifest.books = [...(manifest.books ?? []), book];
   }
   const existing = findChapter(book, chapterId);
@@ -276,6 +374,7 @@ export async function saveChapter(opts: SaveOptions): Promise<SaveResult> {
     audioDurationMs: existing?.audioDurationMs ?? 0,
     publishedAt: existing?.publishedAt ?? new Date().toISOString().slice(0, 10),
     audioStale,
+    origin: opts.origin ?? (existing ? originOf(existing) : 'portal'),
   };
   book.chapters = existing
     ? book.chapters.map((ch) => (ch.id === chapterId ? entry : ch))

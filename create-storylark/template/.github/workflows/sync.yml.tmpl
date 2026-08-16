@@ -1,0 +1,79 @@
+name: Sync content
+
+# Pull this site's library from an external source of truth on a schedule
+# (AB#7422). Delete this file if your stories live here rather than somewhere
+# else — with no SYNC_URL variable set it stops with an explanation and does
+# nothing.
+#
+# Why this runs in CI rather than inside the deployment: narration needs the TTS
+# model, and neither a Worker nor an App Service request can run it. A scheduled
+# sync inside the deployment could only ever produce silent, permanently
+# audio-stale content for a whole catalogue. A sync is therefore an ordinary
+# publish whose source arrived over the network — it runs the same unchanged
+# packages/pipeline/publish.mjs this repo's publish.yml does.
+#
+# Configure (Settings → Secrets and variables → Actions):
+#   Variables
+#     SYNC_KIND   git | feed          — the two supported connectors
+#     SYNC_URL    repository or feed URL
+#     SYNC_REF    git only: branch or tag              (optional)
+#     SYNC_PATH   git only: subdirectory holding books/ (optional)
+#   Secrets
+#     SYNC_TOKEN  read-only credential for a private repo or feed (optional)
+#     plus the same publish secrets publish.yml uses (AZURE_SPEECH_*,
+#     AZURE_STORAGE_CONNECTION_STRING or CLOUDFLARE_*, ADMIN_KEY)
+#
+# Content pulled this way is read-only in the admin portal — whoever owns the
+# content owns the edit button. See docs/content-sync.md in the StoryLark repo.
+
+on:
+  schedule:
+    # Nightly, 04:17 UTC. Off the hour on purpose: every cron in the world fires
+    # at :00 and this one has no reason to queue behind them.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      no-audio:
+        description: 'Text only — skip narration (much faster; audio catches up next run)'
+        type: boolean
+        default: false
+
+concurrency: publish-content
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+
+      - name: Check a source is configured
+        run: |
+          if [ -z "${{ vars.SYNC_URL }}" ]; then
+            echo "::error::No SYNC_URL repository variable is set, so there is nothing to sync from."
+            echo "Set SYNC_KIND (git|feed) and SYNC_URL, or delete .github/workflows/sync.yml."
+            exit 1
+          fi
+
+      - name: Sync and publish
+        env:
+          STORYLARK_SYNC_KIND: ${{ vars.SYNC_KIND }}
+          STORYLARK_SYNC_URL: ${{ vars.SYNC_URL }}
+          STORYLARK_SYNC_REF: ${{ vars.SYNC_REF }}
+          STORYLARK_SYNC_PATH: ${{ vars.SYNC_PATH }}
+          STORYLARK_SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          AZURE_SPEECH_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+        run: |
+          STORAGE_FLAG=""
+          if [ "${{ vars.STORYLARK_PLATFORM }}" = "azure" ]; then STORAGE_FLAG="--storage azure-blob"; fi
+          AUDIO_FLAG="--no-audio"
+          if [ -n "$AZURE_SPEECH_KEY" ] && [ "${{ inputs.no-audio }}" != "true" ]; then AUDIO_FLAG=""; fi
+          node node_modules/storylark-pipeline/sync.mjs --brand __BRAND_ID__ -- $STORAGE_FLAG $AUDIO_FLAG

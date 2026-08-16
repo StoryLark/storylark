@@ -51,6 +51,32 @@ The two required flags:
 | `--manifest-only` | Regenerate and re-upload just the manifest (after a manifest-schema change), without re-publishing chapters. Requires all chapters to have been published before. |
 | `--pull` | **Before** parsing, fetch each chapter's source markdown back from the live deployment and write it into your source repo. This is how an edit made in the admin portal reaches your machine instead of being overwritten by this publish. One-way (deployment → local) and only when asked. See "Editing on the deployment" below. |
 | `--no-source` | Don't upload the source markdown — derived artifacts only, the pre-0.12 behaviour. The deployment then can't be edited from its own admin portal. |
+| `--origin portal\|cli\|sync` | What to record as this content's `origin` in the manifest. Defaults to whatever the live manifest already says, falling back to `cli` — so an ordinary republish never relabels where content came from. Set to `sync` by `sync.mjs`; you should not normally pass it by hand, because `sync` makes content read-only in the admin portal. See [`content-sync.md`](content-sync.md). |
+| `--sync-kind`, `--sync-url`, `--sync-ref`, `--sync-path` | Recorded alongside `--origin sync`: which connector produced this book and where its real source of truth lives, so the portal can say "edit at source" with a link. Never a credential — the manifest is public. |
+
+### A publish only removes books it could have produced
+
+The manifest is regenerated from what was parsed, so a book you delete from your
+source is unpublished — that is the intended behaviour for content this pipeline
+owns. It is **not** applied to content it doesn't own: a run publishing `sync`
+carries live `portal` and `cli` books through untouched, and a run publishing
+`cli` (the default) carries live `sync` and `portal` books through. Otherwise a
+sync would silently delete every story written in the portal, and the next CLI
+publish would silently delete the synced catalogue.
+
+`--book <id>` narrows the *publish*, not the *library*: books not named are kept
+as they already are rather than dropped.
+
+For a library that is entirely CLI-published — the only shape that existed before
+0.13 — none of this changes anything.
+
+### Syncing from an external source
+
+`packages/pipeline/sync.mjs` pulls a library from a git repository of markdown or
+from a publisher's own JSON feed, stages it in the blessed layout, and then runs
+**this** pipeline over it with `--origin sync`. There is no second publish path:
+change detection, narration, upload and manifest ordering are all the same code.
+See [`content-sync.md`](content-sync.md).
 
 ### Environment
 

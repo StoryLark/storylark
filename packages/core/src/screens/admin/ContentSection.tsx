@@ -35,7 +35,7 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { call, ApiError } from '../../lib/api';
-import type { Block } from '../../lib/types';
+import type { Block, ContentOrigin, SyncSource } from '../../lib/types';
 import { BlockRenderer } from '../../reader/BlockRenderer';
 import { PRESENTATION } from '../../presentation';
 
@@ -62,6 +62,12 @@ interface ChapterSummary {
   hasSource: boolean;
   contentHash: string;
   publishedAt?: string;
+  /** Where this chapter came from (AB#7422). Older deployments omit it. */
+  origin?: ContentOrigin;
+  /** True for `sync`: managed externally, so this portal shows it and does not
+   *  offer to edit it. The server enforces the same rule; this is what stops an
+   *  operator finding out only after typing a paragraph. */
+  readOnly?: boolean;
 }
 
 interface BookSummary {
@@ -72,6 +78,9 @@ interface BookSummary {
   cover?: string;
   chapterCount: number;
   chapters: ChapterSummary[];
+  origin?: ContentOrigin;
+  readOnly?: boolean;
+  syncSource?: SyncSource;
 }
 
 interface LibraryResponse {
@@ -105,6 +114,9 @@ interface ChapterDetail {
   wordCount: number;
   readingTime?: string;
   contentHash: string;
+  origin?: ContentOrigin;
+  readOnly?: boolean;
+  syncSource?: SyncSource;
   revisions: Revision[];
   revisionLimit: number;
 }
@@ -133,6 +145,48 @@ interface SaveResponse {
 }
 
 type View = { name: 'library' } | { name: 'book'; bookId: string } | { name: 'chapter'; bookId: string; chapterId: string; isNew?: boolean };
+
+/**
+ * "Managed externally — edit at source" (AB#7422 — plan §8).
+ *
+ * Shown wherever synced content is, INSTEAD of the editing controls rather than
+ * beside them. The API refuses these writes anyway, but a portal that lets an
+ * operator write a paragraph and only then says no has already wasted their
+ * work and taught them not to trust it. The notice names the actual source and
+ * links to it, because "edit at source" is not advice unless it says which one.
+ */
+function ManagedExternally({ source, what }: { source?: SyncSource; what: string }): JSX.Element {
+  const href = source && /^https?:\/\//i.test(source.url) ? source.url : undefined;
+  return (
+    <p class="settings-note admin-notice">
+      <strong>Managed externally.</strong> {what} is synced into this deployment from{' '}
+      {source?.kind === 'git' ? 'a git repository' : source?.kind === 'feed' ? "the publisher's own system" : 'an external source'}
+      {source ? (
+        <>
+          {' — '}
+          {href ? (
+            <a href={href} rel="noreferrer noopener" target="_blank">
+              {source.url}
+            </a>
+          ) : (
+            <code>{source.url}</code>
+          )}
+          {source.ref ? ` (branch ${source.ref})` : ''}
+        </>
+      ) : (
+        ''
+      )}
+      . What you see here is a copy, so it can't be edited from the portal — a change saved here would be overwritten by the next
+      sync. Edit it at the source and re-sync.
+      {source?.syncedAt ? ` Last synced ${new Date(source.syncedAt).toLocaleString()}.` : ''}
+    </p>
+  );
+}
+
+/** The one-word label a row carries when its content isn't ours to edit. */
+function OriginBadge({ readOnly }: { readOnly?: boolean }): JSX.Element | null {
+  return readOnly ? <span class="admin-badge">synced</span> : null;
+}
 
 export function ContentSection(): JSX.Element {
   const flat = PRESENTATION.layout === 'flat';
@@ -252,6 +306,12 @@ function LibraryView({
         {library.announceVersion !== library.libraryVersion ? ` (announced ${library.announceVersion})` : ''} ·{' '}
         {library.revisionLimit} revisions kept per chapter
       </p>
+      {library.books.some((b) => b.readOnly) && (
+        <p class="settings-note">
+          Some of this library is synced from an external source of truth and is read-only here — those rows are marked{' '}
+          <span class="admin-badge">synced</span>. Everything else is edited normally. See <code>docs/content-sync.md</code>.
+        </p>
+      )}
 
       <ul class="admin-content-list">
         {library.books.map((b) => {
@@ -267,6 +327,7 @@ function LibraryView({
                     {b.cover ? ' · cover' : ''}
                   </span>
                 </span>
+                <OriginBadge readOnly={b.readOnly} />
                 {stale && <span class="admin-badge admin-badge-warn">audio out of date</span>}
               </button>
             </li>
@@ -340,7 +401,11 @@ function BookView({
         ← All books
       </button>
       <h2>{book.title ?? book.id}</h2>
-      <BookDetails book={book} contentOrigin={contentOrigin} onChanged={onChanged} />
+      {book.readOnly ? (
+        <ManagedExternally source={book.syncSource} what={`"${book.title ?? book.id}"`} />
+      ) : (
+        <BookDetails book={book} contentOrigin={contentOrigin} onChanged={onChanged} />
+      )}
 
       <h3 class="admin-subhead">Chapters</h3>
       <ul class="admin-content-list">
@@ -355,31 +420,38 @@ function BookView({
                   {ch.hasSource ? '' : ' · no source'}
                 </span>
               </span>
+              <OriginBadge readOnly={ch.readOnly} />
               {ch.audioStale && <span class="admin-badge admin-badge-warn">audio out of date</span>}
             </button>
-            <button class="btn-ghost admin-row-action" onClick={() => void remove(ch.id)}>
-              Delete
-            </button>
+            {/* Deleting a synced chapter would only make it reappear on the next
+                sync, so the control isn't offered rather than offered and refused. */}
+            {!ch.readOnly && (
+              <button class="btn-ghost admin-row-action" onClick={() => void remove(ch.id)}>
+                Delete
+              </button>
+            )}
           </li>
         ))}
       </ul>
 
-      <form
-        class="signin-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const id = slug(newId);
-          if (id) onOpenChapter(id, true);
-        }}
-      >
-        <label class="settings-row">
-          <span>New chapter id</span>
-          <input placeholder="the-long-dark" value={newId} onInput={(e) => setNewId((e.target as HTMLInputElement).value)} />
-        </label>
-        <button class="btn" type="submit" disabled={!slug(newId)}>
-          Add chapter
-        </button>
-      </form>
+      {!book.readOnly && (
+        <form
+          class="signin-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const id = slug(newId);
+            if (id) onOpenChapter(id, true);
+          }}
+        >
+          <label class="settings-row">
+            <span>New chapter id</span>
+            <input placeholder="the-long-dark" value={newId} onInput={(e) => setNewId((e.target as HTMLInputElement).value)} />
+          </label>
+          <button class="btn" type="submit" disabled={!slug(newId)}>
+            Add chapter
+          </button>
+        </form>
+      )}
       {message && <p class="settings-note">{message}</p>}
     </section>
   );
@@ -661,6 +733,11 @@ function ChapterEditor({
   }
 
   const problem = preview?.problem ?? null;
+  /** Synced content opens as a reader, not an editor (AB#7422). Everything that
+   *  writes is withheld; everything that reads — the text, the preview, the
+   *  download, the history — stays, because seeing your whole library in one
+   *  place is the point and only the edit button is somebody else's. */
+  const readOnly = detail?.readOnly === true;
 
   return (
     <section class="settings-section">
@@ -669,7 +746,8 @@ function ChapterEditor({
       </button>
       <h2>
         {detail?.title ?? chapterId}
-        {dirty && <span class="admin-badge">unsaved</span>}
+        {readOnly && <span class="admin-badge">synced</span>}
+        {dirty && !readOnly && <span class="admin-badge">unsaved</span>}
       </h2>
       <p class="settings-note">
         <code>
@@ -679,6 +757,7 @@ function ChapterEditor({
         {detail?.hasAudio ? ' · narrated' : ''}
       </p>
 
+      {readOnly && <ManagedExternally source={detail?.syncSource} what="This chapter" />}
       {detail?.audioStale && (
         <p class="settings-note admin-notice">
           <strong>Audio out of date.</strong> The words changed and the narration didn't. Text is live for readers now; run the
@@ -700,12 +779,16 @@ function ChapterEditor({
         <button class="btn-ghost" onClick={download}>
           Download .md
         </button>
-        <button class="btn-ghost" onClick={() => mdInput.current?.click()}>
-          Upload .md
-        </button>
-        <button class="btn-ghost" onClick={() => fileInput.current?.click()} disabled={busy}>
-          Insert image
-        </button>
+        {!readOnly && (
+          <>
+            <button class="btn-ghost" onClick={() => mdInput.current?.click()}>
+              Upload .md
+            </button>
+            <button class="btn-ghost" onClick={() => fileInput.current?.click()} disabled={busy}>
+              Insert image
+            </button>
+          </>
+        )}
       </div>
       <input
         ref={mdInput}
@@ -739,6 +822,7 @@ function ChapterEditor({
           class="admin-markdown-input admin-editor-pane"
           rows={24}
           spellcheck
+          readOnly={readOnly}
           value={markdown}
           onInput={(e) => {
             setMarkdown((e.target as HTMLTextAreaElement).value);
@@ -756,8 +840,15 @@ function ChapterEditor({
         )}
       </div>
 
-      {problem && <p class="settings-note admin-error">{problem}</p>}
+      {problem && !readOnly && <p class="settings-note admin-error">{problem}</p>}
 
+      {readOnly ? (
+        <p class="settings-note">
+          Read-only. To change these words, change them where they live and run the sync again — the next sync republishes this
+          chapter, narration and all.
+        </p>
+      ) : (
+        <>
       <label class="settings-row admin-correction">
         <span>
           This is a correction
@@ -772,6 +863,8 @@ function ChapterEditor({
       <button class="btn" onClick={() => void save()} disabled={busy || !markdown || problem !== null}>
         {busy ? 'Saving…' : correction ? 'Save correction' : 'Publish'}
       </button>
+        </>
+      )}
       {message && <p class="settings-note">{message}</p>}
       {error && <p class="settings-note admin-error">{error}</p>}
 
@@ -779,6 +872,7 @@ function ChapterEditor({
         revisions={revisions}
         limit={detail?.revisionLimit ?? 5}
         busy={busy}
+        readOnly={readOnly}
         onRevert={(id) => void revert(id)}
         onLoad={async (id) => {
           const res = await adminFetch<{ markdown: string }>(`/content/books/${bookId}/chapters/${chapterId}/revisions/${id}`);
@@ -795,12 +889,17 @@ function RevisionList({
   revisions,
   limit,
   busy,
+  readOnly,
   onRevert,
   onLoad,
 }: {
   revisions: Revision[];
   limit: number;
   busy: boolean;
+  /** Synced content: the history is still worth seeing (a sync that pulled the
+   *  wrong thing is exactly when you want it), but reverting to an older copy
+   *  would diverge from the source, so only "Open" is offered. */
+  readOnly: boolean;
   onRevert: (id: string) => void;
   onLoad: (id: string) => Promise<void>;
 }): JSX.Element {
@@ -833,9 +932,11 @@ function RevisionList({
                     <button class="btn-ghost admin-row-action" disabled={busy} onClick={() => void onLoad(r.id)}>
                       Open
                     </button>
-                    <button class="btn-ghost admin-row-action" disabled={busy} onClick={() => onRevert(r.id)}>
-                      Revert
-                    </button>
+                    {!readOnly && (
+                      <button class="btn-ghost admin-row-action" disabled={busy} onClick={() => onRevert(r.id)}>
+                        Revert
+                      </button>
+                    )}
                   </>
                 )}
               </li>

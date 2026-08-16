@@ -58,3 +58,15 @@ books/<bookId>/
 Hashed filenames = immutable caching; a republished chapter gets a new hash and the
 manifest points at it atomically (manifest uploads last). Block IDs are stabilized
 across republishes by text-hash matching so bookmarks and positions survive edits.
+
+Each book and chapter in `manifest.json` also records **where it came from**:
+
+| Field | On | Meaning |
+|---|---|---|
+| `origin` | book + chapter | `portal` \| `cli` \| `sync` \| `personal`. **Absent reads as `cli`** — every manifest written before this field existed came from the pipeline, so an old library stays fully editable. |
+| `syncSource` | book | `{kind: "git"\|"feed", url, ref?, path?, syncedAt?}` when `origin` is `sync`. Never carries a credential; the manifest is public. |
+
+`origin: "sync"` is the only value that makes content read-only in the admin
+portal — whoever owns the content owns the edit button. `personal` is the seam
+for a reader's own device-local imports, which never reach a deployment. See
+[`content-sync.md`](content-sync.md).

@@ -43,6 +43,28 @@ A live value that is not a valid origin (no scheme, or a path attached) is
 **ignored with a warning in the platform log**, and the build-time value is used
 instead — a typo in an app setting must not take the whole library offline.
 
+## `sync` — when the content lives somewhere else
+
+A deployment whose library is **pulled from an external source of truth** rather
+than authored here carries a `sync` block (AB#7422):
+
+```json
+"sync": { "kind": "git", "url": "https://github.com/mypress/website.git", "ref": "main", "path": "site" }
+```
+
+`kind` is `git` (a repository of markdown) or `feed` (your own system's JSON
+feed) — those two and no others. Read by `packages/pipeline/sync.mjs`, which
+runs where publishing runs, not inside the deployment. Environment overrides:
+`STORYLARK_SYNC_KIND` / `_URL` / `_REF` / `_PATH`.
+
+Content that arrives this way is recorded `origin: "sync"` and is **read-only in
+the admin portal** — whoever owns the content owns the edit button. Full details
+in [`docs/content-sync.md`](../docs/content-sync.md).
+
+The read-only credential for a private source is `STORYLARK_SYNC_TOKEN` in the
+environment, never a key in this file — see below, and note that `sync.mjs`
+treats a token found here as a hard error rather than a warning.
+
 ## No secrets here
 
 Everything in this folder is public by definition — it reaches the browser, in

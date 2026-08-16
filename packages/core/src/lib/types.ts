@@ -214,6 +214,33 @@ export interface VoiceTrack {
   timings: string; // R2 path
 }
 
+/**
+ * Where a piece of content came from (AB#7422 / AB#7426 — plan §8). Mirrors
+ * `ContentOrigin` in packages/worker/src/content-types.ts, spelled out again
+ * for the same reason every other manifest type here is: the frontend must not
+ * depend on the worker package.
+ *
+ *   portal   — written in the admin portal.
+ *   cli      — published by the pipeline from an operator's markdown.
+ *   sync     — pulled from an external source of truth; read-only in the portal.
+ *   personal — a reader's own device-local import (plan §5, not built — this is
+ *              the discriminator seam it will arrive through, AB#7426).
+ *
+ * Absent means `cli`: every manifest written before this field existed came
+ * from the pipeline.
+ */
+export type ContentOrigin = 'portal' | 'cli' | 'sync' | 'personal';
+
+/** The external source a synced book is a copy of (AB#7422). Never carries a
+ *  credential — the manifest is public. */
+export interface SyncSource {
+  kind: 'git' | 'feed';
+  url: string;
+  ref?: string;
+  path?: string;
+  syncedAt?: string;
+}
+
 export interface BookEntry {
   id: string;
   title: string;
@@ -228,6 +255,10 @@ export interface BookEntry {
   publishDate?: string; // ISO date the book/story was first published
   timeframe?: string; // flat libraries: in-world time "YYYY-MM" for chronological sort (absent in older manifests)
   chapters: ChapterEntry[];
+  /** Where this book came from (AB#7422). Absent = `cli`. */
+  origin?: ContentOrigin;
+  /** Present when `origin` is `sync`: the external source of truth it copies. */
+  syncSource?: SyncSource;
 }
 
 export interface ChapterEntry {
@@ -259,6 +290,9 @@ export interface ChapterEntry {
    * why the voice and the page disagree.
    */
   audioStale?: boolean;
+  /** Where this chapter came from (AB#7422). Absent = `cli`; `sync` means it is
+   *  managed externally and read-only in the portal. */
+  origin?: ContentOrigin;
 }
 
 export type Block =

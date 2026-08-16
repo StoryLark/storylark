@@ -35,21 +35,25 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { AppContext } from '../types';
-import type { BookEntry, ChapterEntry } from '../content-types';
+import type { BookEntry, ChapterEntry, LibraryManifest } from '../content-types';
 import { requireAdmin } from '../lib/session';
 import { getText, IMMUTABLE, type ContentStore } from '../lib/content-store';
 import {
   ID_RE,
   announceVersionOf,
+  effectiveOrigin,
   findBook,
   findChapter,
   key,
   listRevisions,
+  managedExternallyMessage,
+  originOf,
   readManifest,
   readRevision,
   revisionLimit,
   saveChapter,
   storeOf,
+  syncSourceOf,
   validateSource,
   writeManifest,
 } from '../lib/content';
@@ -99,6 +103,52 @@ function resolve(c: Context<AppContext>, needChapter: boolean): { store: Content
   return { store, bookId, chapterId };
 }
 
+/**
+ * The ownership gate (AB#7422 — plan §8: "whoever owns the content owns the
+ * edit button").
+ *
+ * Every WRITE route calls this before it changes anything. Reads are untouched
+ * on purpose: synced content must still be visible, listable, openable and
+ * downloadable here — an operator needs to see their whole library in one place
+ * — it just isn't writable, because this deployment holds a copy and the next
+ * sync would overwrite whatever was typed.
+ *
+ * Returns the manifest + book + (optional) chapter when the write may proceed,
+ * or the refusal Response. 409 rather than 403: nothing is wrong with the
+ * caller's credentials, the request conflicts with where this content lives.
+ * The message names the actual source, because "edit at source" is useless
+ * advice without saying which source.
+ *
+ * Only `origin: 'sync'` is refused. `portal` and `cli` content — and anything
+ * predating the field, which defaults to `cli` — behaves exactly as it did
+ * before this existed.
+ */
+async function requireWritable(
+  c: Context<AppContext>,
+  store: ContentStore,
+  bookId: string,
+  chapterId?: string
+): Promise<{ manifest: LibraryManifest | null; book: BookEntry | undefined; chapter: ChapterEntry | undefined } | Response> {
+  const manifest = await readManifest(store);
+  const book = manifest ? findBook(manifest, bookId) : undefined;
+  const chapter = chapterId ? findChapter(book, chapterId) : undefined;
+
+  // The chapter's own origin wins where it has one; otherwise the book's. A
+  // chapter is the thing being edited, and a book can legitimately hold both
+  // (a synced catalogue that an operator later added a portal-written story to
+  // would be a mistake, but it must be described honestly rather than guessed).
+  const origin = effectiveOrigin(book, chapter);
+  if ((book || chapter) && origin === 'sync') {
+    const source = syncSourceOf(book);
+    const what = chapterId ? `"${bookId}/${chapterId}"` : `"${bookId}"`;
+    return c.json(
+      { error: 'managed_externally', message: managedExternallyMessage(bookId, source, what), origin, syncSource: source },
+      409
+    );
+  }
+  return { manifest, book, chapter };
+}
+
 /** Whoever is signed in, in the form worth showing next to a revision. */
 function actor(c: Context<AppContext>): string {
   const user = c.get('user');
@@ -140,6 +190,13 @@ adminContent.get('/content/books', async (c) => {
       description: b.description,
       cover: b.cover,
       chapterCount: b.chapters?.length ?? 0,
+      // Ownership, on the listing itself (AB#7422). The portal has to know
+      // before it draws a row whether that row gets an edit button — an
+      // operator discovering a refusal only after typing a paragraph is
+      // exactly the experience plan §8 is trying to prevent.
+      origin: originOf(b),
+      readOnly: originOf(b) === 'sync',
+      syncSource: syncSourceOf(b),
       chapters: (b.chapters ?? []).map((ch) => ({
         id: ch.id,
         title: ch.title,
@@ -151,6 +208,8 @@ adminContent.get('/content/books', async (c) => {
         hasSource: typeof ch.source === 'string' && ch.source.length > 0,
         contentHash: ch.contentHash,
         publishedAt: ch.publishedAt,
+        origin: effectiveOrigin(b, ch),
+        readOnly: effectiveOrigin(b, ch) === 'sync',
       })),
     })),
   });
@@ -191,6 +250,13 @@ adminContent.get('/content/books/:bookId/chapters/:chapterId', async (c) => {
     wordCount: entry.wordCount,
     readingTime: entry.readingTime,
     contentHash: entry.contentHash,
+    // Ownership (AB#7422). The editor reads this to decide whether it is an
+    // editor at all — a synced chapter opens read-only, with a link to where
+    // the edit actually belongs, rather than offering a save button that would
+    // be refused.
+    origin: effectiveOrigin(book, entry),
+    readOnly: effectiveOrigin(book, entry) === 'sync',
+    syncSource: syncSourceOf(book),
     revisions,
     revisionLimit: revisionLimit(c.env),
   });
@@ -247,8 +313,9 @@ adminContent.put('/content/books/:bookId/chapters/:chapterId', async (c) => {
   const problem = validateSource(body.markdown);
   if (problem) return c.json({ error: 'invalid_markdown', message: problem }, 400);
 
-  const manifest = await readManifest(store);
-  const isNew = !findChapter(manifest ? findBook(manifest, bookId) : undefined, chapterId);
+  const gate = await requireWritable(c, store, bookId, chapterId);
+  if (gate instanceof Response) return gate;
+  const isNew = !gate.chapter;
   const correction = typeof body.correction === 'boolean' ? body.correction : !isNew;
 
   const result = await saveChapter({
@@ -324,6 +391,11 @@ adminContent.post('/content/books/:bookId/chapters/:chapterId/revisions/:revisio
   const revisionId = c.req.param('revisionId');
   if (!/^[0-9]+(-[0-9]+)?$/.test(revisionId)) return c.json({ error: 'invalid_revision_id' }, 400);
 
+  // A revert is a write, so it is gated like one: putting old text back into a
+  // synced chapter would diverge from the source exactly as typing would.
+  const gate = await requireWritable(c, store, bookId, chapterId);
+  if (gate instanceof Response) return gate;
+
   const markdown = await readRevision(store, bookId, chapterId, revisionId);
   if (markdown === null) return c.json({ error: 'not_found', message: 'That revision has aged out or never existed.' }, 404);
 
@@ -357,8 +429,9 @@ adminContent.put('/content/books/:bookId', async (c) => {
   const body = await c.req.json<{ title?: string; author?: string; description?: string }>().catch(() => null);
   if (!body) return c.json({ error: 'bad_request' }, 400);
 
-  const manifest = await readManifest(store);
-  const book = manifest ? findBook(manifest, bookId) : undefined;
+  const gate = await requireWritable(c, store, bookId);
+  if (gate instanceof Response) return gate;
+  const { manifest, book } = gate;
   if (!manifest || !book) return c.json({ error: 'not_found' }, 404);
 
   if (typeof body.title === 'string') book.title = body.title;
@@ -385,9 +458,10 @@ adminContent.delete('/content/books/:bookId/chapters/:chapterId', async (c) => {
   const r = resolve(c, true);
   if (r instanceof Response) return r;
   const { store, bookId, chapterId } = r;
-  const manifest = await readManifest(store);
-  const book = manifest ? findBook(manifest, bookId) : undefined;
-  if (!manifest || !book || !findChapter(book, chapterId)) return c.json({ error: 'not_found' }, 404);
+  const gate = await requireWritable(c, store, bookId, chapterId);
+  if (gate instanceof Response) return gate;
+  const { manifest, book, chapter } = gate;
+  if (!manifest || !book || !chapter) return c.json({ error: 'not_found' }, 404);
 
   book.chapters = book.chapters.filter((ch) => ch.id !== chapterId);
   manifest.libraryVersion = (manifest.libraryVersion ?? 0) + 1;
@@ -441,6 +515,12 @@ adminContent.post('/upload', async (c) => {
   if (!ID_RE.test(bookId)) return c.json({ error: 'invalid_book_id', message: 'A valid bookId is required.' }, 400);
   const kind = String(form.get('kind') ?? 'inline');
   if (kind !== 'inline' && kind !== 'cover') return c.json({ error: 'bad_request', message: 'kind must be "inline" or "cover".' }, 400);
+
+  // Uploading art into a synced book is a write like any other: a cover set
+  // here is replaced by the source's cover on the next sync, and an inline
+  // image is orphaned the moment the markdown that referenced it is re-pulled.
+  const gate = await requireWritable(c, store, bookId);
+  if (gate instanceof Response) return gate;
 
   const ext = IMAGE_TYPES[fileType];
   if (!ext) {

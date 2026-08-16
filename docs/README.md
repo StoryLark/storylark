@@ -39,6 +39,10 @@ the same codebase.
 - **[Publishing Stories](publishing-stories.md)** — the operator's guide: CLI
   publish (full pipeline, including narration) vs. the admin portal (browser
   upload, text-only).
+- **[Content Sync](content-sync.md)** — for publishers whose content already
+  lives somewhere else: pull from a git repository of markdown or from your own
+  system's JSON feed, the `origin` field, and the one rule that keeps a
+  deployment and a real catalogue from diverging.
 - **[Content Pipeline](content-pipeline.md)** — the technical reference:
   source → `packages/pipeline/publish.mjs` → chapter JSON + neural TTS MP3 + word timings →
   storage → manifest. The parser contract, flags, incremental hashing, and local mode.

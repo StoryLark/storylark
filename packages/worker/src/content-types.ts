@@ -13,6 +13,63 @@
  * edit made by a newer pipeline is never silently dropped by an older Worker.
  */
 
+/**
+ * Where a piece of content came from (AB#7422 / AB#7426 — plan §8).
+ *
+ * The rule the whole large-provider story rests on: **whoever owns the content
+ * owns the edit button.** A deployment can hold all of these side by side —
+ * that is the point of recording it per book/chapter rather than as one global
+ * "mode" — and each behaves correctly on its own terms:
+ *
+ *   portal   — written here, in the admin portal. Fully editable.
+ *   cli      — published by packages/pipeline/publish.mjs from an operator's
+ *              own markdown. Editable here too; the next publish reconciles
+ *              (that is what `publish.mjs --pull` is for).
+ *   sync     — pulled from an EXTERNAL source of truth (a git repo of markdown,
+ *              or the publisher's own feed). READ-ONLY in the portal: an edit
+ *              made here would be silently overwritten by the next sync, so the
+ *              portal refuses it and says where the edit belongs instead.
+ *   personal — a reader's own import (PDF/EPUB), device-local and never
+ *              uploaded to a deployment. Plan §5, deliberately NOT built: this
+ *              value exists so that feature has a seam to arrive through rather
+ *              than needing a schema change to start.
+ *
+ * Absent means `cli`. Every manifest written before this field existed was
+ * written by publish.mjs — the portal's own save path (AB#7420) is newer than
+ * the pipeline by a wide margin and there was no other writer — so that default
+ * is a statement of fact, not a guess. It matters that the default is a
+ * WRITABLE origin: an older library must not become read-only because a field
+ * it predates is missing.
+ */
+export type ContentOrigin = 'portal' | 'cli' | 'sync' | 'personal';
+
+/** The origin an entry with no `origin` field is treated as. See ContentOrigin. */
+export const DEFAULT_ORIGIN: ContentOrigin = 'cli';
+
+/**
+ * Where a synced book actually lives, recorded on the book itself so the portal
+ * can say "edit it HERE" with a link rather than "edit it somewhere else".
+ *
+ * On the book rather than in deployment config on purpose: it travels with the
+ * content, so a deployment fed by two different repos describes each of them
+ * correctly, and the portal needs no extra configuration surface to read.
+ *
+ * No credential is ever recorded here. A private repo's token belongs to the
+ * process running the sync (STORYLARK_SYNC_TOKEN), and the manifest is public.
+ */
+export interface SyncSource {
+  /** Which of the two supported connectors produced this. No third kind exists. */
+  kind: 'git' | 'feed';
+  /** Repo or feed URL, as configured — with any embedded credential stripped. */
+  url: string;
+  /** Git only: the branch or tag synced. */
+  ref?: string;
+  /** Git only: the subdirectory of the repo that holds `books/`. */
+  path?: string;
+  /** When this book was last pulled from that source. */
+  syncedAt?: string;
+}
+
 export interface StyleSpan {
   start: number;
   end: number;
@@ -67,6 +124,11 @@ export interface ChapterEntry {
    * simply doesn't mention audio staleness, it doesn't misreport it.
    */
   audioStale?: boolean;
+  /**
+   * Where this chapter came from (AB#7422). Absent = `cli`, see ContentOrigin.
+   * `sync` is the only value that makes a chapter read-only in the portal.
+   */
+  origin?: ContentOrigin;
   [key: string]: unknown;
 }
 
@@ -77,6 +139,11 @@ export interface BookEntry {
   cover?: string;
   description?: string;
   chapters: ChapterEntry[];
+  /** Where this book came from (AB#7422). Absent = `cli`, see ContentOrigin. */
+  origin?: ContentOrigin;
+  /** Set when `origin` is `sync`: the external source of truth this book is a
+   *  copy of, and therefore where its edit button actually lives. */
+  syncSource?: SyncSource;
   [key: string]: unknown;
 }
 

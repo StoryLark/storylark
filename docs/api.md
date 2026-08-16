@@ -85,8 +85,8 @@ explanation. Design: [`design/admin-content-editing.md`](design/admin-content-ed
 
 | Method & path | Behavior |
 |---|---|
-| `GET /api/admin/content/books` | The whole library, from `manifest.json` alone — no per-chapter storage reads. `{storeAvailable, contentOrigin, libraryVersion, announceVersion, revisionLimit, books:[{id,title,author,description,cover,chapterCount,chapters:[{id,title,label,wordCount,readingTime,hasAudio,audioStale,hasSource,contentHash,publishedAt}]}]}`. |
-| `GET /api/admin/content/books/:bookId/chapters/:chapterId` | `{bookId,chapterId,title,label,markdown,reconstructed,hasAudio,audioStale,wordCount,readingTime,contentHash,revisions[],revisionLimit}`. `reconstructed: true` means the chapter predates source upload and the markdown was rebuilt (lossily) from its published blocks. |
+| `GET /api/admin/content/books` | The whole library, from `manifest.json` alone — no per-chapter storage reads. `{storeAvailable, contentOrigin, libraryVersion, announceVersion, revisionLimit, books:[{id,title,author,description,cover,chapterCount,origin,readOnly,syncSource?,chapters:[{id,title,label,wordCount,readingTime,hasAudio,audioStale,hasSource,contentHash,publishedAt,origin,readOnly}]}]}`. |
+| `GET /api/admin/content/books/:bookId/chapters/:chapterId` | `{bookId,chapterId,title,label,markdown,reconstructed,hasAudio,audioStale,wordCount,readingTime,contentHash,origin,readOnly,syncSource?,revisions[],revisionLimit}`. `reconstructed: true` means the chapter predates source upload and the markdown was rebuilt (lossily) from its published blocks. |
 | `PUT /api/admin/content/books/:bookId/chapters/:chapterId` | `{markdown, correction?}` → writes the source, re-parses, writes a new content-hashed chapter JSON, appends a revision, rewrites the manifest, records the publish. `correction` defaults to `true` for an existing chapter and `false` for a new one. Returns `{ok,created,contentHash,wordCount,readingTime,blocks,audioStale,libraryVersion,announceVersion,correction,revision,revisionCount,notified:{version,announced,subscriptions}}`. `400 invalid_markdown` with prose when validation fails — before anything is written. |
 | `DELETE /api/admin/content/books/:bookId/chapters/:chapterId` | Removes the manifest entry. The content-hashed objects, the source and the history stay, so this is recoverable. |
 | `PUT /api/admin/content/books/:bookId` | `{title?, author?, description?}` → book-level metadata. Never announces. |
@@ -96,6 +96,27 @@ explanation. Design: [`design/admin-content-editing.md`](design/admin-content-ed
 | `GET /api/admin/content/books/:bookId/chapters/:chapterId/revisions/:revisionId` | `{revisionId, markdown}`. `404` once a revision has aged out. |
 | `POST /api/admin/content/books/:bookId/chapters/:chapterId/revisions/:revisionId/revert` | `{correction?}` (default `true`) → puts that revision's text back **through the ordinary save path**, so it re-parses, re-publishes and appends a NEW revision. History is never rewound. |
 | `POST /api/admin/upload` | `multipart/form-data`: `file`, `bookId`, `kind` (`inline` \| `cover`), `alt?`. Validates type (PNG/JPEG/WebP/GIF/AVIF — no SVG) and size (`CONTENT_MAX_UPLOAD_BYTES`, default 8MB), writes through the storage seam under a content-hashed key, and returns `{ok,kind,key,url,bytes,contentType,markdown?}`. For `inline`, `markdown` is the exact `![alt](url)` reference for the editor to insert. For `cover`, the manifest's book entry is updated. |
+
+### Ownership: `origin` and `409 managed_externally`
+
+Every book and chapter records where it came from — `portal`, `cli`, `sync` or
+`personal` (see [`content-sync.md`](content-sync.md)). An absent `origin` reads
+as `cli`, so a library published before the field existed stays fully editable.
+
+`origin: "sync"` content is **read-only through this API**. It is still listed,
+readable, previewable and downloadable — you need to see your whole library —
+but every write route (`PUT` chapter, `DELETE` chapter, `PUT` book, revert,
+`POST /api/admin/upload`) answers:
+
+```
+409 { "error": "managed_externally", "message": "…edit it at source…",
+      "origin": "sync", "syncSource": { "kind": "git", "url": "…", "ref": "…" } }
+```
+
+409 rather than 403: the credentials are fine, the request conflicts with where
+the content lives. The message names the actual source, because "edit at source"
+is not advice unless it says which one. The gate runs **before** any other
+lookup, so a refusal never masquerades as a 404.
 
 ### The correction rule
 

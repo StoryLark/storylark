@@ -38,6 +38,24 @@
           "description": "Every voice the library offers. The default `voice` is always included."
         }
       }
+    },
+    "sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "External content source of truth (AB#7422). Present when this deployment's library is PULLED from somewhere else rather than authored here — a git repository of markdown, or the publisher's own system over a JSON feed. Content that arrives this way is read-only in the admin portal: whoever owns the content owns the edit button. Read by packages/pipeline/sync.mjs; see docs/content-sync.md. NO CREDENTIAL BELONGS HERE — this file is committed. A read-only token goes in STORYLARK_SYNC_TOKEN, and sync.mjs refuses to run if it finds one in this file.",
+      "required": ["kind", "url"],
+      "properties": {
+        "kind": {
+          "enum": ["git", "feed"],
+          "description": "Which of the two supported connectors. There are exactly two and there will not be a third: a system that fits neither shape calls the content API instead."
+        },
+        "url": {
+          "type": "string",
+          "description": "Repository URL (kind=git) or feed URL (kind=feed). A URL embedding user:password@ is refused — use STORYLARK_SYNC_TOKEN."
+        },
+        "ref": { "type": "string", "description": "kind=git only: branch or tag to sync. Defaults to the repository's default branch." },
+        "path": { "type": "string", "description": "kind=git only: subdirectory of the repository that contains books/. Defaults to the repository root." }
+      }
     }
   }
 }

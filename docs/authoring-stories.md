@@ -106,6 +106,14 @@ up yet, and `--local <dir>` to publish to a local folder instead of the
 cloud while you're getting the format right. See
 [`content-pipeline.md`](content-pipeline.md) for every flag.
 
+## When this layout already lives in a repository
+
+If these files are in a git repository that is *your* source of truth — a
+website repo you publish from, say — StoryLark can pull from it on a schedule
+instead of you running a publish by hand. Content that arrives that way is
+read-only in the admin portal, because the repo owns it. See
+[`content-sync.md`](content-sync.md).
+
 ## When you need something other than markdown
 
 If your content genuinely lives somewhere else in a different shape — a CMS,

@@ -11,6 +11,7 @@
   "type": "module",
   "bin": {
     "storylark-publish": "publish.mjs",
+    "storylark-sync": "sync.mjs",
     "storylark-gen-icons": "gen-icons.mjs",
     "storylark-gen-vapid": "gen-vapid.mjs"
   },
@@ -25,9 +26,12 @@
   },
   "files": [
     "publish.mjs",
+    "sync.mjs",
     "gen-icons.mjs",
     "gen-vapid.mjs",
     "r2-upload.mjs",
+    "storage.mjs",
+    "storage-azure.mjs",
     "stitch.mjs",
     "tts.mjs",
     "tts-kokoro.mjs",

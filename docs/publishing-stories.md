@@ -1,7 +1,9 @@
 # Publishing Stories
 
-Two ways to get a story onto a live site: the CLI (full control, including
-narration) and the admin portal (browser upload, text-only today).
+Three ways to get a story onto a live site: the CLI (full control, including
+narration), the admin portal (browser upload, text-only today), and a sync from
+a source of truth you already have (a git repository of markdown, or your own
+system's JSON feed — see [`content-sync.md`](content-sync.md)).
 
 ## Format first
 
@@ -45,6 +47,21 @@ portal's confirmation message says which happened, honestly, every time.
 Requires `GITHUB_REPO` and `GITHUB_DEPLOY_TOKEN` configured on the
 deployment (see [`admin-guide.md`](admin-guide.md)); without them, upload
 is disabled and the portal tells you why.
+
+## Sync from your own source of truth
+
+If your stories already live somewhere — a website repository of markdown, or a
+CMS that can serve JSON — StoryLark can pull from it instead:
+
+```
+node packages/pipeline/sync.mjs --brand <id>
+```
+
+That stages your content and runs the pipeline above over it, so you get the
+same narration, the same change detection and the same manifest. Content that
+arrives this way is read-only in the admin portal, because your source owns it.
+Two connectors, no more: a repository of markdown, and a JSON feed. Full guide:
+[`content-sync.md`](content-sync.md).
 
 ## Removing or changing a story
 
