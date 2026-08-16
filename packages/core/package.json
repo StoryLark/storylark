@@ -1,6 +1,6 @@
 {
   "name": "storylark-core",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "StoryLark engine — installable read-along PWA (library, reader, player, offline, sync) plus the defineStorylarkConfig Vite preset that builds a branded site from a theme folder.",
   "license": "Apache-2.0",
   "repository": {
