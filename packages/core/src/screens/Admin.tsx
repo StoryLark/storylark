@@ -2,7 +2,6 @@ import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { BRAND } from '../brand';
 import { api, call, ApiError, type AuthUser } from '../lib/api';
-import { navigate } from '../router';
 
 // Admin portal (AB#7404). Gated by a real account in the app's own `users`
 // table carrying the `is_admin` flag — the same email+password, the same
@@ -310,8 +309,11 @@ function AdminSignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }): JSX.E
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
         {/* Hands off to the reader-side reset flow in Settings rather than
-            duplicating it — ?forgot=1 drops straight into that form. */}
-        <button type="button" class="btn-ghost signin-forgot-link" onClick={() => navigate('/settings?forgot=1')}>
+            duplicating it — ?forgot=1 drops straight into that form. A full
+            document load, not a client-side navigate: the admin portal is its
+            own page and its own bundle, and the reader app's router doesn't
+            exist here (AB#7404). */}
+        <button type="button" class="btn-ghost signin-forgot-link" onClick={() => location.assign('/settings?forgot=1')}>
           Forgot password?
         </button>
         <button type="button" class="btn-ghost signin-forgot-link" onClick={() => setMode('recover')}>

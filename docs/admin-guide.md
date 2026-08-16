@@ -2,6 +2,14 @@
 
 Running your deployed StoryLark site from `/admin` — the operator's portal.
 
+The portal is a **standalone page**, not a screen inside the reader app: its
+own document, its own bundle, no reader or player code, and deliberately
+outside the installable PWA — nothing about it is precached, so what you see
+is always live, never a cached copy from before your last update. Readers
+never download any of it, and nothing in the reader links to it. See
+[`design/standalone-admin.md`](design/standalone-admin.md) for how that's
+built and routed.
+
 ## Getting in
 
 The admin portal uses a normal account — the same email and password any

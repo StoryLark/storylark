@@ -18,7 +18,7 @@
 import preact from '@preact/preset-vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { readFileSync, cpSync, existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
@@ -27,6 +27,15 @@ import { mergeConfig } from 'vite';
 const CORE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const requireFromCore = createRequire(import.meta.url);
 const BUILTIN_MODES = new Set(['development', 'production', 'test']);
+
+/**
+ * The standalone admin page (AB#7404). It is a second Vite entry owned
+ * entirely by core — the site contributes no admin.html and no admin source,
+ * so every deployment gets the identical portal and it can never drift per
+ * site. Its HTML shell is emitted by adminPagePlugin below rather than kept
+ * as a file, for the same reason.
+ */
+const ADMIN_ENTRY = resolve(CORE_DIR, 'src', 'admin-entry.tsx');
 
 /**
  * @param {object} [options]
@@ -64,6 +73,7 @@ export function defineStorylarkConfig(options = {}) {
         fontsModulePlugin(brand),
         themePlugin(themeCss),
         brandAssetsPlugin(brandDir, brand),
+        adminPagePlugin(brand, siteRoot),
         VitePWA({
           strategies: 'injectManifest',
           // The service worker ships inside storylark-core and compiles in
@@ -77,6 +87,12 @@ export function defineStorylarkConfig(options = {}) {
           manifest: false, // manifest.webmanifest is emitted by brandAssetsPlugin
           injectManifest: {
             globPatterns: ['**/*.{js,css,html,woff2,svg,png,webmanifest}'],
+            // The admin page is deliberately NOT part of the installable app
+            // (AB#7404): readers who install the PWA must not carry operator
+            // code, and the operator must never be looking at a stale cached
+            // admin UI while pushing a platform update. admin.html and the
+            // admin entry's own js/css are the only outputs matching these.
+            globIgnores: ['**/node_modules/**/*', 'admin.html', 'assets/admin-*'],
             maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
             buildPlugins: { vite: [configModulePlugin(brand)] },
           },
@@ -85,7 +101,18 @@ export function defineStorylarkConfig(options = {}) {
       // Core ships TS/TSX source; keep it out of the dep optimizer so Vite
       // compiles it through the normal pipeline (where preact JSX applies).
       optimizeDeps: { exclude: ['storylark-core'] },
-      build: { outDir: 'dist', emptyOutDir: true, sourcemap: false },
+      build: {
+        outDir: 'dist',
+        emptyOutDir: true,
+        sourcemap: false,
+        // Two entries: the reader app (the site's index.html) and the
+        // standalone admin page (core's admin-entry.tsx). Separate roots,
+        // separate module graphs — the reader bundle contains no admin code
+        // and the admin bundle contains no reader/player/library/router code.
+        // The `index` key keeps the app's chunk names unchanged from when
+        // index.html was the sole implicit entry.
+        rollupOptions: { input: { index: resolve(siteRoot, 'index.html'), admin: ADMIN_ENTRY } },
+      },
     };
     return options.vite ? mergeConfig(config, options.vite) : config;
   };
@@ -214,6 +241,92 @@ function themePlugin(themeCss) {
   };
 }
 
+/**
+ * The standalone admin page's HTML shell (AB#7404).
+ *
+ * Note what is NOT here: no manifest link, no apple-mobile-web-app meta, no
+ * service-worker registration. The admin page is outside the PWA on purpose —
+ * it is never installed, never precached, and always comes from the network.
+ * `noindex` keeps it out of search results; it is not a security control (the
+ * portal's actual gate is the admin account behind /api/admin/*).
+ */
+function adminHtml(brand, scriptSrc, cssHrefs) {
+  const styles = cssHrefs.map((href) => `    <link rel="stylesheet" href="${href}" />\n`).join('');
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Admin — ${brand.appName}</title>
+    <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+${styles}  </head>
+  <body>
+    <div id="admin" data-storylark-admin="standalone"></div>
+    <script type="module" src="${scriptSrc}"></script>
+  </body>
+</html>
+`;
+}
+
+/**
+ * Emits `admin.html` at build and serves `/admin` in `vite dev`.
+ *
+ * The shell is generated rather than kept as a file so that a downstream site
+ * owns nothing about admin: `npm update storylark-core` upgrades the portal,
+ * its markup included. At build the emitted HTML points at the hashed admin
+ * entry chunk and its CSS; in dev it points at core's source entry and goes
+ * through Vite's own HTML transform (so the preact refresh preamble and the
+ * dev client are injected exactly as they are for index.html).
+ */
+function adminPagePlugin(brand, siteRoot) {
+  return {
+    name: 'storylark-admin-page',
+    configureServer(server) {
+      // Outside the site root in a workspace checkout, inside node_modules in
+      // an installed site — /@fs/ covers the first, a root-relative URL the
+      // second (Vite only serves /@fs/ paths inside server.fs.allow).
+      const rel = relative(siteRoot, ADMIN_ENTRY);
+      const scriptSrc =
+        rel.startsWith('..') || rel === '' ? `/@fs/${ADMIN_ENTRY.replace(/\\/g, '/')}` : `/${rel.replace(/\\/g, '/')}`;
+      server.middlewares.use((req, res, next) => {
+        const path = (req.url ?? '').split('?')[0];
+        if (path !== '/admin' && path !== '/admin/' && path !== '/admin.html') return next();
+        server
+          .transformIndexHtml(req.url ?? '/admin', adminHtml(brand, scriptSrc, []), req.originalUrl)
+          .then((html) => {
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'text/html');
+            res.end(html);
+          })
+          .catch(next);
+      });
+    },
+    generateBundle(_options, bundle) {
+      const chunk = Object.values(bundle).find((c) => c.type === 'chunk' && c.isEntry && c.name === 'admin');
+      if (!chunk) {
+        this.error('storylark-admin-page: no `admin` entry chunk in the bundle — the admin page would ship without its script.');
+      }
+      // CSS lands on whichever chunk Rollup attributed it to — with two
+      // entries sharing stylesheets that is usually a shared chunk, not the
+      // admin entry itself, so walk the import graph or the page ships
+      // unstyled (it did, first build).
+      const css = new Set();
+      const seen = new Set();
+      const walk = (name) => {
+        if (seen.has(name)) return;
+        seen.add(name);
+        const c = bundle[name];
+        if (!c || c.type !== 'chunk') return;
+        for (const f of c.viteMetadata?.importedCss ?? []) css.add(`/${f}`);
+        for (const imported of c.imports ?? []) walk(imported);
+      };
+      walk(chunk.fileName);
+      this.emitFile({ type: 'asset', fileName: 'admin.html', source: adminHtml(brand, `/${chunk.fileName}`, [...css]) });
+    },
+  };
+}
+
 /** Brand-titles index.html and emits manifest.webmanifest + brand icons. */
 function brandAssetsPlugin(brandDir, brand) {
   let outDir = 'dist';
@@ -224,7 +337,10 @@ function brandAssetsPlugin(brandDir, brand) {
       outDir = config.build.outDir;
       root = config.root;
     },
-    transformIndexHtml(html) {
+    transformIndexHtml(html, ctx) {
+      // The standalone admin page titles itself ("Admin — <appName>") and is
+      // served by adminPagePlugin, not from a site file — leave it alone.
+      if (ctx?.path?.startsWith('/admin')) return html;
       // Brand-driven document title: follows whatever theme builds.
       return html.replace(/<title>[\s\S]*?<\/title>/, `<title>${brand.appName}</title>`);
     },

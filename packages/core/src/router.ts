@@ -7,8 +7,7 @@ export type Route =
   | { name: 'now-playing' }
   | { name: 'reader'; bookId: string; chapterId: string; mode?: 'read' | 'both' }
   | { name: 'settings' }
-  | { name: 'about' }
-  | { name: 'admin' };
+  | { name: 'about' };
 
 export const route = signal<Route>(parse(location.pathname + location.search));
 
@@ -41,6 +40,9 @@ function parse(path: string): Route {
   if (p.startsWith('/now-playing')) return { name: 'now-playing' };
   if (p.startsWith('/settings')) return { name: 'settings' };
   if (p.startsWith('/about')) return { name: 'about' };
-  if (p.startsWith('/admin')) return { name: 'admin' };
+  // No '/admin' route on purpose (AB#7404): admin is its own page and its own
+  // bundle now (admin.html / src/admin-entry.tsx), served by the platform
+  // before this app ever loads. Nothing in the reader links to it, and a
+  // hand-typed /admin is a full document load, so this router never sees it.
   return { name: 'home' };
 }

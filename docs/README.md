@@ -59,6 +59,8 @@ the same codebase.
   storage, and the free-tier budget.
 - **[Infrastructure](design/infrastructure.md)** — deployment architecture,
   Cloudflare and Azure side by side, with a diagram.
+- **[Standalone Admin](design/standalone-admin.md)** — why `/admin` is a
+  separate page and bundle, how it's built, and how each platform routes it.
 - **[Content Flow](design/content-flow.md)** — the add-a-story pipeline end to
   end, with a diagram.
 - **[Update Flow](design/update-flow.md)** — the update mechanism, why the

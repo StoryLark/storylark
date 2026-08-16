@@ -16,7 +16,6 @@ function activeTab(): TabName {
       return 'now-playing';
     case 'settings':
     case 'about':
-    case 'admin':
       return 'settings';
   }
 }

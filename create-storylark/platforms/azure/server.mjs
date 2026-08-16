@@ -74,18 +74,41 @@ const app = new Hono();
 // export entirely.
 const staticRoot = process.env.STATIC_ROOT ?? './app/dist';
 app.use('/api/*', async (c) => workerApp.fetch(c.req.raw, env, executionCtx));
-app.use('/*', serveStatic({ root: staticRoot }));
-// SPA fallback: Cloudflare's Workers+Assets binding does this natively
-// (not_found_handling: "single-page-application" in wrangler.jsonc) — the
-// Node server needs it spelled out. Without this, any client-side route
-// (e.g. /admin — confirmed live: a real GET to /admin 404s here while the
-// same route works fine on the Cloudflare deployment) 404s instead of
-// serving the app shell and letting the router take over.
-let indexHtmlCache;
-app.get('*', async (c) => {
-  indexHtmlCache ??= await readFile(`${staticRoot}/index.html`, 'utf8');
-  return c.html(indexHtmlCache);
+
+// The admin portal is its own page and its own bundle (AB#7404), so /admin
+// must serve admin.html — NOT the app shell the SPA fallback below hands out.
+// Cloudflare's asset router does this natively: with html_handling at its
+// default (auto-trailing-slash) a request for /admin resolves to the
+// /admin.html asset before not_found_handling ever runs, and both /admin/ and
+// /admin.html 307 back to the canonical /admin (verified against a real
+// `wrangler dev`). These three routes reproduce that behaviour exactly, so
+// the URL an operator bookmarks behaves the same on either platform.
+const htmlCache = new Map();
+async function html(name) {
+  if (!htmlCache.has(name)) {
+    const body = await readFile(`${staticRoot}/${name}`, 'utf8').catch(() => null);
+    if (body === null) console.warn(`No ${staticRoot}/${name} — rebuild the site.`);
+    htmlCache.set(name, body); // cached either way, warning included: once, not per request
+  }
+  return htmlCache.get(name);
+}
+app.get('/admin', async (c) => {
+  // Falls back to the app shell — what /admin did before the portal became
+  // its own page — if a build from an older storylark-core has no admin.html.
+  // This process serves assets it didn't build, so the two can legitimately
+  // be a version apart mid-update; a 500 there would be the wrong answer.
+  return c.html((await html('admin.html')) ?? (await html('index.html')));
 });
+app.get('/admin/', (c) => c.redirect('/admin', 307));
+app.get('/admin.html', (c) => c.redirect('/admin', 307));
+
+app.use('/*', serveStatic({ root: staticRoot }));
+// SPA fallback for the reader app: Cloudflare's Workers+Assets binding does
+// this natively (not_found_handling: "single-page-application" in
+// wrangler.jsonc) — the Node server needs it spelled out. Without this, any
+// client-side route (e.g. /library/<id>, /read/<book>/<chapter>) 404s instead
+// of serving the app shell and letting the router take over.
+app.get('*', async (c) => c.html(await html('index.html')));
 
 const port = Number(process.env.PORT ?? 8787);
 serve({ fetch: app.fetch, port }, (info) => {

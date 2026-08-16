@@ -36,6 +36,10 @@ two drivers.
   export that `server.mjs` binds directly to a Postgres-backed env.
 - **Infrastructure provisioning** — `wrangler.jsonc` (Cloudflare) vs.
   `platforms/azure/infra.bicep` (Azure).
+- **Static routing** — the reader app's SPA fallback and the `/admin` page are
+  native asset-router behaviour on Cloudflare and explicit routes in
+  `server.mjs` on Azure. Same observable result, two mechanisms; see
+  [`standalone-admin.md`](standalone-admin.md).
 - **Background work keep-alive** — Cloudflare's `ExecutionContext.waitUntil`
   is native; Azure's App Service process stays warm on its own (Always On),
   so `server.mjs` provides a small polyfill with the same shape.
