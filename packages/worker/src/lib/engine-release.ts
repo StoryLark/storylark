@@ -111,7 +111,17 @@ export async function findEngineRelease(
     };
   }
 
-  const repo = opts.repo ?? DEFAULT_RELEASE_REPO;
+  // `||`, not `??`: Azure's server.mjs sets ENGINE_RELEASE_REPO to
+  // `process.env.ENGINE_RELEASE_REPO ?? ''` (an empty string when unset, not
+  // undefined — Node env vars don't distinguish "absent" the way a Cloudflare
+  // Workers binding does). `??` only falls back on null/undefined, so an
+  // empty string reached here unchanged and produced a real, reproducible
+  // "https://github.com//releases/..." — a genuine GitHub 404, but from a
+  // malformed URL, not a missing release. Found live against Azure dev,
+  // 2026-08-16 (see the temporary [diag: landed=...] detail this fix makes
+  // unnecessary — remove that once this ships). opts.base above already used
+  // a truthy check for the same reason; this matches it.
+  const repo = opts.repo || DEFAULT_RELEASE_REPO;
   const releaseUrl = `https://github.com/${repo}/releases/tag/${encodeURIComponent(tag)}`;
   const download = (name: string) => `https://github.com/${repo}/releases/download/${encodeURIComponent(tag)}/${name}`;
   return { version, tag, artifactUrl: download(asset), checksumUrl: download(checksum), releaseUrl };
@@ -144,18 +154,9 @@ export async function downloadEngineArtifact(
     // prebuilt artifact (cut before Phase 5, or its build step failed) —
     // there's no separate existence check anymore now that findEngineRelease
     // constructs the URL directly instead of asking GitHub's API first.
-    //
-    // TEMPORARY DIAGNOSTIC (2026-08-16): a real 404 surfaced from Azure App
-    // Service specifically, for a release confirmed reachable (200, after
-    // its 302) from every other network tested. sumRes.url (the address
-    // fetch actually landed on after following redirects) and a short body
-    // snippet distinguish "never left github.com" from "reached the signed
-    // CDN URL and that 404'd" without needing remote access to the box.
-    // Remove once that's understood — this is not meant to be permanent.
     if (sumRes.status === 404) {
-      const snippet = await sumRes.text().catch(() => '');
       throw new EngineReleaseError(
-        `There is no published prebuilt engine for "${release.tag}". That release was cut before prebuilt artifacts existed, its build step failed, or the version doesn't exist — take this update with the installer command instead. [diag: landed=${sumRes.url} body=${snippet.slice(0, 200).replace(/\s+/g, ' ')}]`,
+        `There is no published prebuilt engine for "${release.tag}". That release was cut before prebuilt artifacts existed, its build step failed, or the version doesn't exist — take this update with the installer command instead.`,
         'no_release'
       );
     }

@@ -38,7 +38,13 @@ import {
   isBrandOwned,
 } from 'storylark-contracts/engine-package';
 import { unzip } from 'storylark-contracts/zip';
-import { findEngineRelease, downloadEngineArtifact, EngineReleaseError, releaseTag } from '../src/lib/engine-release.ts';
+import {
+  findEngineRelease,
+  downloadEngineArtifact,
+  EngineReleaseError,
+  releaseTag,
+  DEFAULT_RELEASE_REPO,
+} from '../src/lib/engine-release.ts';
 import {
   cloudflareSelfDeploy,
   resolveSelfDeploy,
@@ -225,6 +231,18 @@ test('a release is located, downloaded over real HTTP, and verified against its 
   } finally {
     server.close();
   }
+});
+
+test('an empty-string repo falls back to the default, same as an absent one', async () => {
+  // Azure's server.mjs sets ENGINE_RELEASE_REPO to `process.env.X ?? ''` —
+  // an empty string when unset, not undefined. Node env vars don't
+  // distinguish "absent" the way a Cloudflare Workers binding does. A `??`
+  // fallback would leave repo === '' and produce a real
+  // "https://github.com//releases/..." 404 — found live against Azure dev,
+  // 2026-08-16.
+  const release = await findEngineRelease('9.9.9', { repo: '' });
+  assert.ok(release.artifactUrl.startsWith(`https://github.com/${DEFAULT_RELEASE_REPO}/releases/download/`));
+  assert.ok(!release.artifactUrl.includes('github.com//'));
 });
 
 test('a substituted artifact is caught by the checksum and nothing is installed', async () => {
