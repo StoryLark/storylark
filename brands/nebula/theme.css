@@ -1,0 +1,60 @@
+/* Nebula — a science-fiction archive, dark first.
+ *
+ * The reference is a glass plate archive, not a spaceship HUD: the ground is
+ * the grey-violet of photographic emulsion rather than a near-black, the type
+ * colour is bone (the paper a plate is catalogued on), and the accent is the
+ * soft blue of a reflection nebula — desaturated, printed, no glow. The one
+ * saturated colour in the theme is H-alpha rose, and it is spent entirely on
+ * the read-along highlight, so a real emission-line pair (blue reflection,
+ * red emission) is doing the work that a neon accent usually does badly.
+ *
+ * Chrome is sans and reading is serif, deliberately: the catalogue label and
+ * the catalogue text were never set in the same face.
+ *
+ * Note the inversion against brands/storylark: dark sits on bare `:root` and
+ * light is the `[data-theme]` override, because `data-theme` is only stamped
+ * once the app's JavaScript has run. On a dark-first brand the unstamped state
+ * has to already be dark, or every cold load flashes white first.
+ */
+:root {
+  color-scheme: dark;
+
+  --bg: #171A21;          /* plate emulsion — violet-grey, not black */
+  --bg-raised: #202631;
+  --bg-sunken: #0D1015;
+  --text: #E9E6DF;        /* bone, the colour of the catalogue card */
+  --text-muted: #A2A5B1;
+  --text-faint: #6E7280;
+  --accent: #86A8DE;      /* reflection blue */
+  --accent-strong: #A9C4EF;
+  --rule: #2B313D;
+  --link: #A9C4EF;
+
+  --font-display: "Inter", system-ui, "Segoe UI", sans-serif;
+  --font-headers: "Inter", system-ui, "Segoe UI", sans-serif;
+  --font-body: "Newsreader", Georgia, Cambria, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+
+  /* H-alpha. The only saturated colour here, and only on the sung word. */
+  --highlight-word: rgba(216, 108, 124, 0.26);
+  --highlight-block: rgba(216, 108, 124, 0.5);
+}
+
+/* Light is the print, not the plate: the same archive photographed onto paper.
+   Every token is mirrored — a reader who sets light in Settings gets a
+   complete theme, not a dark one with a white background. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #EDEEF2;
+  --bg-raised: #F8F9FC;
+  --bg-sunken: #DFE1E9;
+  --text: #171A21;
+  --text-muted: #565B69;
+  --text-faint: #8E93A2;
+  --accent: #33528F;
+  --accent-strong: #223C6E;
+  --rule: #D3D7E1;
+  --link: #33528F;
+  --highlight-word: rgba(198, 88, 108, 0.2);
+  --highlight-block: rgba(198, 88, 108, 0.42);
+}

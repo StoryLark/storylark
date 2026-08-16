@@ -1,0 +1,53 @@
+{
+  "contractVersion": 1,
+  "layout": "series",
+  "nouns": {
+    "unit": "log",
+    "unitPlural": "logs",
+    "Unit": "Log",
+    "UnitPlural": "Logs",
+    "collection": "mission",
+    "Collection": "Mission"
+  },
+  "nav": {
+    "position": "side",
+    "items": ["home", "library", "nowPlaying", "settings", "about"],
+    "labels": {
+      "home": "Overview",
+      "library": "Archive",
+      "nowPlaying": "Playback",
+      "about": "Provenance"
+    }
+  },
+  "home": {
+    "sections": ["newReleases", "continue"]
+  },
+  "library": {
+    "defaultSort": "order",
+    "sortOptions": ["order", "recent", "title"],
+    "groupBy": "collection",
+    "groupOptions": ["collection", "timeframe"],
+    "view": "grid",
+    "showSearch": true
+  },
+  "reader": {
+    "defaultMode": "readListen"
+  },
+  "player": {
+    "skipSeconds": 30,
+    "showSpeed": true
+  },
+  "cover": {
+    "aspect": "square"
+  },
+  "detail": {
+    "showCover": false,
+    "showLength": true
+  },
+  "emptyState": {
+    "library": "The archive holds nothing yet. No {unitPlural} have come back from this {collection}.",
+    "librarySearch": "Nothing in the archive matches “{query}”. Try a designation, a date, or a bearing.",
+    "home": "Spinning up the archive…",
+    "nowPlaying": "Silence on the channel."
+  }
+}

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 260" font-family='Inter, system-ui, sans-serif'>
+  <rect x="8" y="26" width="208" height="208" rx="48" fill="#171A21"/>
+  <g transform="translate(8 26) scale(0.40625)">
+  <g transform="rotate(-28 256 256)">
+    <ellipse cx="256" cy="256" rx="190" ry="78" fill="none" stroke="#86A8DE" stroke-width="17"/>
+    <ellipse cx="256" cy="256" rx="132" ry="52" fill="none" stroke="#86A8DE" stroke-width="8" opacity="0.4"/>
+  </g>
+  <circle cx="256" cy="256" r="52" fill="#E9E6DF"/>
+  <circle cx="398" cy="106" r="12" fill="#E9E6DF" opacity="0.9"/>
+  <circle cx="112" cy="404" r="8" fill="#E9E6DF" opacity="0.7"/>
+  <circle cx="142" cy="176" r="6" fill="#E9E6DF" opacity="0.55"/>
+  </g>
+  <text x="262" y="150" font-size="104" fill="#E9E6DF" letter-spacing="1">Neb<tspan fill="#86A8DE">ula</tspan></text>
+  <text x="266" y="196" font-size="27" fill="#A2A5B1" opacity="0.85" font-style="italic">Every log the expedition sent back, kept in order.</text>
+</svg>
