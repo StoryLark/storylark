@@ -2,6 +2,7 @@
 import { render } from 'preact';
 import { App } from './app';
 import { BRAND } from './brand';
+import { PRESENTATION } from './presentation';
 import { bootstrap } from './lib/state';
 import { startSyncLoop } from './lib/progress-sync';
 import { initDownloadStates } from './lib/downloads';
@@ -24,6 +25,10 @@ import './styles/ui2.css';
  */
 export function mount(el: HTMLElement): void {
   document.title = `${BRAND.appName}: ${BRAND.name}`;
+  // Cover shape (AB#7416 — presentation `cover.aspect`). An attribute on <html>
+  // rather than a class on a container, so the CSS that reads it is a single
+  // :root selector and the value is in place before the first component renders.
+  document.documentElement.dataset.coverAspect = PRESENTATION.cover.aspect;
 
   initServiceWorker();
 

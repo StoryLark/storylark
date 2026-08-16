@@ -1,5 +1,6 @@
 import type { JSX } from 'preact';
-import { BRAND, NOUNS, countUnits } from '../brand';
+import { BRAND } from '../brand';
+import { NOUNS, PRESENTATION, countUnits } from '../presentation';
 import { DEPLOYMENT } from '../deployment';
 import { BUILD } from '../version';
 import { navigate } from '../router';
@@ -98,6 +99,8 @@ export function About(): JSX.Element {
         </a>
       </section>
 
+      <BrandLinks />
+
       <section class="settings-section">
         <h2>Version &amp; build</h2>
         <ul class="about-list">
@@ -148,6 +151,35 @@ export function About(): JSX.Element {
         </p>
       </footer>
     </div>
+  );
+}
+
+/**
+ * The brand's own links — presentation `about.links` (AB#7416 — plan §0b,
+ * "About screen: extra links and credits, so a brand can point at its own site,
+ * licence, or contact").
+ *
+ * Empty by default, so the section simply does not exist for a library that
+ * states none — which is every library today, and therefore no visible change.
+ * `rel="noopener"` on every one of them: these are URLs from a config file, and
+ * a config file is not a trusted origin just because the operator wrote it.
+ */
+function BrandLinks(): JSX.Element | null {
+  const links = PRESENTATION.about.links;
+  if (links.length === 0) return null;
+  return (
+    <section class="settings-section">
+      <h2>More from {BRAND.name}</h2>
+      <ul class="about-list">
+        {links.map((link) => (
+          <li key={link.href}>
+            <a href={link.href} target="_blank" rel="noopener noreferrer">
+              {link.label} ↗
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

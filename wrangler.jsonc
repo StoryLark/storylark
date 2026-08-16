@@ -8,8 +8,9 @@
     "directory": "app/dist",
     "binding": "ASSETS",
     // Documents run through the Worker so it can stamp this deployment's live
-    // origins / VAPID key (AB#7414 — packages/worker/src/lib/deployment.ts) and
-    // its live brand (AB#7415 — .../lib/brand.ts) into them. The negative rules
+    // origins / VAPID key (AB#7414 — packages/worker/src/lib/deployment.ts), its
+    // live brand (AB#7415 — .../lib/brand.ts) and its live presentation
+    // (AB#7416 — .../lib/presentation.ts) into them. The negative rules
     // keep the bulk of the site — hashed JS/CSS/fonts and the icon files — on
     // the asset router, served with no Worker invocation exactly as before;
     // what costs an invocation is a navigation, /admin, /sw.js, /theme.css and

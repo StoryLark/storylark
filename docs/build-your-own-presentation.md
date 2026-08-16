@@ -30,17 +30,17 @@ Settings    account, typography, theme, read-along mode, downloads
 About       app version, changelog, roadmap
 ```
 
-The tab bar (`packages/core/src/components/TabBar.tsx`) is fixed: **Home · Library · Now
-Playing · Settings**. The routes are defined in `packages/core/src/router.ts`
-(`/`, `/library`, `/library/<bookId>`, `/read/<bookId>/<chapterId>`,
-`/now-playing`, `/settings`, `/about`). The operator's
-[admin portal](admin-guide.md) is deliberately **not** one of these: `/admin`
-is a separate page with its own bundle
-([how it's built](design/standalone-admin.md)), so nothing you change about
-the reader's presentation touches it, and none of its code ships to readers.
-This structure is not currently
-config-driven — changing nav arrangement or screen composition means editing the
-components.
+The tab bar (`packages/core/src/components/TabBar.tsx`) defaults to **Home ·
+Library · Now Playing · Settings** along the bottom, and `nav` in your
+presentation file changes which entries appear, in what order, what they are
+called, and whether the bar runs along the bottom or down the side. The routes
+are defined in `packages/core/src/router.ts` (`/`, `/library`,
+`/library/<bookId>`, `/read/<bookId>/<chapterId>`, `/now-playing`, `/settings`,
+`/about`) and are **not** configurable — v1 rearranges the shell, it does not
+invent screens. The operator's [admin portal](admin-guide.md) is deliberately
+not one of these: `/admin` is a separate page with its own bundle
+([how it's built](design/standalone-admin.md)), so nothing you change about the
+reader's presentation touches it, and none of its code ships to readers.
 
 ## What you configure via `presentation.json`
 
@@ -79,7 +79,11 @@ the build refuses to guess about.
 
 If the file is missing entirely, the defaults apply and the app still builds.
 
-### The two fields that work today
+> **This file is read at request time, not baked in (2026-08).** It ships as
+> `dist/presentation.json` and the platform serving your site reads it on the way
+> out of every request. Replacing that one file on a deployed site rearranges the
+> live site — no rebuild, no redeploy, and on Node not even a restart. See
+> [the design note](design/presentation-contract.md).
 
 ### `layout` — flat vs series
 
@@ -95,15 +99,18 @@ If the file is missing entirely, the defaults apply and the app still builds.
 - **`series`** — units are grouped into collections (think books grouped into a
   series). Manifest entries carry `series`, `seriesOrder`, `bookOrder`, etc.
 
-The `layout` value also changes an auto-download default (see the `autoDownload`
-setting in `packages/core/src/lib/types.ts`): flat auto-downloads new units; series keeps a
-whole collection downloaded.
+`layout` also sets the DEFAULT for four other keys, because those four used to be
+read off it directly: `library.groupBy`, `library.groupOptions`,
+`library.showSearch` and `download.mode`. A flat library opens ungrouped with a
+search box and a sort picker and auto-downloads only new units; a series library
+opens grouped by collection with no controls and keeps everything downloaded.
+State any of those four yourself and your value wins.
 
 ### `nouns` — what a "unit" and "collection" are called
 
 Every user-visible content word is pulled from `nouns` — the app
 never hardcodes "story", "chapter", or "book". Consumed via
-`packages/core/src/brand.ts` (`NOUNS`, `countUnits()`).
+`packages/core/src/presentation.ts` (`NOUNS`, `countUnits()`, `fillCopy()`).
 
 ```json
 "nouns": {
@@ -146,32 +153,62 @@ How markdown maps to these blocks is documented in
 [`content-pipeline.md`](content-pipeline.md); how the reader renders and
 highlights them is in [`read-along.md`](read-along.md).
 
-## The direction (planned)
+## The rest of the contract
 
-The `layout` + `nouns` fields are the first slice of a larger idea: a
-**presentation-layer template** that is distinct from a theme — the theme carries
-identity (colors/fonts/icons), the presentation template carries structure (nav
-arrangement, screen composition, library organization). Today the shell is fixed
-and only `layout`/`nouns` vary it.
+Beyond `layout` and `nouns`, these keys are read by the screens. Every one of
+them is optional and every default below is what the app did before the key
+existed, so adding this file changes nothing until you change a value.
 
-Giving presentation its own file and its own `contractVersion` is step one of
-that. The agreed v1 contract also covers `nav` (position, which tabs, their
-order), `home` (which sections and in what order), `library` (default sort,
-grouping, grid vs list, search), `reader` (default read/listen mode), `player`
-(skip seconds, speed control) and `features` (where each new engine feature
-appears). Those keys are already described by the published schema
-(`packages/core/schemas/presentation.schema.json`) and are accepted and
-validated, but **the app does not read them yet** — the screens still have to be
-taught to. Setting one today does nothing; leaving it out will always be safe.
+| Key | Default | What it does |
+|---|---|---|
+| `nav.position` | `"bottom"` | `bottom` bar or `side` rail |
+| `nav.items` | `["home","library","nowPlaying","settings"]` | which entries, in what order. `about` is also available |
+| `nav.labels` | `{}` | per-item label override, e.g. `{ "library": "Shelf" }` |
+| `home.sections` | `["continue","newReleases"]` | which sections, in what order. `allUnits` adds a full cover shelf |
+| `library.defaultSort` | `"order"` | `order` · `title` · `author` · `recent` · `timeframe` |
+| `library.sortOptions` | `["order","timeframe","recent"]` | what the picker offers. `[]` removes it |
+| `library.groupBy` | flat `"none"` / series `"collection"` | `none` · `collection` · `group` · `timeframe` |
+| `library.groupOptions` | flat `["group"]` / series `[]` | groupings offered alongside the sorts |
+| `library.view` | `"list"` | `list` of rows, or a `grid` cover shelf |
+| `library.showSearch` | flat `true` / series `false` | the search box |
+| `reader.defaultMode` | `"read"` | `read` · `listen` · `readListen`. A reader who has already chosen keeps their choice |
+| `player.skipSeconds` | `15` | the transport's skip distance |
+| `player.showSpeed` | `true` | the playback-speed dial |
+| `cover.aspect` | `"portrait"` | `portrait` (3:4) or `square` cover art on the shelves |
+| `detail.*` | all `true` | which of cover / author / description / chapter list / length appear on a detail screen |
+| `auth.required` | `false` | `true` puts an account gate in front of the whole app |
+| `settings.*` | all `true` | which controls the Settings screen offers: `typography`, `theme`, `narrator`, `autoPlay`, `readAlong`, `keepAwake`, `downloads`, `notifications` |
+| `download.mode` | flat `"newUnits"` / series `"everything"` | what the auto-download toggle means |
+| `emptyState.*` | see below | first-run and empty-shelf copy |
+| `about.links` | `[]` | extra `{ label, href }` links on the About screen |
+| `features.<name>` | `{}` | where each new engine feature appears |
 
-The planned distribution model mirrors themes:
+### Empty-state copy
 
-- Official presentation templates: `storylark-template-*`.
-- Community templates: `storylark-template-*`.
+`{unit}`, `{unitPlural}`, `{Unit}`, `{UnitPlural}`, `{collection}`,
+`{Collection}` and — in `librarySearch` only — `{query}` are substituted from
+your `nouns`:
 
-Swappable presentation templates and a config-driven shell are **planned**, not
-available today. What you can rely on now is `layout` and `nouns`; deeper changes
-require editing the app components. Browse existing arrangements in the
+```json
+"emptyState": {
+  "library":       "No {unitPlural} published yet. Check back soon.",
+  "librarySearch": "No {unitPlural} match “{query}”.",
+  "home":          "Loading the library…",
+  "nowPlaying":    "Nothing playing yet."
+}
+```
+
+### What v1 deliberately does not do
+
+No custom components, no arbitrary screen composition, no new routes. Those are
+the level at which a core update *can* break what you wrote, so they are not part
+of the supported contract. Cloning the repo and editing the components is always
+possible — it is Apache-2.0 — but that path carries no compatibility promise; the
+keys above do.
+
+The planned distribution model mirrors themes: official and community
+presentation templates published as `storylark-template-*`, importable rather
+than copied by hand. Browse existing arrangements in the
 [gallery](https://gallery.storylark.dev/templates.html), and see the
 [submission guide](https://github.com/StoryLark/gallery/blob/main/CONTRIBUTING.md)
 to share your own.

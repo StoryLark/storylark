@@ -39,3 +39,10 @@ on reconnect/app-focus. Last-writer-wins server-side makes replay order irreleva
   build-time assets. An app that is **already installed** may keep its old
   home-screen name and icon until it is reinstalled — the operating system owns
   that copy of the manifest, and no web app can force it to update.
+- The precached app shell carries the brand, deployment config and presentation
+  that were injected the day it was cached, and the precache is only refetched
+  when the *build* changes. The service worker therefore re-stamps all three into
+  the shell on its way out of the cache, using its own copies — which are current
+  because the platform re-injects `sw.js` on every fetch of it and serves it
+  `no-store`. `brand.json` and `presentation.json` are deliberately **not**
+  precached, since those are the files an operator swaps.

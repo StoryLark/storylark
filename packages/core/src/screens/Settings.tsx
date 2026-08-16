@@ -3,17 +3,30 @@ import type { JSX } from 'preact';
 import { user, settings, saveSettings, manifest, pullPreferences } from '../lib/state';
 import type { ConsumptionMode, DownloadRecord } from '../lib/types';
 import { api, ApiError, type AuthUser, type PasskeySummary } from '../lib/api';
-import { BRAND, NOUNS } from '../brand';
+import { BRAND } from '../brand';
+import { NOUNS, PRESENTATION } from '../presentation';
 import { BUILD } from '../version';
 import { navigate } from '../router';
 import { pushSupported, needsInstallForPush, currentSubscription, subscribe, unsubscribe } from '../lib/push';
 import { downloadStates, removeDownload, getDownloadRecords } from '../lib/downloads';
 import { reconcileProgress, resetProgressPushMarker } from '../lib/progress-sync';
-import { syncNow, setAutoDownloadBaseline } from '../lib/autosync';
+import { syncNow, setAutoDownloadBaseline, downloadsNewUnitsOnly } from '../lib/autosync';
 import { passkeysSupported, addPasskey, PasskeyCanceledError } from '../lib/webauthn';
 import { syncWakeLock } from '../lib/player';
 
+/**
+ * Which controls this screen offers is presentation `settings.*` (AB#7416 —
+ * plan §0b, "Which settings the reader is offered").
+ *
+ * "An opinionated brand may not want its look overridable; an
+ * accessibility-minded one very much does." Every flag defaults to true, so
+ * this screen is unchanged for every existing library; turning one off removes
+ * the control AND leaves the underlying preference at whatever the deployment
+ * and the reader already settled on, rather than resetting it — hiding a
+ * control is not the same as reverting a choice.
+ */
 export function Settings(): JSX.Element {
+  const s = PRESENTATION.settings;
   return (
     <div class="screen settings-screen">
       <header class="screen-header">
@@ -21,10 +34,10 @@ export function Settings(): JSX.Element {
       </header>
       <AccountSection />
       <PlaybackSection />
-      <TypographySection />
+      {(s.typography || s.theme) && <TypographySection />}
       <SyncSection />
-      <NotificationsSection />
-      <StorageSection />
+      {s.notifications && <NotificationsSection />}
+      {s.downloads && <StorageSection />}
       <footer class="settings-footer">
         <button class="btn-ghost settings-about-link" onClick={() => navigate('/about')}>
           About {BRAND.appName} →
@@ -37,8 +50,14 @@ export function Settings(): JSX.Element {
   );
 }
 
-/** Narrator voice choice — only rendered when the library publishes 2+ voices. */
+/**
+ * Narrator voice choice — only rendered when the deployment offers it AND the
+ * library publishes 2+ voices. Both conditions, not either: `settings.narrator`
+ * is the brand's choice about its own UI, the voice count is a fact about the
+ * content, and neither implies the other.
+ */
 function NarratorPicker(): JSX.Element | null {
+  if (!PRESENTATION.settings.narrator) return null;
   const voices = manifest.value?.voices;
   if (!voices || Object.keys(voices).length < 2) return null;
   return (
@@ -86,18 +105,20 @@ function PlaybackSection(): JSX.Element {
         The app remembers your choice for each one.
       </p>
       <NarratorPicker />
-      <label class="settings-row">
-        <span>Read-along highlight</span>
-        <select
-          value={s.readAlong}
-          onChange={(e) => void saveSettings({ readAlong: (e.target as HTMLSelectElement).value as 'word' | 'block' | 'off' })}
-        >
-          <option value="word">Word by word</option>
-          <option value="block">Paragraph only</option>
-          <option value="off">Off</option>
-        </select>
-      </label>
-      {'wakeLock' in navigator && (
+      {PRESENTATION.settings.readAlong && (
+        <label class="settings-row">
+          <span>Read-along highlight</span>
+          <select
+            value={s.readAlong}
+            onChange={(e) => void saveSettings({ readAlong: (e.target as HTMLSelectElement).value as 'word' | 'block' | 'off' })}
+          >
+            <option value="word">Word by word</option>
+            <option value="block">Paragraph only</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+      )}
+      {PRESENTATION.settings.keepAwake && 'wakeLock' in navigator && (
         <>
           <label class="settings-row">
             <span>Keep screen awake</span>
@@ -112,7 +133,14 @@ function PlaybackSection(): JSX.Element {
           <p class="settings-note">While read-along is playing, the screen won't dim or lock mid-{NOUNS.unit}.</p>
         </>
       )}
-      {BRAND.layout === 'flat' && (
+      {/*
+        Auto-play only makes sense where auto-download is per-unit: in a library
+        that keeps everything downloaded, "the next unit" is a chapter and
+        chapters always continue anyway. That condition used to be spelled
+        `BRAND.layout === 'flat'`; it is now the download MODE, which is the
+        thing it was actually about, and whose default still follows the layout.
+      */}
+      {PRESENTATION.settings.autoPlay && downloadsNewUnitsOnly() && (
         <>
           <label class="settings-row">
             <span>Auto-play the next {NOUNS.unit}</span>
@@ -137,44 +165,55 @@ function TypographySection(): JSX.Element {
   return (
     <section class="settings-section">
       <h2>Reading</h2>
-      <label class="settings-row">
-        <span>Text size</span>
-        <input
-          type="range"
-          min="0"
-          max="4"
-          step="1"
-          value={s.fontScale}
-          onInput={(e) => void saveSettings({ fontScale: Number((e.target as HTMLInputElement).value) })}
-        />
-      </label>
-      <label class="settings-row">
-        <span>Line spacing</span>
-        <select
-          value={String(s.lineHeight)}
-          onChange={(e) => void saveSettings({ lineHeight: Number((e.target as HTMLSelectElement).value) })}
-        >
-          <option value="1.5">Compact</option>
-          <option value="1.7">Comfortable</option>
-          <option value="1.9">Airy</option>
-        </select>
-      </label>
-      <label class="settings-row">
-        <span>Theme</span>
-        <select value={s.theme} onChange={(e) => void saveSettings({ theme: (e.target as HTMLSelectElement).value as 'dark' | 'light' | 'auto' })}>
-          <option value="auto">Brand default</option>
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-        </select>
-      </label>
+      {PRESENTATION.settings.typography && (
+        <>
+          <label class="settings-row">
+            <span>Text size</span>
+            <input
+              type="range"
+              min="0"
+              max="4"
+              step="1"
+              value={s.fontScale}
+              onInput={(e) => void saveSettings({ fontScale: Number((e.target as HTMLInputElement).value) })}
+            />
+          </label>
+          <label class="settings-row">
+            <span>Line spacing</span>
+            <select
+              value={String(s.lineHeight)}
+              onChange={(e) => void saveSettings({ lineHeight: Number((e.target as HTMLSelectElement).value) })}
+            >
+              <option value="1.5">Compact</option>
+              <option value="1.7">Comfortable</option>
+              <option value="1.9">Airy</option>
+            </select>
+          </label>
+        </>
+      )}
+      {PRESENTATION.settings.theme && (
+        <label class="settings-row">
+          <span>Theme</span>
+          <select value={s.theme} onChange={(e) => void saveSettings({ theme: (e.target as HTMLSelectElement).value as 'dark' | 'light' | 'auto' })}>
+            <option value="auto">Brand default</option>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </label>
+      )}
     </section>
   );
 }
 
 function SyncSection(): JSX.Element {
   const s = settings.value;
-  const autoDownloadLabel =
-    BRAND.layout === 'flat' ? `Auto-download new ${NOUNS.unitPlural} (incl. audio)` : `Keep the whole ${NOUNS.collection} downloaded (incl. audio)`;
+  // What the auto-download toggle MEANS is presentation `download.mode`
+  // (AB#7416); its default still follows the layout, so no existing library
+  // changes what the switch does or what it is called.
+  const newUnitsOnly = downloadsNewUnitsOnly();
+  const autoDownloadLabel = newUnitsOnly
+    ? `Auto-download new ${NOUNS.unitPlural} (incl. audio)`
+    : `Keep the whole ${NOUNS.collection ?? 'library'} downloaded (incl. audio)`;
   return (
     <section class="settings-section">
       <h2>Library & sync</h2>
@@ -200,7 +239,7 @@ function SyncSection(): JSX.Element {
           onChange={(e) => {
             const on = (e.target as HTMLInputElement).checked;
             void (async () => {
-              if (on && BRAND.layout === 'flat') await setAutoDownloadBaseline();
+              if (on && newUnitsOnly) await setAutoDownloadBaseline();
               await saveSettings({ autoDownload: on });
               if (on) void syncNow();
             })();
@@ -208,7 +247,7 @@ function SyncSection(): JSX.Element {
         />
       </label>
       <p class="settings-note">
-        {BRAND.layout === 'flat'
+        {newUnitsOnly
           ? `${NOUNS.UnitPlural} published from now on download automatically for offline reading and listening.`
           : `Every ${NOUNS.unit}, both text and narration, stays available offline, including new ones as they publish.`}
       </p>
@@ -496,8 +535,13 @@ const USERNAME_RE = /^[a-z0-9_]{3,20}$/i;
  * the Reader). Passkeys and magic-link/code still work at the API level,
  * see PasskeyManager above for the one place passkeys still show up, inside
  * an already-signed-in account, but neither is featured on this screen.
+ *
+ * Exported because the `auth.required` gate in app.tsx renders this exact form
+ * (AB#7416). One implementation, not two: a second sign-in form would be a
+ * second place for the reset-token hand-off, the error messages and the
+ * post-sign-in sync to be got right.
  */
-function SignIn(): JSX.Element {
+export function SignIn(): JSX.Element {
   const [mode, setMode] = useState<'register' | 'signin' | 'forgot'>('register');
   const [resetToken, setResetToken] = useState<string | undefined>(undefined);
 

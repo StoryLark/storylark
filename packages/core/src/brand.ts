@@ -21,13 +21,14 @@
 // built-in one. A blank field in a hand-edited file must not wipe a value out.
 //
 // ── Where the boundary is, and why ──────────────────────────────────────────
-// Only IDENTITY is runtime. `layout` and `nouns` are PRESENTATION and stay
-// baked (plan §0d Phase 3 moves them, separately) — IDENTITY_KEYS below is the
-// enforcement, not a comment: an injected object carrying a `layout` cannot
-// reach BRAND through this function, so no half-migrated presentation can
-// appear by accident.
+// This module is IDENTITY, and only identity. `layout`, `nouns` and the rest of
+// the §0b contract are PRESENTATION: they have their own file, their own
+// injected global and their own resolver (./presentation.ts, AB#7416). They are
+// not on `Brand` at all any more, so IDENTITY_KEYS below is no longer the only
+// thing keeping them apart — the type is. An injected object carrying a
+// `layout` still cannot reach BRAND through this function.
 
-import type { Brand, ContentNouns } from './lib/types';
+import type { Brand } from './lib/types';
 import config from 'virtual:storylark-config';
 import { DEPLOYMENT } from './deployment';
 
@@ -80,33 +81,19 @@ export function resolveBrand(): Brand {
 }
 
 /**
- * Brand identity + presentation.
- *
- * Identity comes from the deployment (see above). Presentation — `layout`,
- * `nouns` — is still baked in at build time from
- * presentation/<id>/presentation.json, deliberately: making it runtime is plan
- * §0d Phase 3, and it touches every component that reads a noun.
+ * This deployment's brand identity.
  *
  * Read at module evaluation, which is safe because the injected `<script>` sits
  * in `<head>` ahead of the module bundle — no extra round trip, nothing to
  * await, and no flash of the previous brand's name.
+ *
+ * For `layout`, `nouns` and everything else about the SHAPE of the library, see
+ * ./presentation.ts. They were on this object until AB#7416.
  */
 export const BRAND: Brand = resolveBrand();
 
 export function contentUrl(path: string): string {
   return `${DEPLOYMENT.contentOrigin}/${path.replace(/^\//, '')}`;
-}
-
-/**
- * Brand content nouns — what a content unit is called in the UI, taken straight
- * from the presentation config (see ContentNouns in lib/types). Every
- * user-visible string uses these instead of hardcoding "story"/"chapter"/"book".
- */
-export const NOUNS: ContentNouns = BRAND.nouns;
-
-/** "3 chapters" / "1 story" — count with the right brand noun. */
-export function countUnits(n: number): string {
-  return `${n} ${n === 1 ? NOUNS.unit : NOUNS.unitPlural}`;
 }
 
 /**

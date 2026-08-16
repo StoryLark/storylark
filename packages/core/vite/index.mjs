@@ -27,7 +27,6 @@ import {
   BRAND_SCHEMA,
   PRESENTATION_SCHEMA,
   DEPLOYMENT_SCHEMA,
-  PRESENTATION_DEFAULTS,
   DEPLOYMENT_DEFAULTS,
   readContract,
 } from '../schemas/validate.mjs';
@@ -64,7 +63,7 @@ export function defineStorylarkConfig(options = {}) {
     const siteRoot = process.cwd();
     const brandId = options.brandId ?? (mode && !BUILTIN_MODES.has(mode) ? mode : 'storylark');
     const brandDir = resolve(siteRoot, options.brandsRoot ?? 'brands', brandId);
-    const { brand, identity, deployment } = loadStorylarkConfig(siteRoot, brandId, brandDir, options);
+    const { brand, identity, presentation, deployment } = loadStorylarkConfig(siteRoot, brandId, brandDir, options);
     const themeFile = resolve(brandDir, 'theme.css');
 
     /** @type {import('vite').UserConfig} */
@@ -72,6 +71,8 @@ export function defineStorylarkConfig(options = {}) {
       plugins: [
         preact(),
         configModulePlugin(brand),
+        presentationModulePlugin(presentation),
+        presentationAssetPlugin(presentation),
         deploymentModulePlugin(deployment),
         buildInfoPlugin(resolveBuildInfo(siteRoot, brandId)),
         fontsModulePlugin(),
@@ -99,12 +100,13 @@ export function defineStorylarkConfig(options = {}) {
             //   *.webmanifest — generated per request from the live brand, so a
             //     precached copy would name the app after whichever brand was
             //     current at the last build.
-            //   theme.css / brand.json — the two files an operator swaps. A
-            //     precache entry is keyed to the BUILD, so precaching them is
-            //     exactly the "service worker serves a stale brand" failure the
-            //     plan warns about. theme.css is network-first in sw.ts;
-            //     brand.json is never fetched by the client at all (it arrives
-            //     injected, and the worker re-stamps the cached shell).
+            //   theme.css / brand.json / presentation.json — the files an
+            //     operator swaps. A precache entry is keyed to the BUILD, so
+            //     precaching them is exactly the "service worker serves a stale
+            //     brand" failure the plan warns about. theme.css is
+            //     network-first in sw.ts; brand.json and presentation.json are
+            //     never fetched by the client at all (they arrive injected, and
+            //     the worker re-stamps the cached shell with both).
             globPatterns: ['**/*.{js,css,html,svg,png}'],
             // The admin page is deliberately NOT part of the installable app
             // (AB#7404): readers who install the PWA must not carry operator
@@ -113,7 +115,9 @@ export function defineStorylarkConfig(options = {}) {
             // admin entry's own js/css are the only outputs matching these.
             globIgnores: ['**/node_modules/**/*', 'admin.html', 'assets/admin-*', 'theme.css'],
             maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
-            buildPlugins: { vite: [configModulePlugin(brand), deploymentModulePlugin(deployment)] },
+            buildPlugins: {
+              vite: [configModulePlugin(brand), presentationModulePlugin(presentation), deploymentModulePlugin(deployment)],
+            },
           },
         }),
       ],
@@ -138,11 +142,12 @@ export function defineStorylarkConfig(options = {}) {
 }
 
 /**
- * Loads the three contracts a build needs and resolves them into the two
+ * Loads the three contracts a build needs and resolves them into the three
  * objects the app sees:
  *
- *   virtual:storylark-config      brand identity + look + presentation (Brand)
- *   virtual:storylark-deployment  origins, VAPID public key, tts
+ *   virtual:storylark-config        brand identity + look (Brand)
+ *   virtual:storylark-presentation  layout, nouns and the §0b keys, AS STATED
+ *   virtual:storylark-deployment    origins, VAPID public key, tts
  *
  * from:
  *
@@ -156,23 +161,26 @@ export function defineStorylarkConfig(options = {}) {
  * touches your brand" and "the same brand runs on two platforms" both true.
  *
  * Resolution order, per contract:
- *   presentation — file value, else the core default (missing key = default,
- *                  permanently; that is the compatibility promise)
+ *   presentation — NOT resolved here at all (AB#7416). The file travels as it
+ *                  was written, unknown keys dropped, and the FRONTEND fills in
+ *                  every absent key from DEFAULT_PRESENTATION. Resolving here
+ *                  as well would freeze today's defaults into a customer's
+ *                  bundle, so a later core update with a better default could
+ *                  never reach them — "a missing key takes the core default,
+ *                  PERMANENTLY" means core's current default, not the one that
+ *                  happened to be current the day they last built.
  *   deployment   — env var (STORYLARK_*), else file value, else core default.
  *                  Env wins because that is how an installer configures a
  *                  deployment it just provisioned.
  *
- * Neither half is the source of truth on a real deployment any more. The
+ * None of this is the source of truth on a real deployment any more. The
  * platform serving the app injects the live deployment config (AB#7414 —
- * packages/worker/src/lib/deployment.ts, from environment variables) and the
- * live brand IDENTITY (AB#7415 — .../lib/brand.ts, from dist/brand.json) into
- * every document at response time; what is compiled in here is the fallback for
- * a context with no injection — `vite dev`, `vite preview`, a plain static
+ * packages/worker/src/lib/deployment.ts, from environment variables), the live
+ * brand IDENTITY (AB#7415 — .../lib/brand.ts, from dist/brand.json) and the live
+ * PRESENTATION (AB#7416 — .../lib/presentation.ts, from dist/presentation.json)
+ * into every document at response time; what is compiled in here is the fallback
+ * for a context with no injection — `vite dev`, `vite preview`, a plain static
  * host, or a platform mid-update still running an older engine.
- *
- * What IS still genuinely baked is presentation — `layout` and `nouns` —
- * because nothing reads them at runtime yet. Making them runtime is plan §0d
- * Phase 3, and it touches every component that names a content unit.
  */
 function loadStorylarkConfig(siteRoot, brandId, brandDir, options = {}) {
   const brandFile = resolve(brandDir, 'brand.json');
@@ -201,8 +209,9 @@ function loadStorylarkConfig(siteRoot, brandId, brandDir, options = {}) {
     );
     const { layout, nouns, appOrigin, contentOrigin, vapidPublicKey, tts, ...identity } = raw;
     return {
-      brand: resolveConfig(identity, { layout, nouns }),
+      brand: resolveConfig(identity),
       identity: resolveIdentity(identity),
+      presentation: resolvePresentation({ contractVersion: 1, layout, nouns }),
       deployment: deploymentFromEnv({ appOrigin, contentOrigin, vapidPublicKey, tts }),
     };
   }
@@ -216,8 +225,9 @@ function loadStorylarkConfig(siteRoot, brandId, brandDir, options = {}) {
     : {};
 
   return {
-    brand: resolveConfig(identity, presentation),
+    brand: resolveConfig(identity),
     identity: resolveIdentity(identity),
+    presentation: resolvePresentation(presentation),
     deployment: deploymentFromEnv(deployment),
   };
 }
@@ -291,25 +301,16 @@ function deploymentFromEnv(deployment) {
 }
 
 /**
- * Merge identity + presentation into the flat `Brand` object the app expects.
+ * The `Brand` object the app compiles against — identity and look, nothing else.
  *
- * Deployment config is NOT merged in any more (AB#7414): it has its own
- * virtual module because it has a different lifetime — the brand is what the
- * site is and changes only with a rebuild, while origins and keys belong to
- * whichever deployment happens to be serving the bundle right now. Keeping
- * them in one object is what let one deployment's URLs travel inside a brand
- * in the first place.
- *
- * Presentation keys beyond layout/nouns are passed through at the end for
- * whatever reads them later; nothing does today.
+ * Deployment config is not in it (AB#7414) and presentation is not in it any
+ * more either (AB#7416): all three have different lifetimes. The brand is who
+ * the site is; presentation is how it is arranged and is swapped by the
+ * operator; origins and keys belong to whichever deployment happens to be
+ * serving the bundle right now. Keeping them in one object is what let one
+ * deployment's URLs travel inside a brand in the first place.
  */
-function resolveConfig(identity, presentation) {
-  const { contractVersion: _v, layout, nouns, ...restPresentation } = presentation ?? {};
-  // Rule 2 for real: an unknown key is *ignored*, not just warned about, so it
-  // never reaches the bundle and can never be depended on by accident.
-  const known = Object.fromEntries(
-    Object.entries(restPresentation).filter(([k]) => k in (PRESENTATION_SCHEMA.properties ?? {}))
-  );
+function resolveConfig(identity) {
   return stripUndefined({
     id: identity.id,
     name: identity.name,
@@ -320,11 +321,27 @@ function resolveConfig(identity, presentation) {
     backgroundColor: identity.backgroundColor,
     defaultTheme: identity.defaultTheme,
     author: identity.author,
-    layout: layout ?? PRESENTATION_DEFAULTS.layout,
-    nouns: { ...PRESENTATION_DEFAULTS.nouns, ...stripUndefined(nouns ?? {}) },
     fonts: identity.fonts,
-    ...stripUndefined(known),
   });
+}
+
+/**
+ * The presentation as STATED, with unknown keys removed — the thing that both
+ * becomes `virtual:storylark-presentation` and is written to
+ * dist/presentation.json (AB#7416).
+ *
+ * Note what does NOT happen here: no defaults are applied. This is the file, as
+ * the operator wrote it, minus anything this engine does not recognise. Rule 2
+ * for real — an unknown key is *ignored*, not merely warned about, so it never
+ * reaches the bundle and can never be depended on by accident — and rule 1 left
+ * to the frontend, which is the only place that knows what an absent key means.
+ *
+ * `contractVersion` is kept, so the emitted file stays a valid presentation.json
+ * and "download it, edit it, upload it" is a coherent operation.
+ */
+function resolvePresentation(presentation) {
+  const known = Object.keys(PRESENTATION_SCHEMA.properties ?? {});
+  return stripUndefined(Object.fromEntries(known.map((k) => [k, (presentation ?? {})[k]])));
 }
 
 /** Drops undefined values so they never reach the bundle as explicit keys. */
@@ -393,6 +410,70 @@ function configModulePlugin(brand) {
     },
     load(id) {
       if (id === '\0storylark-config') return `export default ${JSON.stringify(brand)};`;
+    },
+  };
+}
+
+/**
+ * Serves the build-time presentation fallback as `virtual:storylark-presentation`
+ * (AB#7416 — plan §0d Phase 3).
+ *
+ * This is the FALLBACK only — the live presentation comes from
+ * dist/presentation.json, injected by the serving platform (see
+ * presentationAssetPlugin below and packages/worker/src/lib/presentation.ts).
+ * It exists so the app still works where nothing injects: `vite dev`, `vite
+ * preview`, a plain static host, or a platform mid-update on an older engine.
+ *
+ * Instantiated twice — once for the app build, once for the service-worker
+ * build (see `buildPlugins` in defineStorylarkConfig) — because sw.ts re-stamps
+ * the precached shell and therefore imports src/presentation.ts too. Plugin
+ * instances must not be shared between the two builds.
+ */
+function presentationModulePlugin(presentation) {
+  return {
+    name: 'storylark-presentation-module',
+    resolveId(id) {
+      if (id === 'virtual:storylark-presentation') return '\0storylark-presentation';
+    },
+    load(id) {
+      if (id === '\0storylark-presentation') return `export default ${JSON.stringify(presentation)};`;
+    },
+  };
+}
+
+/**
+ * Emits `dist/presentation.json` — the file an operator swaps (AB#7416).
+ *
+ * Separate from presentationModulePlugin above, and only in the app build, for
+ * a mechanical reason: that one is instantiated a second time for the
+ * service-worker build, which writes into the same output directory, and two
+ * plugins emitting the same fileName is a build error rather than a harmless
+ * duplicate.
+ *
+ * The emitted file is the presentation AS STATED, not a resolved one — see
+ * resolvePresentation above for why writing today's defaults into a customer's
+ * deployment would break the compatibility promise rather than help it. It also
+ * keeps the file small and hand-editable, which is the point of it being the
+ * file an operator downloads, edits and uploads.
+ *
+ * In `vite dev` there is no dist/, so the middleware serves the same bytes from
+ * memory: /presentation.json is a real URL in every context.
+ */
+function presentationAssetPlugin(presentation) {
+  const body = `${JSON.stringify(presentation, null, 2)}\n`;
+  return {
+    name: 'storylark-presentation-asset',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if ((req.url ?? '').split('?')[0] !== '/presentation.json') return next();
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(body);
+      });
+    },
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'presentation.json', source: body });
     },
   };
 }

@@ -64,6 +64,9 @@ the same codebase.
 - **[Runtime Brand](design/runtime-brand.md)** — why `brand.json` and
   `theme.css` are files the deployment serves rather than bundle contents, how
   fonts work, and where staleness can still bite.
+- **[Presentation Contract](design/presentation-contract.md)** — every key that
+  controls how a library is arranged, the two rules that keep a template working
+  across core updates, and where the supported line sits.
 - **[Content Flow](design/content-flow.md)** — the add-a-story pipeline end to
   end, with a diagram.
 - **[Update Flow](design/update-flow.md)** — the update mechanism, why the

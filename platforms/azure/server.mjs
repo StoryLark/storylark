@@ -58,6 +58,19 @@ try {
   );
 }
 
+// Serve-time presentation (AB#7416 — plan §0d Phase 3) arrived in
+// storylark-worker 0.11.0. Same dynamic-import reasoning again: an older worker
+// package must degrade to the arrangement baked into the bundle rather than
+// refuse to start.
+let presentationLib = null;
+try {
+  presentationLib = await import('storylark-worker/lib/presentation');
+} catch {
+  console.warn(
+    'storylark: this storylark-worker has no lib/presentation (needs >= 0.11.0). Serving the presentation that was baked in at build — swapping presentation.json will not reach the frontend until storylark-worker is updated.'
+  );
+}
+
 const required = ['DATABASE_URL', 'BRAND', 'APP_ORIGIN', 'CONTENT_ORIGIN', 'MAIL_FROM', 'APP_NAME'];
 const missing = required.filter((k) => !process.env[k]);
 if (missing.length > 0) {
@@ -152,6 +165,21 @@ async function liveBrand() {
 }
 
 /**
+ * This deployment's presentation (AB#7416 — plan §0d Phase 3), read from
+ * <staticRoot>/presentation.json on EVERY request, for the same reason
+ * liveBrand() is: its source is a file, not the process environment, so an
+ * operator (or, later, the admin portal) replacing it must take effect on the
+ * next request rather than on the next restart. Caching it would turn "swap the
+ * file" back into "swap the file and restart the app", which is most of what
+ * this phase exists to delete.
+ */
+async function livePresentation() {
+  if (!presentationLib) return undefined;
+  const text = await readFile(`${staticRoot}/presentation.json`, 'utf8').catch(() => null);
+  return text === null ? undefined : presentationLib.readPresentationAsset(text);
+}
+
+/**
  * The curated font registry, read once. Engine data emitted by the site build
  * (dist/fonts.json), so it can only change when the site is rebuilt — and a new
  * site build on App Service means a new process.
@@ -165,13 +193,14 @@ async function fonts() {
   return fontRegistry ?? undefined;
 }
 
-/** An HTML document, with the deployment config and the live brand stamped in. */
+/** An HTML document, with the deployment config, the live brand and the live presentation stamped in. */
 async function document(c, body) {
   if (body == null) return c.notFound();
   c.header('Cache-Control', 'no-store');
   let out = injectDeploymentIntoHtml(body, deployment);
-  const brand = await liveBrand();
+  const [brand, presentation] = await Promise.all([liveBrand(), livePresentation()]);
   if (brand) out = brandLib.injectBrandIntoHtml(out, brand);
+  if (presentation) out = presentationLib.injectPresentationIntoHtml(out, presentation);
   return c.html(out);
 }
 
@@ -212,11 +241,13 @@ app.get('/sw.js', async (c) => {
   if (js === null) return c.notFound();
   c.header('Content-Type', 'text/javascript; charset=utf-8');
   c.header('Cache-Control', 'no-store');
-  // Brand first, so the deployment statement stays on line 1 where Phase 1's
-  // own prelude regex expects to find it.
-  const brand = await liveBrand();
-  const branded = brand ? brandLib.injectBrandIntoScript(js, brand) : js;
-  return c.body(injectDeploymentIntoScript(branded, deployment));
+  // Presentation, then brand, then deployment — each prepends, so the
+  // deployment statement ends up on line 1 where Phase 1's own prelude regex
+  // expects to find it.
+  const [brand, presentation] = await Promise.all([liveBrand(), livePresentation()]);
+  let out = presentation ? presentationLib.injectPresentationIntoScript(js, presentation) : js;
+  out = brand ? brandLib.injectBrandIntoScript(out, brand) : out;
+  return c.body(injectDeploymentIntoScript(out, deployment));
 });
 
 // The brand's stylesheet, with the live font selection appended (AB#7415).

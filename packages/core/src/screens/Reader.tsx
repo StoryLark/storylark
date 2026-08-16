@@ -3,7 +3,8 @@ import type { JSX } from 'preact';
 import type { ChapterContent, ChapterTimings, ConsumptionMode, Progress } from '../lib/types';
 import { manifest, progressMap, progressKey, modeFor, setItemMode } from '../lib/state';
 import { saveProgress } from '../lib/progress-sync';
-import { contentUrl, NOUNS } from '../brand';
+import { contentUrl } from '../brand';
+import { NOUNS, PRESENTATION } from '../presentation';
 import { navigate } from '../router';
 import { BlockRenderer } from '../reader/BlockRenderer';
 import { audioController } from '../reader/AudioController';
@@ -23,6 +24,9 @@ import {
 } from '../lib/player';
 
 const SAVE_INTERVAL_MS = 30_000;
+
+/** Skip distance, from presentation `player.skipSeconds` (AB#7416). Same value the Now Playing transport uses. */
+const SKIP = PRESENTATION.player.skipSeconds;
 
 export function Reader({ bookId, chapterId, mode: routeMode }: { bookId: string; chapterId: string; mode?: 'read' | 'both' }): JSX.Element {
   const [content, setContent] = useState<ChapterContent | null>(null);
@@ -251,14 +255,14 @@ export function Reader({ bookId, chapterId, mode: routeMode }: { bookId: string;
 
       {mode === 'both' && content && (
         <div class="player-bar">
-          <button class="icon-btn" onClick={() => skip(-15)} aria-label="Back 15 seconds">
-            ↺15
+          <button class="icon-btn" onClick={() => skip(-SKIP)} aria-label={`Back ${SKIP} seconds`}>
+            ↺{SKIP}
           </button>
           <button class="play-btn" onClick={togglePlay} aria-label={playerPlaying.value && playingThis ? 'Pause' : 'Play'}>
             {playerPlaying.value && playingThis ? '❚❚' : '▶'}
           </button>
-          <button class="icon-btn" onClick={() => skip(15)} aria-label="Forward 15 seconds">
-            15↻
+          <button class="icon-btn" onClick={() => skip(SKIP)} aria-label={`Forward ${SKIP} seconds`}>
+            {SKIP}↻
           </button>
           <div class="player-track" onClick={(e) => scrubTo(e, playerDurationMs.value)}>
             <div

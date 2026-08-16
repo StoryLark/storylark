@@ -10,7 +10,8 @@ import { signal } from '@preact/signals';
 import type { BookEntry, ChapterContent, ChapterEntry, ChapterTimings, Progress } from './types';
 import { manifest, settings, progressMap, progressKey } from './state';
 import { saveProgress } from './progress-sync';
-import { contentUrl, BRAND } from '../brand';
+import { contentUrl } from '../brand';
+import { isFlat } from '../presentation';
 import { audioController } from '../reader/AudioController';
 import { speechFallback } from '../reader/SpeechFallback';
 import { setupMediaSession, updatePlaybackState } from './mediasession';
@@ -388,7 +389,14 @@ export function fmtDuration(ms: number): string {
   return `${Math.floor(min / 60)} h ${min % 60} min`;
 }
 
-/** True when this brand's UI treats every book as a standalone unit (flat library). */
+/**
+ * True when this library's UI treats every book as a standalone unit.
+ *
+ * Kept under its old name because half the app reads it, but the answer now
+ * comes from the PRESENTATION contract rather than from the brand, so it can
+ * change at runtime along with everything else about the library's shape
+ * (AB#7416). `isFlat()` in ../presentation is the same question for new code.
+ */
 export function isStoryBrand(): boolean {
-  return BRAND.layout === 'flat';
+  return isFlat();
 }

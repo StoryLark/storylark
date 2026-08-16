@@ -2,12 +2,18 @@
 // produced by the publish pipeline (tools/).
 
 /**
- * Brand identity + look, and the presentation keys the engine reads today.
+ * Brand IDENTITY and look. Nothing else.
  *
  * Deliberately carries NO addresses and NO keys (AB#7413/7414): `appOrigin`,
  * `contentOrigin`, `vapidPublicKey` and `tts` describe one particular
  * deployment, not the brand, and live in DeploymentConfig below. That
  * separation is what lets the same brand run on two platforms.
+ *
+ * And deliberately no `layout`/`nouns` any more (AB#7416 — plan §0d Phase 3):
+ * those are PRESENTATION, they live in Presentation below, and they are
+ * resolved at runtime from the deployment's own presentation.json. Keeping the
+ * two apart in the TYPE is what stops "the brand" quietly re-absorbing the
+ * shape of the library the first time somebody adds a field in a hurry.
  */
 export interface Brand {
   id: string;
@@ -19,13 +25,6 @@ export interface Brand {
   backgroundColor: string;
   defaultTheme: 'dark' | 'light';
   author: string;
-  /**
-   * Library shape. 'flat' — standalone units shown in one flat list (no
-   * collection level). 'series' — units are grouped into collections.
-   */
-  layout: 'flat' | 'series';
-  /** What a content unit and its collection are called throughout the UI. */
-  nouns: ContentNouns;
   fonts?: { display: string; headers: string; body: string; mono: string };
 }
 
@@ -65,6 +64,132 @@ export interface ContentNouns {
   collection: string | null;
   Collection: string | null;
 }
+
+// ── Presentation, the §0b contract (AB#7416 — plan §0d Phase 3) ─────────────
+//
+// How this library is SHAPED and ARRANGED, as opposed to who it is (Brand) or
+// where it lives (DeploymentConfig). Resolved at runtime from the deployment's
+// own presentation.json — see ../presentation.ts.
+//
+// Every field here is REQUIRED in this interface and OPTIONAL in the file: the
+// resolver fills anything the file leaves out from DEFAULT_PRESENTATION, so
+// components read a complete object and never write `?? somethingElse`. That
+// asymmetry is contract rule 1 ("a missing key takes the core default,
+// permanently") expressed in the type system — a component physically cannot
+// invent a second, competing default for a key.
+
+/** A navigation entry. Also the id used in `nav.items` and `nav.labels`. */
+export type NavItem = 'home' | 'library' | 'nowPlaying' | 'settings' | 'about';
+
+/** A Home screen section. Presence in `home.sections` = shown; order = display order. */
+export type HomeSection = 'continue' | 'newReleases' | 'allUnits';
+
+/** How the library orders units within a section. */
+export type LibrarySort = 'order' | 'title' | 'author' | 'recent' | 'timeframe';
+
+/** How the library divides units into sections. */
+export type LibraryGroup = 'none' | 'collection' | 'group' | 'timeframe';
+
+/** How an item opens by default. `readListen` is the app's internal 'both'. */
+export type ReaderMode = 'read' | 'listen' | 'readListen';
+
+/**
+ * What auto-download means for this library — previously *derived* from
+ * `layout`, now stated (plan §0b, "Download behaviour").
+ *
+ *   newUnits    only units published after the reader turned the toggle on
+ *   everything  the whole library, including new units as they publish
+ */
+export type DownloadMode = 'newUnits' | 'everything';
+
+/** One extra link on the About screen. */
+export interface AboutLink {
+  label: string;
+  href: string;
+}
+
+/** A core feature's placement, as stated by a presentation file. */
+export interface FeatureConfig {
+  enabled: boolean;
+  placement?: string;
+}
+
+/** The resolved presentation — complete, every key present. */
+export interface Presentation {
+  /**
+   * Library shape. 'flat' — standalone units shown in one flat list (no
+   * collection level). 'series' — units are grouped into collections.
+   */
+  layout: 'flat' | 'series';
+  /** What a content unit and its collection are called throughout the UI. */
+  nouns: ContentNouns;
+  nav: {
+    position: 'bottom' | 'side';
+    items: NavItem[];
+    /** Per-item label override. An item not named here keeps the core label. */
+    labels: Partial<Record<NavItem, string>>;
+  };
+  home: { sections: HomeSection[] };
+  library: {
+    defaultSort: LibrarySort;
+    /** Which sorts the picker offers. Empty = no sort picker. */
+    sortOptions: LibrarySort[];
+    groupBy: LibraryGroup;
+    /** Which groupings the picker offers alongside the sorts. */
+    groupOptions: Exclude<LibraryGroup, 'none'>[];
+    view: 'grid' | 'list';
+    showSearch: boolean;
+  };
+  reader: { defaultMode: ReaderMode };
+  player: { skipSeconds: number; showSpeed: boolean };
+  /** Cover shape on the shelves — the most visible difference between brands. */
+  cover: { aspect: 'square' | 'portrait' };
+  /** Which parts of the unit/collection detail screen appear. */
+  detail: {
+    showCover: boolean;
+    showAuthor: boolean;
+    showDescription: boolean;
+    showChapterList: boolean;
+    /** Reading time / narration duration on each row. */
+    showLength: boolean;
+  };
+  /** Sign-in posture. `true` puts an account gate in front of the whole app. */
+  auth: { required: boolean };
+  /** Which controls the Settings screen offers the reader. */
+  settings: {
+    typography: boolean;
+    theme: boolean;
+    narrator: boolean;
+    autoPlay: boolean;
+    readAlong: boolean;
+    keepAwake: boolean;
+    downloads: boolean;
+    notifications: boolean;
+  };
+  download: { mode: DownloadMode };
+  /**
+   * First-run and empty-shelf copy. `{unit}`, `{unitPlural}`, `{Unit}`,
+   * `{UnitPlural}` and `{query}` are substituted; see fillCopy().
+   */
+  emptyState: { library: string; librarySearch: string; home: string; nowPlaying: string };
+  about: { links: AboutLink[] };
+  /** Where every NEW core feature lands. Absent feature = the core default. */
+  features: Record<string, FeatureConfig>;
+}
+
+/**
+ * A presentation as a FILE states it: every key optional, at any depth.
+ *
+ * This is what `presentation/<id>/presentation.json` and the injected
+ * `self.__STORYLARK_PRESENTATION__` conform to, and it is deliberately a
+ * different type from `Presentation` above — the whole compatibility promise
+ * lives in the gap between them.
+ */
+export type PresentationInput = {
+  [K in keyof Presentation]?: Presentation[K] extends Array<unknown> | string
+    ? Presentation[K]
+    : Partial<Presentation[K]>;
+};
 
 export interface LibraryManifest {
   schemaVersion: number;

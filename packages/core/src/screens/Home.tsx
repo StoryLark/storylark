@@ -3,9 +3,24 @@ import { manifest, progressMap, progressKey, modeFor } from '../lib/state';
 import { fmtDuration, isStoryBrand, startPlayback, nextItem } from '../lib/player';
 import { openItem } from '../lib/open-item';
 import { navigate } from '../router';
-import { BRAND, NOUNS, contentUrl } from '../brand';
+import { BRAND, contentUrl } from '../brand';
+import { NOUNS, PRESENTATION, countUnits, fillCopy } from '../presentation';
 import { PreviewBanner } from '../components/PreviewBanner';
-import type { ChapterEntry, Progress } from '../lib/types';
+import type { ChapterEntry, HomeSection, Progress } from '../lib/types';
+
+/**
+ * Which section each id renders (AB#7416 — presentation `home.sections`).
+ *
+ * Presence in the list = shown; order in the list = display order. The two
+ * defaults are the two sections Home has always had, in the order it had them.
+ * `allUnits` is new and off by default: Home has never carried a full listing,
+ * and switching one on for every existing deployment is not a default's job.
+ */
+const SECTIONS: Record<HomeSection, () => JSX.Element | null> = {
+  continue: ContinueCard,
+  newReleases: NewSection,
+  allUnits: AllUnitsSection,
+};
 
 export function Home(): JSX.Element {
   const m = manifest.value;
@@ -21,13 +36,14 @@ export function Home(): JSX.Element {
 
       <PreviewBanner />
 
-      {!m && <p class="empty-state">Loading the library…</p>}
-      {m && (
-        <>
-          <ContinueCard />
-          <NewSection />
-        </>
-      )}
+      {!m && <p class="empty-state">{fillCopy(PRESENTATION.emptyState.home)}</p>}
+      {m &&
+        PRESENTATION.home.sections
+          .filter((id) => SECTIONS[id])
+          .map((id) => {
+            const Section = SECTIONS[id];
+            return <Section key={id} />;
+          })}
     </div>
   );
 }
@@ -229,6 +245,85 @@ function NewSection(): JSX.Element | null {
             <span class="new-card-title">Full library</span>
           </button>
         </li>
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * Every unit in the library, in reading order, as a cover shelf
+ * (presentation `home.sections: ["…","allUnits"]`).
+ *
+ * Off by default — see SECTIONS above. It exists because a small library is
+ * better served by showing everything on the front page than by a carousel that
+ * scrolls past three items and a "see all" that leads to the same three; that
+ * is a real choice a deployment should be able to make, and until now it could
+ * not. Reuses the carousel's card chrome and the Library's grid so all three
+ * shelves stay one implementation.
+ */
+function AllUnitsSection(): JSX.Element | null {
+  const m = manifest.value;
+  if (!m) return null;
+  const items: NewItem[] = [];
+  for (const book of m.books) {
+    if (isStoryBrand()) {
+      const ch = book.chapters[0];
+      if (!ch) continue;
+      items.push({
+        bookId: book.id,
+        chapterId: ch.id,
+        title: book.title,
+        subtitle: book.group ?? '',
+        cover: book.cover,
+        date: book.publishDate ?? ch.publishedAt,
+        meta: metaFor(ch),
+      });
+    } else {
+      const ch = book.chapters[0];
+      if (!ch) continue;
+      items.push({
+        bookId: book.id,
+        chapterId: ch.id,
+        title: book.title,
+        subtitle: book.series ?? book.group ?? '',
+        cover: book.cover,
+        date: book.publishDate,
+        meta: countUnits(book.chapters.length),
+      });
+    }
+  }
+  if (items.length === 0) return null;
+  return (
+    <section class="home-section">
+      <h2 class="home-section-title">All {NOUNS.unitPlural}</h2>
+      <ul class="library-grid" aria-label={`All ${NOUNS.unitPlural}`}>
+        {items.map((item) => (
+          <li key={`${item.bookId}/${item.chapterId}`}>
+            <button
+              class="new-card"
+              onClick={() =>
+                isStoryBrand()
+                  ? openItem(item.bookId, item.chapterId)
+                  : navigate(`/library/${encodeURIComponent(item.bookId)}`)
+              }
+              aria-label={`Open ${item.title}`}
+            >
+              <span class="new-card-coverwrap">
+                {item.cover ? (
+                  <img class="new-card-cover" src={contentUrl(item.cover)} alt="" loading="lazy" />
+                ) : (
+                  <span class="new-card-cover new-cover-fallback" aria-hidden="true">
+                    {item.title.slice(0, 1)}
+                  </span>
+                )}
+                <CardProgress bookId={item.bookId} chapterId={item.chapterId} />
+              </span>
+              <span class="new-card-title">{item.title}</span>
+              {item.subtitle && <span class="new-card-subtitle">{item.subtitle}</span>}
+              <span class="new-card-meta">{item.meta}</span>
+            </button>
+          </li>
+        ))}
       </ul>
     </section>
   );

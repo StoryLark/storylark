@@ -1,10 +1,20 @@
 import { signal, computed } from '@preact/signals';
 import type { ConsumptionMode, LibraryManifest, Progress, Settings } from './types';
 import { BRAND, contentUrl } from '../brand';
+import { readerDefaultMode } from '../presentation';
 import { idb } from './db';
 import { api, type AuthUser } from './api';
 
 export const user = signal<AuthUser | null>(null);
+/**
+ * Has the "who is signed in?" question been ANSWERED yet (AB#7416)?
+ *
+ * Only matters for `auth.required`: `user` is null both before the session
+ * check has run and after it has come back empty, and a gate that cannot tell
+ * those apart flashes a sign-in form at every already-signed-in reader on every
+ * cold start.
+ */
+export const authChecked = signal(false);
 export const manifest = signal<LibraryManifest | null>(null);
 export const progressMap = signal<Map<string, Progress>>(new Map());
 export const online = signal(navigator.onLine);
@@ -15,7 +25,11 @@ export const settings = signal<Settings>({
   lineHeight: 1.7,
   theme: 'auto',
   readAlong: 'word',
-  defaultMode: 'read',
+  // The DEPLOYMENT's default, from presentation `reader.defaultMode`
+  // (AB#7416) — not an override. Anything saved in IndexedDB or synced from
+  // the account wins over it in bootstrap() below, so a reader who has already
+  // chosen a mode keeps their choice when the deployment changes its default.
+  defaultMode: readerDefaultMode(),
   autoSync: true,
   autoDownload: false,
   narratorVoice: '',
@@ -151,5 +165,7 @@ async function loadUser(): Promise<void> {
     void pullPreferences();
   } catch {
     user.value = null;
+  } finally {
+    authChecked.value = true;
   }
 }

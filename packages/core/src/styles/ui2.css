@@ -2,6 +2,17 @@
 
 :root {
   --tabbar-h: 3.5rem;
+  --sidebar-w: 6.5rem;
+  /*
+   * Cover shape on the shelves — presentation `cover.aspect` (AB#7416).
+   * 3/4 is the default because it is what every shelf surface already used;
+   * `square` is set on <html> by mount.tsx via data-cover-aspect.
+   */
+  --cover-ar: 3 / 4;
+}
+
+:root[data-cover-aspect='square'] {
+  --cover-ar: 1 / 1;
 }
 
 /* Every screen clears the fixed tab bar. */
@@ -24,6 +35,94 @@
   padding: 0 0 env(safe-area-inset-bottom);
   background: var(--bg-raised);
   border-top: 1px dashed var(--rule);
+}
+
+/*
+ * ---- Side navigation — presentation `nav.position: "side"` (AB#7416) ----
+ *
+ * A left rail instead of a bottom bar. Same markup, same components: only the
+ * modifier class changes, so a deployment switching position cannot end up with
+ * two implementations of a tab that have to agree.
+ *
+ * `body` carries the offset rather than `.screen`, because the reader's fixed
+ * player bar and the update banner are outside `.screen` and would otherwise
+ * sit underneath the rail.
+ */
+body:has(.tab-bar-side) {
+  padding-left: calc(var(--sidebar-w) + env(safe-area-inset-left));
+}
+
+body:has(.tab-bar-side) .screen {
+  padding-bottom: 2rem;
+}
+
+.tab-bar-side {
+  top: 0;
+  bottom: 0;
+  right: auto;
+  width: calc(var(--sidebar-w) + env(safe-area-inset-left));
+  height: 100%;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0.25rem;
+  padding: calc(1rem + env(safe-area-inset-top)) 0 calc(1rem + env(safe-area-inset-bottom)) env(safe-area-inset-left);
+  border-top: none;
+  border-right: 1px dashed var(--rule);
+}
+
+.tab-bar-side .tab {
+  flex: 0 0 auto;
+  max-width: none;
+  padding: 0.7rem 0;
+}
+
+/*
+ * ---- Square covers — presentation `cover.aspect: "square"` (AB#7416) ----
+ *
+ * Written as overrides on top of the existing portrait rules rather than by
+ * rewriting them in terms of --cover-ar, deliberately: the portrait declarations
+ * are the shipped look of every existing deployment, and re-deriving them from a
+ * variable would have moved .book-hero-cover by a pixel for everybody to make
+ * this file tidier. Only the square case is new, so only the square case is new
+ * CSS. The four surfaces here are the shelves; .story-cover (the 52px list-row
+ * thumbnail) is square already and stays square in both settings — it is a row
+ * thumbnail, not a shelf.
+ */
+:root[data-cover-aspect='square'] .continue-cover {
+  width: 80px;
+}
+
+:root[data-cover-aspect='square'] .new-card-coverwrap {
+  aspect-ratio: 1 / 1;
+}
+
+:root[data-cover-aspect='square'] .series-book-cover {
+  width: 96px;
+}
+
+:root[data-cover-aspect='square'] .book-hero-cover {
+  width: 196px;
+}
+
+/*
+ * ---- Library grid view — presentation `library.view: "grid"` (AB#7416) ----
+ *
+ * A cover shelf instead of a list of rows. Reuses the Home carousel's card
+ * chrome (.new-card*) so the two shelves cannot drift apart; the only thing this
+ * adds is the wrapping grid. New surface, so it takes --cover-ar directly rather
+ * than needing an override.
+ */
+.library-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 1rem 0.85rem;
+}
+
+.library-grid .new-card-coverwrap {
+  aspect-ratio: var(--cover-ar);
 }
 
 .tab {
@@ -537,6 +636,19 @@
 
 .series-section {
   margin-bottom: 1.5rem;
+}
+
+/*
+ * The series shelf's list wrapper (AB#7416). Series cards carry their own
+ * vertical margins and rely on normal-flow collapsing, so this resets the list
+ * chrome and nothing else — putting them in .story-list's flex column instead
+ * would have added its gap on top of those margins and respaced every series
+ * library the day the two shelves were unified.
+ */
+.series-book-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .series-book-card {

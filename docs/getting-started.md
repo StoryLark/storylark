@@ -116,7 +116,12 @@ plus `presentation/<brandId>/presentation.json` and
   inject — `vite dev`, `vite preview`, plain static hosting — and read through
   `packages/core/src/brand.ts` (`BRAND`, `NOUNS`, `contentUrl()`), which the
   service worker consumes too.
-- `layout` and `nouns` from `presentation.json` really are baked, for now.
+- Presentation is an output file too — `dist/presentation.json`, read per request
+  and injected the same way, so a swapped file rearranges a live site with no
+  rebuild (see [the design note](design/presentation-contract.md)). Everything it
+  does not state takes a core default, permanently. `virtual:storylark-presentation`
+  is the no-injector fallback, read through `packages/core/src/presentation.ts`
+  (`PRESENTATION`, `NOUNS`, `countUnits()`).
 - The whole curated font set becomes `@fontsource` imports via
   `virtual:storylark-fonts` (imported in `packages/core/src/mount.tsx`); the
   brand's `fonts` chooses among them at request time. `dist/fonts.json` is the
@@ -133,7 +138,7 @@ The built-in Vite modes (`development`, `production`, `test`) fall back to the
 
 ```
 brands/             per-brand identity: brand.json, theme.css, assets/icons/ (and optional assets/covers/)
-presentation/       per-brand shape: presentation.json (layout, nouns)
+presentation/       per-brand shape: presentation.json (layout, nouns, nav, home, library, reader, player, …)
 deployment/         per-install config: deployment.json (origins, VAPID public key, TTS)
 app/                the base SITE — a thin consumer of storylark-core (index.html, entry.ts, vite.config.ts)
 packages/core/      storylark-core — the PWA engine (library / reader / player / settings + service worker)

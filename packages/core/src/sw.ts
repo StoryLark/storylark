@@ -5,6 +5,7 @@ declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: Array<{ url: str
 import { addPlugins, precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
 
 import { BRAND, BRAND_INJECTED, restampBrand } from './brand';
+import { PRESENTATION_INJECTED, STATED_PRESENTATION, restampPresentation } from './presentation';
 import { DEPLOYMENT, DEPLOYMENT_INJECTED, restampDeployment } from './deployment';
 
 // This deployment's content origin, read at script evaluation. The serving
@@ -36,12 +37,12 @@ const FONT_RE = /\.(woff2?|ttf|otf)$/i;
 precacheAndRoute(self.__WB_MANIFEST);
 cleanupOutdatedCaches();
 
-// The precached app shell carries the deployment config AND the brand that were
-// injected when it was cached, and the precache is only refetched when the
-// BUILD changes — so on an installed PWA a changed origin or a swapped brand
-// would otherwise stay invisible to the page indefinitely, even though this
-// worker already knows about both. Stamp the current values back into the shell
-// on its way out of the cache.
+// The precached app shell carries the deployment config, the brand AND the
+// presentation that were injected when it was cached, and the precache is only
+// refetched when the BUILD changes — so on an installed PWA a changed origin, a
+// swapped brand or a rearranged tab bar would otherwise stay invisible to the
+// page indefinitely, even though this worker already knows about all three.
+// Stamp the current values back into the shell on its way out of the cache.
 //
 // This worker's own copies are current because the platform re-injects sw.js on
 // every fetch of it and serves it `no-store`, so the browser's update check
@@ -50,7 +51,7 @@ cleanupOutdatedCaches();
 // Skipped entirely when nothing injected this script: then the page's
 // build-time fallbacks and this worker's are the same values, and rewriting the
 // document would only risk breaking a static host for no gain.
-if (DEPLOYMENT_INJECTED || BRAND_INJECTED) {
+if (DEPLOYMENT_INJECTED || BRAND_INJECTED || PRESENTATION_INJECTED) {
   addPlugins([
     {
       async cachedResponseWillBeUsed({ cachedResponse }) {
@@ -60,6 +61,11 @@ if (DEPLOYMENT_INJECTED || BRAND_INJECTED) {
         let fresh = html;
         if (DEPLOYMENT_INJECTED) fresh = restampDeployment(fresh, DEPLOYMENT);
         if (BRAND_INJECTED) fresh = restampBrand(fresh, BRAND);
+        // The STATED presentation, not the resolved one — writing this engine's
+        // defaults into a cached document would let a stale copy of an old
+        // default outlive the core update that changed it. See
+        // restampPresentation.
+        if (PRESENTATION_INJECTED) fresh = restampPresentation(fresh, STATED_PRESENTATION);
         if (fresh === html) return cachedResponse;
         return new Response(fresh, {
           status: cachedResponse.status,

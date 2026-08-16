@@ -109,6 +109,18 @@ again **no site rebuild**, no new JavaScript, no hashed asset touched. See
 for the full list of what does and doesn't follow, and
 [the design note](design/runtime-brand.md) for how it works.
 
+### Rearranging the app after deploy
+
+Same again, third source. `dist/presentation.json` is read from the deployed
+assets on every request, so replacing that one file changes the tab bar, the
+Home sections, the shelf's sorting and grouping, cover shape, the reader and
+player defaults, which settings readers are offered and the empty-state copy —
+**no site rebuild**, and on the Azure node server not even a restart. Anything
+the file does not state takes a core default, permanently, so the file only ever
+has to contain the parts you actually want to change. See
+[Build your own presentation](build-your-own-presentation.md) for every key and
+[the design note](design/presentation-contract.md) for how it works.
+
 ## 3. Provision Cloudflare resources
 
 Authenticate once (`npx wrangler login`), then create the per-brand resources.

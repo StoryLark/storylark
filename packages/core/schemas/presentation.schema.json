@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://storylark.dev/schemas/presentation.schema.json",
   "title": "StoryLark presentation",
-  "description": "The shape of a StoryLark library: how it is organised, what a content unit is called, and how the shell is arranged. Every key is optional — an absent key takes the core default, permanently, so a template written today keeps working on every future engine. Only `layout` and `nouns` are consumed by the engine today (contract v1, Phase 0); the remaining keys are the agreed v1 contract surface and are read once the presentation layer becomes runtime data.",
+  "description": "The shape of a StoryLark library: how it is organised, what a content unit is called, and how the shell is arranged. Every key is optional — an absent key takes the core default, permanently, so a template written today keeps working on every future engine, and an unknown key is ignored with a warning so a template written for a NEWER engine loads on an older one. The complete default for every key is DEFAULT_PRESENTATION in storylark-core/src/presentation.ts; this file states what is LEGAL, that one states what is CHOSEN when nothing is said. `contractVersion` does not move when a backwards-compatible key is added here — the two rules above already cover that case — only on a genuinely breaking reshape.",
   "type": "object",
   "required": ["contractVersion"],
   "additionalProperties": false,
@@ -67,9 +67,25 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "defaultSort": { "enum": ["order", "title", "author", "recent", "timeframe"] },
-        "groupBy": { "enum": ["none", "collection", "group", "timeframe"] },
-        "view": { "enum": ["grid", "list"] },
+        "defaultSort": {
+          "enum": ["order", "title", "author", "recent", "timeframe"],
+          "description": "How units are ordered within a section. 'order' is the reading order the author intends (manifest order); 'timeframe' is the in-world chronology; 'recent' is real-world release date, newest first."
+        },
+        "sortOptions": {
+          "type": "array",
+          "items": { "enum": ["order", "title", "author", "recent", "timeframe"] },
+          "description": "Which sorts the picker offers, and in what order. An empty array removes the picker. A timeframe sort is meaningful for an in-world chronology and meaningless elsewhere, which is why the OFFER is configurable and not only the default."
+        },
+        "groupBy": {
+          "enum": ["none", "collection", "group", "timeframe"],
+          "description": "How units are divided into sections. 'collection' is the collection level (a series, or the `group` when there is no series); 'group' is the era/collection label on each unit; 'timeframe' is the in-world period."
+        },
+        "groupOptions": {
+          "type": "array",
+          "items": { "enum": ["collection", "group", "timeframe"] },
+          "description": "Which groupings the picker offers alongside the sorts."
+        },
+        "view": { "enum": ["grid", "list"], "description": "'list' — one row per unit. 'grid' — a cover shelf." },
         "showSearch": { "type": "boolean" }
       }
     },
@@ -77,7 +93,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "defaultMode": { "enum": ["read", "listen", "readListen"] }
+        "defaultMode": {
+          "enum": ["read", "listen", "readListen"],
+          "description": "How an item opens when a reader who has expressed no preference taps it. A reader who HAS chosen keeps their choice — this is the deployment's default, not an override."
+        }
       }
     },
     "player": {
@@ -86,6 +105,90 @@
       "properties": {
         "skipSeconds": { "type": "integer", "minimum": 1, "maximum": 120 },
         "showSpeed": { "type": "boolean" }
+      }
+    },
+    "cover": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Cover shape on the shelves. A short-story library with square title illustrations and a book publisher with portrait covers want visibly different shelves.",
+      "properties": {
+        "aspect": { "enum": ["square", "portrait"] }
+      }
+    },
+    "detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Which parts of the unit/collection detail screen appear. A one-chapter short story and a 20-chapter book want different detail pages.",
+      "properties": {
+        "showCover": { "type": "boolean" },
+        "showAuthor": { "type": "boolean" },
+        "showDescription": { "type": "boolean" },
+        "showChapterList": { "type": "boolean" },
+        "showLength": { "type": "boolean", "description": "Reading time / narration duration on each row." }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Sign-in posture. A genuine per-deployment decision, not a reader preference: it changes the whole first-run experience.",
+      "properties": {
+        "required": { "type": "boolean", "description": "true puts an account gate in front of the whole app; false is browse-and-read anonymously." }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Which controls the Settings screen offers the reader. An opinionated brand may not want its look overridable; an accessibility-minded one very much does.",
+      "properties": {
+        "typography": { "type": "boolean", "description": "Text size and line spacing." },
+        "theme": { "type": "boolean", "description": "Light/dark override." },
+        "narrator": { "type": "boolean", "description": "Narrator picker (still only shown when the library publishes two or more voices)." },
+        "autoPlay": { "type": "boolean", "description": "Auto-play the next unit (still only shown when auto-download is per-unit)." },
+        "readAlong": { "type": "boolean", "description": "Read-along highlight granularity." },
+        "keepAwake": { "type": "boolean" },
+        "downloads": { "type": "boolean", "description": "Storage & downloads section." },
+        "notifications": { "type": "boolean" }
+      }
+    },
+    "download": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What auto-download means here. Previously DERIVED from `layout`, which was surprising and undocumented in the UI; it is an explicit choice now, defaulting to whatever the layout used to imply.",
+      "properties": {
+        "mode": {
+          "enum": ["newUnits", "everything"],
+          "description": "'newUnits' — only units published after the reader turned the toggle on. 'everything' — the whole library, including new units as they publish."
+        }
+      }
+    },
+    "emptyState": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "First-run and empty-shelf copy — the very first thing a new deployment shows its owner. `{unit}`, `{unitPlural}`, `{Unit}`, `{UnitPlural}`, `{collection}`, `{Collection}` and (in `librarySearch`) `{query}` are substituted from `nouns`.",
+      "properties": {
+        "library": { "type": "string" },
+        "librarySearch": { "type": "string" },
+        "home": { "type": "string" },
+        "nowPlaying": { "type": "string" }
+      }
+    },
+    "about": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Extra links and credits, so a brand can point at its own site, licence, or contact.",
+      "properties": {
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "href"],
+            "properties": {
+              "label": { "type": "string" },
+              "href": { "type": "string" }
+            }
+          }
+        }
       }
     },
     "features": {

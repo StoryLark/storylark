@@ -16,6 +16,17 @@ declare module 'virtual:storylark-deployment' {
   export default deployment;
 }
 
+// The presentation as the file STATED it at BUILD time
+// (presentation/<id>/presentation.json, unknown keys removed). This is the
+// fallback only — the live values come from the serving platform at request
+// time, and everything absent comes from DEFAULT_PRESENTATION. Always read
+// ../presentation.ts's PRESENTATION rather than importing this directly.
+declare module 'virtual:storylark-presentation' {
+  import type { PresentationInput } from './lib/types';
+  const presentation: PresentationInput;
+  export default presentation;
+}
+
 // Side-effect module: @fontsource imports generated from the brand's `fonts`.
 declare module 'virtual:storylark-fonts';
 

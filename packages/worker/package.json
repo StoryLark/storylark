@@ -19,7 +19,8 @@
     "./db/types": "./src/db/types.ts",
     "./lib/update-check": "./src/lib/update-check.ts",
     "./lib/deployment": "./src/lib/deployment.ts",
-    "./lib/brand": "./src/lib/brand.ts"
+    "./lib/brand": "./src/lib/brand.ts",
+    "./lib/presentation": "./src/lib/presentation.ts"
   },
   "files": [
     "src/",

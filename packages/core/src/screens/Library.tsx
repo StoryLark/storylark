@@ -6,8 +6,9 @@ import { DownloadButton } from '../components/DownloadButton';
 import { fmtDuration, isStoryBrand, startPlayback } from '../lib/player';
 import { openItem } from '../lib/open-item';
 import { navigate } from '../router';
-import { BRAND, NOUNS, contentUrl, countUnits } from '../brand';
-import type { BookEntry, ChapterEntry } from '../lib/types';
+import { BRAND, contentUrl } from '../brand';
+import { NOUNS, PRESENTATION, countUnits, fillCopy } from '../presentation';
+import type { BookEntry, ChapterEntry, LibraryGroup, LibrarySort } from '../lib/types';
 
 export function Library(): JSX.Element {
   const m = manifest.value;
@@ -24,112 +25,145 @@ export function Library(): JSX.Element {
         </div>
       )}
 
-      {!m && <p class="empty-state">Loading the library…</p>}
-      {m && m.books.length === 0 && <p class="empty-state">No {NOUNS.unitPlural} published yet. Check back soon.</p>}
+      {!m && <p class="empty-state">{fillCopy(PRESENTATION.emptyState.home)}</p>}
+      {m && m.books.length === 0 && <p class="empty-state">{fillCopy(PRESENTATION.emptyState.library)}</p>}
       {m && m.books.length > 0 && (isStoryBrand() ? <StoryLibrary books={m.books} /> : <SeriesLibrary books={m.books} />)}
     </div>
   );
 }
 
-// ---- flat: searchable, sortable list of standalone units ----
+// ---- Arrangement — presentation `library.*` (AB#7416 — plan §0b) ------------
 //
-// Four views onto the same stories, matching the series' three-axis metadata:
-//   order      — the numbered reading order the author intends (manifest order)
-//   chrono     — in-world timeline, by each story's `timeframe` ("YYYY-MM")
-//   released   — real-world release date, newest first (`publishDate`)
-//   collection — grouped by era/collection, each section in in-world order
-type SortKey = 'order' | 'chrono' | 'released' | 'collection';
+// The shelf used to hold one hardcoded `<select>` with four entries, three of
+// which were sorts and one of which ("By collection") was secretly a GROUPING
+// that switched the whole rendering path. Which of the four you got, whether
+// there was a search box at all, and how the sections were built were all
+// decided by `layout`.
+//
+// All of it is presentation now:
+//
+//   library.defaultSort   which order the shelf opens in
+//   library.sortOptions   which orders the picker offers (empty = no picker)
+//   library.groupBy       which grouping it opens in
+//   library.groupOptions  which groupings the picker offers alongside the sorts
+//   library.view          list of rows, or a cover grid
+//   library.showSearch    whether there is a search box
+//
+// The defaults reproduce the old behaviour exactly, per layout — see
+// DEFAULT_PRESENTATION and layoutDefaults in ../presentation.ts. `title` and
+// `author` sorts are implemented but not offered by default, because the
+// picker has never had them and adding entries to everyone's shelf is not what
+// a default is for.
 
-function StoryLibrary({ books }: { books: BookEntry[] }): JSX.Element {
-  const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<SortKey>('order');
+/** The picker's value space: a sort, or a grouping. One control, as before. */
+type Arrangement = { kind: 'sort'; key: LibrarySort } | { kind: 'group'; key: Exclude<LibraryGroup, 'none'> };
 
-  const q = query.trim().toLowerCase();
-  let list = books.filter((b) => b.chapters.length > 0);
-  if (q) {
-    list = list.filter(
-      (b) =>
-        b.title.toLowerCase().includes(q) ||
-        (b.group ?? '').toLowerCase().includes(q) ||
-        (b.description ?? '').toLowerCase().includes(q)
-    );
-  }
-
-  return (
-    <>
-      <div class="library-controls">
-        <input
-          class="library-search"
-          type="search"
-          placeholder="Search stories…"
-          value={query}
-          onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
-          aria-label="Search stories by title or era"
-        />
-        <select class="library-sort" value={sort} onChange={(e) => setSort((e.target as HTMLSelectElement).value as SortKey)} aria-label="Sort stories">
-          <option value="order">Story order</option>
-          <option value="chrono">Chronological</option>
-          <option value="released">Recently released</option>
-          <option value="collection">By collection</option>
-        </select>
-      </div>
-
-      {list.length === 0 && <p class="empty-state">No stories match “{query}”.</p>}
-      {sort === 'collection' ? (
-        <StoryCollections books={list} />
-      ) : (
-        <ul class="story-list">
-          {sortStories(list, sort).map((book) => (
-            <li key={book.id}>
-              <StoryRow book={book} chapter={book.chapters[0]} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </>
-  );
+function arrangementValue(a: Arrangement): string {
+  return `${a.kind}:${a.key}`;
 }
 
-/** Flat sort for the non-grouped views. 'order' preserves the manifest's reading order. */
-function sortStories(books: BookEntry[], sort: SortKey): BookEntry[] {
+function parseArrangement(value: string): Arrangement {
+  const [kind, key] = value.split(':');
+  return kind === 'group'
+    ? { kind: 'group', key: key as Exclude<LibraryGroup, 'none'> }
+    : { kind: 'sort', key: key as LibrarySort };
+}
+
+const SORT_LABELS: Record<LibrarySort, () => string> = {
+  order: () => `${NOUNS.Unit} order`,
+  title: () => 'Title (A–Z)',
+  author: () => 'Author (A–Z)',
+  recent: () => 'Recently released',
+  timeframe: () => 'Chronological',
+};
+
+const GROUP_LABELS: Record<Exclude<LibraryGroup, 'none'>, () => string> = {
+  collection: () => `By ${NOUNS.collection ?? 'collection'}`,
+  group: () => 'By collection',
+  timeframe: () => 'By timeframe',
+};
+
+/** The arrangement this deployment opens in. */
+function initialArrangement(): Arrangement {
+  const { groupBy, defaultSort } = PRESENTATION.library;
+  return groupBy === 'none' ? { kind: 'sort', key: defaultSort } : { kind: 'group', key: groupBy };
+}
+
+/** One section of the shelf. `name` null = the ungrouped whole library. */
+interface Section {
+  name: string | null;
+  books: BookEntry[];
+}
+
+/**
+ * Divide the library into sections.
+ *
+ * Shared by both layouts on purpose. The two used to be separate functions with
+ * separate grouping rules (StoryCollections grouped on `group` with an "Other
+ * Stories" bucket; SeriesLibrary grouped on `series ?? group ?? BRAND.name`),
+ * which is why `groupBy` has both a `collection` and a `group` value — they are
+ * those two rules, now nameable and selectable independently of the layout.
+ */
+function sectionsOf(books: BookEntry[], by: LibraryGroup, within: LibrarySort): Section[] {
+  if (by === 'none') return [{ name: null, books: sortBooks(books, within) }];
+
+  const buckets = new Map<string, BookEntry[]>();
+  for (const b of books) {
+    const key =
+      by === 'collection'
+        ? (b.series ?? b.group ?? BRAND.name)
+        : by === 'timeframe'
+          ? (b.timeframe ?? `Undated ${NOUNS.unitPlural}`)
+          : b.group || `Other ${NOUNS.UnitPlural}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(b);
+  }
+
+  const sections = [...buckets.entries()].map(([name, list]) => ({ name, books: sortBooks(list, within) }));
+  // Section order: by the collection's own place in the series (`collection`,
+  // matching the old SeriesLibrary) or by its earliest in-world date (`group` /
+  // `timeframe`, matching the old StoryCollections). Both are the rules the two
+  // paths already used; neither is new.
+  if (by === 'collection') {
+    sections.sort(
+      (a, b) =>
+        Math.min(...a.books.map((x) => x.seriesOrder ?? 999)) - Math.min(...b.books.map((x) => x.seriesOrder ?? 999))
+    );
+  } else {
+    sections.sort((a, b) => cmpAsc(earliest(a.books), earliest(b.books)));
+  }
+  return sections;
+}
+
+/**
+ * Order within a section.
+ *
+ * 'order' preserves the manifest's reading order, which is the author's
+ * intent and therefore the only sort that is not a comparison. Inside a
+ * GROUPED shelf the old code always used in-world order regardless of the sort
+ * picker, and sortBooks is called with that same key from renderSections below,
+ * so grouped output is unchanged.
+ */
+function sortBooks(books: BookEntry[], sort: LibrarySort): BookEntry[] {
   const list = [...books];
-  if (sort === 'chrono') {
-    list.sort((a, b) => cmpAsc(a.timeframe, b.timeframe) || (a.bookOrder ?? 999) - (b.bookOrder ?? 999));
-  } else if (sort === 'released') {
-    list.sort((a, b) => cmpAsc(releaseDate(b), releaseDate(a))); // newest first
+  switch (sort) {
+    case 'timeframe':
+      list.sort((a, b) => cmpAsc(a.timeframe, b.timeframe) || (a.bookOrder ?? 999) - (b.bookOrder ?? 999));
+      break;
+    case 'recent':
+      list.sort((a, b) => cmpAsc(releaseDate(b), releaseDate(a))); // newest first
+      break;
+    case 'title':
+      list.sort((a, b) => a.title.localeCompare(b.title));
+      break;
+    case 'author':
+      list.sort((a, b) => cmpAsc(a.author, b.author) || a.title.localeCompare(b.title));
+      break;
+    case 'order':
+    default:
+      break; // manifest order
   }
   return list;
-}
-
-/** flat: units grouped under their era/collection; sections and rows in in-world order. */
-function StoryCollections({ books }: { books: BookEntry[] }): JSX.Element {
-  const groups = new Map<string, BookEntry[]>();
-  for (const b of books) {
-    const key = b.group || 'Other Stories';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(b);
-  }
-  for (const list of groups.values()) {
-    list.sort((a, b) => cmpAsc(a.timeframe, b.timeframe) || (a.bookOrder ?? 999) - (b.bookOrder ?? 999));
-  }
-  const sections = [...groups.entries()].sort((a, b) => cmpAsc(earliest(a[1]), earliest(b[1])));
-
-  return (
-    <>
-      {sections.map(([name, list]) => (
-        <section key={name} class="series-section">
-          <h2 class="group-title">{name}</h2>
-          <ul class="story-list">
-            {list.map((book) => (
-              <li key={book.id}>
-                <StoryRow book={book} chapter={book.chapters[0]} />
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-    </>
-  );
 }
 
 /** Ascending string compare that sorts missing/empty values last. */
@@ -144,11 +178,133 @@ function releaseDate(b: BookEntry): string | undefined {
   return b.publishDate ?? b.chapters[0]?.publishedAt;
 }
 
-/** Earliest in-world timeframe within a collection — orders the sections. */
+/** Earliest in-world timeframe within a section — orders the sections. */
 function earliest(list: BookEntry[]): string | undefined {
   let min: string | undefined;
   for (const b of list) if (b.timeframe && (!min || b.timeframe < min)) min = b.timeframe;
   return min;
+}
+
+/** Search box + arrangement picker, each present only if this deployment offers it. */
+function LibraryControls({
+  query,
+  onQuery,
+  arrangement,
+  onArrangement,
+}: {
+  query: string;
+  onQuery: (q: string) => void;
+  arrangement: Arrangement;
+  onArrangement: (a: Arrangement) => void;
+}): JSX.Element | null {
+  const { showSearch, sortOptions, groupOptions } = PRESENTATION.library;
+  const showPicker = sortOptions.length + groupOptions.length > 1;
+  if (!showSearch && !showPicker) return null;
+  return (
+    <div class="library-controls">
+      {showSearch && (
+        <input
+          class="library-search"
+          type="search"
+          placeholder={`Search ${NOUNS.unitPlural}…`}
+          value={query}
+          onInput={(e) => onQuery((e.target as HTMLInputElement).value)}
+          aria-label={`Search ${NOUNS.unitPlural} by title or ${NOUNS.collection ?? 'collection'}`}
+        />
+      )}
+      {showPicker && (
+        <select
+          class="library-sort"
+          value={arrangementValue(arrangement)}
+          onChange={(e) => onArrangement(parseArrangement((e.target as HTMLSelectElement).value))}
+          aria-label={`Arrange ${NOUNS.unitPlural}`}
+        >
+          {sortOptions.map((key) => (
+            <option key={`sort:${key}`} value={`sort:${key}`}>
+              {SORT_LABELS[key]()}
+            </option>
+          ))}
+          {groupOptions.map((key) => (
+            <option key={`group:${key}`} value={`group:${key}`}>
+              {GROUP_LABELS[key]()}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+}
+
+/** Title, collection and description — the fields the old flat search matched. */
+function matches(b: BookEntry, q: string): boolean {
+  return (
+    b.title.toLowerCase().includes(q) ||
+    (b.group ?? '').toLowerCase().includes(q) ||
+    (b.series ?? '').toLowerCase().includes(q) ||
+    (b.description ?? '').toLowerCase().includes(q)
+  );
+}
+
+/**
+ * Sections rendered with whatever row/card the layout uses.
+ *
+ * `listClass` exists because the two layouts space their rows differently and
+ * always did: flat rows are a flex column with a gap, series cards carry their
+ * own margins in normal flow. A single list class would have quietly restyled
+ * one of them the day this function replaced the two hand-written renderers.
+ */
+function Shelf({
+  sections,
+  row,
+  listClass,
+}: {
+  sections: Section[];
+  row: (book: BookEntry) => JSX.Element;
+  listClass: string;
+}): JSX.Element {
+  const grid = PRESENTATION.library.view === 'grid';
+  const list = (books: BookEntry[]): JSX.Element => (
+    <ul class={grid ? 'library-grid' : listClass}>
+      {books.map((book) => (
+        <li key={book.id}>{grid ? <GridCard book={book} /> : row(book)}</li>
+      ))}
+    </ul>
+  );
+  if (sections.length === 1 && sections[0].name === null) return list(sections[0].books);
+  return (
+    <>
+      {sections.map((section) => (
+        <section key={section.name} class="series-section">
+          <h2 class="group-title">{section.name}</h2>
+          {list(section.books)}
+        </section>
+      ))}
+    </>
+  );
+}
+
+// ---- flat: standalone units ----
+
+function StoryLibrary({ books }: { books: BookEntry[] }): JSX.Element {
+  const [query, setQuery] = useState('');
+  const [arrangement, setArrangement] = useState<Arrangement>(initialArrangement);
+
+  const q = query.trim().toLowerCase();
+  let list = books.filter((b) => b.chapters.length > 0);
+  if (q) list = list.filter((b) => matches(b, q));
+
+  const sections =
+    arrangement.kind === 'group'
+      ? sectionsOf(list, arrangement.key, 'timeframe')
+      : sectionsOf(list, 'none', arrangement.key);
+
+  return (
+    <>
+      <LibraryControls query={query} onQuery={setQuery} arrangement={arrangement} onArrangement={setArrangement} />
+      {list.length === 0 && <p class="empty-state">{fillCopy(PRESENTATION.emptyState.librarySearch, { query })}</p>}
+      <Shelf sections={sections} listClass="story-list" row={(book) => <StoryRow book={book} chapter={book.chapters[0]} />} />
+    </>
+  );
 }
 
 function StoryRow({ book, chapter }: { book: BookEntry; chapter: ChapterEntry }): JSX.Element {
@@ -168,7 +324,10 @@ function StoryRow({ book, chapter }: { book: BookEntry; chapter: ChapterEntry })
           <span class="story-title">{book.title}</span>
           {book.group && <span class="story-era">{book.group}</span>}
           <span class="chapter-meta">
-            {chapter.hasAudio && chapter.audioDurationMs > 0 ? `♪ ${fmtDuration(chapter.audioDurationMs)}` : chapter.readingTime ?? `${chapter.wordCount} words`}
+            {PRESENTATION.detail.showLength &&
+              (chapter.hasAudio && chapter.audioDurationMs > 0
+                ? `♪ ${fmtDuration(chapter.audioDurationMs)}`
+                : (chapter.readingTime ?? `${chapter.wordCount} words`))}
             {dl === 'done' && ' · ↓ offline'}
           </span>
           {p && p.percent > 0 && (
@@ -193,30 +352,71 @@ function StoryRow({ book, chapter }: { book: BookEntry; chapter: ChapterEntry })
   );
 }
 
+/**
+ * One unit as a cover card — presentation `library.view: "grid"`.
+ *
+ * Layout-agnostic: in a flat library it opens the unit, in a series library it
+ * opens the collection, which is exactly what the corresponding row does.
+ */
+function GridCard({ book }: { book: BookEntry }): JSX.Element {
+  const chapter = book.chapters[0];
+  const pct = bookProgress(book);
+  return (
+    <button
+      class="new-card"
+      aria-label={`Open ${book.title}`}
+      onClick={() =>
+        isStoryBrand() && chapter
+          ? openItem(book.id, chapter.id)
+          : navigate(`/library/${encodeURIComponent(book.id)}`)
+      }
+    >
+      <span class="new-card-coverwrap">
+        {book.cover ? (
+          <img class="new-card-cover" src={contentUrl(book.cover)} alt="" loading="lazy" />
+        ) : (
+          <span class="new-card-cover new-cover-fallback" aria-hidden="true">
+            {book.title.slice(0, 1)}
+          </span>
+        )}
+        {pct > 0 && (
+          <span class="new-card-progress" aria-hidden="true">
+            <span class="new-card-progress-fill" style={{ width: `${Math.min(100, Math.round(pct * 100))}%` }} />
+          </span>
+        )}
+      </span>
+      <span class="new-card-title">{book.title}</span>
+      {PRESENTATION.detail.showAuthor && book.author && <span class="new-card-subtitle">{book.author}</span>}
+      {PRESENTATION.detail.showLength && (
+        <span class="new-card-meta">
+          {isStoryBrand() && chapter?.hasAudio && chapter.audioDurationMs > 0
+            ? `♪ ${fmtDuration(chapter.audioDurationMs)}`
+            : countUnits(book.chapters.length)}
+        </span>
+      )}
+    </button>
+  );
+}
+
 // ---- series: Series → Collection → chapters (Audible-like) ----
 
 function SeriesLibrary({ books }: { books: BookEntry[] }): JSX.Element {
-  const series = new Map<string, BookEntry[]>();
-  for (const b of books) {
-    // Older manifests carry no series metadata — fall back to one shelf.
-    const s = b.series ?? b.group ?? BRAND.name;
-    if (!series.has(s)) series.set(s, []);
-    series.get(s)!.push(b);
-  }
-  for (const list of series.values()) list.sort((a, b) => (a.bookOrder ?? 999) - (b.bookOrder ?? 999));
-  const entries = [...series.entries()].sort(
-    (a, b) => Math.min(...a[1].map((x) => x.seriesOrder ?? 999)) - Math.min(...b[1].map((x) => x.seriesOrder ?? 999))
-  );
+  const [query, setQuery] = useState('');
+  const [arrangement, setArrangement] = useState<Arrangement>(initialArrangement);
+
+  const q = query.trim().toLowerCase();
+  const list = q ? books.filter((b) => matches(b, q)) : books;
+
+  const sections =
+    arrangement.kind === 'group'
+      ? sectionsOf(list, arrangement.key, 'order')
+      : sectionsOf(list, 'none', arrangement.key);
+
   return (
     <>
-      {entries.map(([name, list]) => (
-        <section key={name} class="series-section">
-          <h2 class="group-title">{name}</h2>
-          {list.map((book) => (
-            <SeriesBookCard key={book.id} book={book} />
-          ))}
-        </section>
-      ))}
+      <LibraryControls query={query} onQuery={setQuery} arrangement={arrangement} onArrangement={setArrangement} />
+      {list.length === 0 && <p class="empty-state">{fillCopy(PRESENTATION.emptyState.librarySearch, { query })}</p>}
+      <Shelf sections={sections} listClass="series-book-list" row={(book) => <SeriesBookCard book={book} />} />
     </>
   );
 }
@@ -246,7 +446,7 @@ function SeriesBookCard({ book }: { book: BookEntry }): JSX.Element {
       )}
       <span class="series-book-body">
         <span class="book-title">{book.title}</span>
-        <span class="book-author">{book.author}</span>
+        {PRESENTATION.detail.showAuthor && <span class="book-author">{book.author}</span>}
         <span class="chapter-meta">
           {countUnits(book.chapters.length)}
           {pct > 0 && ` · ${Math.round(pct * 100)}%`}

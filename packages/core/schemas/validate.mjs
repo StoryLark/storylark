@@ -65,27 +65,14 @@ export const RELOCATED_BRAND_KEYS = {
   nouns: 'presentation (presentation/<id>/presentation.json)',
 };
 
-/**
- * Core defaults for the presentation keys the engine consumes today. Rule 1
- * above in code form: a presentation file that omits these still builds.
- *
- * Deliberately only `layout` and `nouns`. The rest of the §0b contract
- * (nav/home/library/reader/player/features) is validated but has no core
- * default yet, because nothing reads it until the presentation layer becomes
- * runtime data — inventing defaults now would bake unread keys into every
- * bundle.
- */
-export const PRESENTATION_DEFAULTS = Object.freeze({
-  layout: 'flat',
-  nouns: Object.freeze({
-    unit: 'story',
-    unitPlural: 'stories',
-    Unit: 'Story',
-    UnitPlural: 'Stories',
-    collection: null,
-    Collection: null,
-  }),
-});
+// Presentation defaults deliberately do NOT live here (AB#7416 — plan §0d
+// Phase 3). They are DEFAULT_PRESENTATION in storylark-core/src/presentation.ts,
+// because presentation is resolved in the FRONTEND now: the build ships the
+// file as the operator stated it (dist/presentation.json) and the browser fills
+// in everything absent. Keeping a second copy of the defaults on this side
+// would mean two answers to "what does an absent key mean", and the day they
+// disagreed, rule 1 above would quietly stop being true. Nothing in the Node
+// build needs them any more, so nothing keeps them.
 
 /** Core defaults for deployment config — an unconfigured deployment, not a broken one. */
 export const DEPLOYMENT_DEFAULTS = Object.freeze({

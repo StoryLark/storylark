@@ -24,6 +24,13 @@ import {
   type BrandIdentity,
   type FontRegistry,
 } from './lib/brand';
+import {
+  PRESENTATION_ASSET,
+  injectPresentationIntoHtml,
+  injectPresentationIntoScript,
+  readPresentationAsset,
+  type PresentationInput,
+} from './lib/presentation';
 
 const app = new Hono<AppContext>();
 
@@ -123,17 +130,29 @@ async function serveAsset(request: Request, env: Env): Promise<Response> {
   }
 
   if (path === '/sw.js' && /javascript|ecmascript/i.test(type)) {
-    const [js, brand] = await Promise.all([response.text(), liveBrand(request, env)]);
-    // Brand first, so the deployment statement stays on line 1 where Phase 1's
-    // own prelude regex expects to find it.
-    const branded = brand ? injectBrandIntoScript(js, brand) : js;
-    return rewritten(response, injectDeploymentIntoScript(branded, deploymentConfigFromEnv(env)));
+    const [js, brand, presentation] = await Promise.all([
+      response.text(),
+      liveBrand(request, env),
+      livePresentation(request, env),
+    ]);
+    // Presentation, then brand, then deployment — each prepends, so the
+    // deployment statement ends up on line 1 where Phase 1's own prelude regex
+    // expects to find it.
+    let out = presentation ? injectPresentationIntoScript(js, presentation) : js;
+    out = brand ? injectBrandIntoScript(out, brand) : out;
+    return rewritten(response, injectDeploymentIntoScript(out, deploymentConfigFromEnv(env)));
   }
 
   if (type.includes('text/html')) {
-    const [html, brand] = await Promise.all([response.text(), liveBrand(request, env)]);
-    const withDeployment = injectDeploymentIntoHtml(html, deploymentConfigFromEnv(env));
-    return rewritten(response, brand ? injectBrandIntoHtml(withDeployment, brand) : withDeployment);
+    const [html, brand, presentation] = await Promise.all([
+      response.text(),
+      liveBrand(request, env),
+      livePresentation(request, env),
+    ]);
+    let out = injectDeploymentIntoHtml(html, deploymentConfigFromEnv(env));
+    if (brand) out = injectBrandIntoHtml(out, brand);
+    if (presentation) out = injectPresentationIntoHtml(out, presentation);
+    return rewritten(response, out);
   }
 
   return response;
@@ -179,6 +198,27 @@ function rewritten(response: Response, body: string): Response {
 async function liveBrand(request: Request, env: Env): Promise<BrandIdentity | undefined> {
   const text = await assetText(request, env, BRAND_ASSET);
   return text === undefined ? undefined : readBrandAsset(text);
+}
+
+/**
+ * This deployment's presentation, read from its own static assets on every
+ * request (AB#7416 — plan §0d Phase 3).
+ *
+ * Per request and not memoised, for exactly the reason liveBrand is: swapping
+ * dist/presentation.json is meant to take effect on the NEXT request, and an
+ * isolate-lifetime cache would make that "on the next cold start", which is
+ * unpredictable and untestable. The cost is one `env.ASSETS.fetch` — a binding
+ * call inside the same colo, issued in parallel with the document fetch and the
+ * brand read it accompanies, not a network round trip.
+ *
+ * Returns undefined when the deployment ships no presentation.json (a site built
+ * by an older core) or when the file is unusable; callers then skip injection
+ * and the frontend falls back to the presentation baked in at build, and beyond
+ * that to core's defaults. A broken file must never take the library down.
+ */
+async function livePresentation(request: Request, env: Env): Promise<PresentationInput | undefined> {
+  const text = await assetText(request, env, PRESENTATION_ASSET);
+  return text === undefined ? undefined : readPresentationAsset(text);
 }
 
 /**

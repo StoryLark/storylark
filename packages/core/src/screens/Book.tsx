@@ -4,7 +4,8 @@ import { downloadStates, downloadChapter } from '../lib/downloads';
 import { fmtDuration, startPlayback } from '../lib/player';
 import { openItem } from '../lib/open-item';
 import { navigate } from '../router';
-import { contentUrl, NOUNS, countUnits } from '../brand';
+import { contentUrl } from '../brand';
+import { NOUNS, PRESENTATION, countUnits } from '../presentation';
 import { bookProgress } from './Library';
 import { DownloadButton } from '../components/DownloadButton';
 import type { BookEntry, ChapterEntry } from '../lib/types';
@@ -47,17 +48,25 @@ export function Book({ bookId }: { bookId: string }): JSX.Element {
         <span />
       </header>
 
+      {/*
+        Which of these five appear is presentation `detail.*` (AB#7416 — plan
+        §0b, "The unit/detail screen"). A one-chapter short story and a
+        20-chapter book want visibly different detail pages, and until now this
+        screen was the same five blocks for both. Every flag defaults to true,
+        which is exactly what it rendered before.
+      */}
       <div class="book-hero">
-        {book.cover ? (
-          <img class="book-hero-cover" src={contentUrl(book.cover)} alt="" />
-        ) : (
-          <span class="book-hero-cover new-cover-fallback" aria-hidden="true">
-            {book.title.slice(0, 1)}
-          </span>
-        )}
+        {PRESENTATION.detail.showCover &&
+          (book.cover ? (
+            <img class="book-hero-cover" src={contentUrl(book.cover)} alt="" />
+          ) : (
+            <span class="book-hero-cover new-cover-fallback" aria-hidden="true">
+              {book.title.slice(0, 1)}
+            </span>
+          ))}
         <h1 class="book-hero-title">{book.title}</h1>
-        <p class="book-author">{book.author}</p>
-        {book.description && <p class="book-description">{book.description}</p>}
+        {PRESENTATION.detail.showAuthor && <p class="book-author">{book.author}</p>}
+        {PRESENTATION.detail.showDescription && book.description && <p class="book-description">{book.description}</p>}
         {started && (
           <div class="book-hero-progress">
             <span class="chapter-progress">
@@ -74,11 +83,13 @@ export function Book({ bookId }: { bookId: string }): JSX.Element {
         <DownloadBookButton book={book} />
       </div>
 
-      <ol class="chapter-list book-chapter-list">
-        {book.chapters.map((ch) => (
-          <BookChapterRow key={ch.id} bookId={book.id} chapter={ch} />
-        ))}
-      </ol>
+      {PRESENTATION.detail.showChapterList && (
+        <ol class="chapter-list book-chapter-list">
+          {book.chapters.map((ch) => (
+            <BookChapterRow key={ch.id} bookId={book.id} chapter={ch} />
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
@@ -142,8 +153,12 @@ function BookChapterRow({ bookId, chapter }: { bookId: string; chapter: ChapterE
           {chapter.label && <span class="chapter-title">{chapter.title}</span>}
         </span>
         <span class="chapter-meta">
-          {chapter.hasAudio && chapter.audioDurationMs > 0 && `♪ ${fmtDuration(chapter.audioDurationMs)} · `}
-          {chapter.readingTime ?? `${chapter.wordCount} words`}
+          {PRESENTATION.detail.showLength && (
+            <>
+              {chapter.hasAudio && chapter.audioDurationMs > 0 && `♪ ${fmtDuration(chapter.audioDurationMs)} · `}
+              {chapter.readingTime ?? `${chapter.wordCount} words`}
+            </>
+          )}
           {dl === 'done' && ' · ↓ offline'}
           {` · opens in ${mode === 'both' ? 'read + listen' : mode}`}
         </span>

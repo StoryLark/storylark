@@ -16,7 +16,17 @@ import {
 } from '../lib/player';
 import { manifest } from '../lib/state';
 import { navigate } from '../router';
-import { contentUrl, NOUNS } from '../brand';
+import { contentUrl } from '../brand';
+import { NOUNS, PRESENTATION, fillCopy } from '../presentation';
+
+/**
+ * Skip distance, from presentation `player.skipSeconds` (AB#7416).
+ *
+ * Read once at module scope rather than per render: the presentation is
+ * resolved before any component mounts and cannot change without a document
+ * load, so this is a constant with a configurable value, not state.
+ */
+const SKIP = PRESENTATION.player.skipSeconds;
 
 export function NowPlaying(): JSX.Element {
   const item = nowPlaying.value;
@@ -28,7 +38,7 @@ export function NowPlaying(): JSX.Element {
           <h1 class="screen-title">Now Playing</h1>
         </header>
         <div class="np-empty">
-          <p class="empty-state">Nothing playing yet.</p>
+          <p class="empty-state">{fillCopy(PRESENTATION.emptyState.nowPlaying)}</p>
           <button class="btn" onClick={() => navigate('/library')}>
             Pick something from the library
           </button>
@@ -87,17 +97,25 @@ export function NowPlaying(): JSX.Element {
       )}
 
       <div class="np-controls">
-        <button class="np-rate" onClick={cycleRate} aria-label="Playback speed" disabled={!item.hasAudio}>
-          {playerRate.value}×
-        </button>
-        <button class="np-skip" onClick={() => skip(-15)} aria-label="Back 15 seconds" disabled={!item.hasAudio}>
-          ↺15
+        {/*
+          The speed dial and the skip distance are presentation (AB#7416): an
+          opinionated audiobook brand may not want a speed control at all, and
+          15 seconds is a convention rather than a law. The defaults are what
+          this transport has always done — dial shown, ±15s.
+        */}
+        {PRESENTATION.player.showSpeed && (
+          <button class="np-rate" onClick={cycleRate} aria-label="Playback speed" disabled={!item.hasAudio}>
+            {playerRate.value}×
+          </button>
+        )}
+        <button class="np-skip" onClick={() => skip(-SKIP)} aria-label={`Back ${SKIP} seconds`} disabled={!item.hasAudio}>
+          ↺{SKIP}
         </button>
         <button class="np-play" onClick={togglePlay} aria-label={playerPlaying.value ? 'Pause' : 'Play'} disabled={playerLoading.value}>
           {playerLoading.value ? '…' : playerPlaying.value ? '❚❚' : '▶'}
         </button>
-        <button class="np-skip" onClick={() => skip(15)} aria-label="Forward 15 seconds" disabled={!item.hasAudio}>
-          15↻
+        <button class="np-skip" onClick={() => skip(SKIP)} aria-label={`Forward ${SKIP} seconds`} disabled={!item.hasAudio}>
+          {SKIP}↻
         </button>
         <button
           class="np-readalong"
