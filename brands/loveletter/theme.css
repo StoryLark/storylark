@@ -1,0 +1,55 @@
+/* Loveletter — romance, as correspondence.
+ *
+ * Not a cream literary paper with a terracotta accent. The reference is the
+ * physical letter: laid stock with a rose-grey cast from being kept in a box
+ * for years, plum-black ink that was never quite black, and one deep carmine
+ * for the wax seal. Carmine is the accent because a seal is the only place a
+ * letter is allowed to shout.
+ *
+ * The read-along highlight is a faded ink violet rather than a warm gold — a
+ * second correspondent's hand annotating the page, cool against the carmine
+ * so the two never compete for the same glance.
+ *
+ * Display and headers are Cormorant Garamond for its high stroke contrast (it
+ * looks written, not printed); the reading face is Lora, which keeps that
+ * calligraphic feel at paragraph size where Cormorant would go thin.
+ */
+:root {
+  color-scheme: light;
+
+  --bg: #F8EFF0;          /* laid paper, gone slightly rose in storage */
+  --bg-raised: #FEF8F7;
+  --bg-sunken: #EDDFE1;
+  --text: #2E2028;        /* plum-black ink */
+  --text-muted: #6D5761;
+  --text-faint: #A28E97;
+  --accent: #A83250;      /* sealing wax */
+  --accent-strong: #7F1F39;
+  --rule: #E4D1D5;
+  --link: #A83250;
+
+  --font-display: "Cormorant Garamond", Garamond, Georgia, serif;
+  --font-headers: "Cormorant Garamond", Garamond, Georgia, serif;
+  --font-body: "Lora", Georgia, Cambria, "Times New Roman", serif;
+  --font-mono: "Inter", system-ui, sans-serif;
+
+  /* Faded ink violet — the annotating hand. */
+  --highlight-word: rgba(124, 96, 176, 0.2);
+  --highlight-block: rgba(124, 96, 176, 0.42);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1E151A;          /* reading by one lamp, late */
+  --bg-raised: #291E23;
+  --bg-sunken: #150E11;
+  --text: #F3E5E8;
+  --text-muted: #C0A8B0;
+  --text-faint: #8D747D;
+  --accent: #E8768F;      /* the wax, lit */
+  --accent-strong: #F49AAC;
+  --rule: #3A2830;
+  --link: #F49AAC;
+  --highlight-word: rgba(166, 138, 220, 0.26);
+  --highlight-block: rgba(166, 138, 220, 0.5);
+}

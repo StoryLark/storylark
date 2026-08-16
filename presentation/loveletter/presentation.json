@@ -1,0 +1,51 @@
+{
+  "contractVersion": 1,
+  "layout": "flat",
+  "nouns": {
+    "unit": "letter",
+    "unitPlural": "letters",
+    "Unit": "Letter",
+    "UnitPlural": "Letters",
+    "collection": null,
+    "Collection": null
+  },
+  "nav": {
+    "position": "bottom",
+    "items": ["home", "library", "nowPlaying", "settings"],
+    "labels": {
+      "library": "Letters",
+      "nowPlaying": "Aloud"
+    }
+  },
+  "home": {
+    "sections": ["continue", "newReleases"]
+  },
+  "library": {
+    "defaultSort": "recent",
+    "sortOptions": ["recent", "title", "author"],
+    "groupBy": "none",
+    "groupOptions": ["group"],
+    "view": "grid",
+    "showSearch": true
+  },
+  "reader": {
+    "defaultMode": "read"
+  },
+  "player": {
+    "skipSeconds": 10,
+    "showSpeed": true
+  },
+  "cover": {
+    "aspect": "portrait"
+  },
+  "detail": {
+    "showChapterList": false,
+    "showLength": true
+  },
+  "emptyState": {
+    "library": "No {unitPlural} yet. The post comes when it comes.",
+    "librarySearch": "Nothing here answers to “{query}”.",
+    "home": "Sorting the post…",
+    "nowPlaying": "Nobody is reading aloud just now."
+  }
+}
