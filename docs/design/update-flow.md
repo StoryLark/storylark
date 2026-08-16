@@ -166,18 +166,39 @@ assets, which downloaded a real 3.4MB artifact, verified its real checksum,
 and produced a 230-file manifest carrying all 11 of that deployment's own
 brand files.
 
-**Not verified: Cloudflare's and Azure's own servers accepting the calls.**
-Both are exercised against local servers implementing the published
-contracts, and the tests assert the exact requests. What no test here can
-prove is that the vendors agree with their own documentation — proving that
-needs a credential capable of redeploying a live site, which is the risk
-this design exists to bound rather than to take casually. The specific open
-question on Cloudflare is whether `/content` honours `assets.jwt`: the
-documented metadata shape lists `assets` for the script, version and
-Workers-for-Platforms upload endpoints, and `/content` is a fourth. If it
-does not, the first real run fails with the API's own 4xx, the portal shows
-it, and nothing is deployed — the failure mode is a red message, not a
-broken site.
+**Cloudflare's own API: now verified for real, against `app.storylark.dev`
+(the project's own demo deployment, 2026-08-16) — not a customer's site.**
+The first two real attempts failed, and both failures were real, useful
+findings rather than reasons to stop:
+
+1. `PUT .../scripts/:name/content` does not exist for an asset-backed
+   Worker at all — exactly the open question this section used to flag as
+   unverified, now answered "no." The correct endpoint is the plain script
+   upload (`PUT .../scripts/:name`, no `/content`), which does accept
+   `assets.jwt` but replaces the Worker's *whole* configuration, so
+   bindings have to be resupplied rather than avoided. Fixed by reading
+   them back via `GET .../settings` first and resending them unchanged —
+   the same "read back what's really there" principle already used for
+   brand assets.
+2. Re-sending a `secret_text` binding by name with no value is **rejected**
+   by Cloudflare's API ("invalid or missing text property"), not treated
+   as "keep the stored value" as first assumed. The real rule: secrets are
+   independent of the bindings list, and any secret simply left out of an
+   upload is preserved automatically from the previous version. Fixed by
+   omitting `secret_text` bindings entirely rather than referencing them.
+
+The third real attempt succeeded completely: real download, real checksum,
+real migration check, real asset diff-and-upload (230 assets, mostly
+already present and skipped), real binding read-back (secrets correctly
+omitted), real script swap, and the site immediately serving the new
+version with D1, R2, admin auth and every secret intact — confirmed by
+re-checking that `oneClick` stayed available afterward, i.e. the
+mechanism survived redeploying itself and can be clicked again.
+
+**Azure's managed-identity path is still unverified against a real App
+Service** — the reasoning (Kudu accepting an IMDS-issued Entra token) is
+sound and documented above, but has not yet been exercised against a real
+deployment the way the Cloudflare path now has.
 
 ## What was removed, and why
 
