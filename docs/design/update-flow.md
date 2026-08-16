@@ -195,10 +195,44 @@ version with D1, R2, admin auth and every secret intact — confirmed by
 re-checking that `oneClick` stayed available afterward, i.e. the
 mechanism survived redeploying itself and can be clicked again.
 
-**Azure's managed-identity path is still unverified against a real App
-Service** — the reasoning (Kudu accepting an IMDS-issued Entra token) is
-sound and documented above, but has not yet been exercised against a real
-deployment the way the Cloudflare path now has.
+**Azure's managed-identity path: now also verified for real, against
+`storylark-dev-app` (2026-08-16) — three real bugs found and fixed along
+the way, each only reachable once the previous one was out of the way:**
+
+1. `POST /api/admin/update-install`'s default version resolution asked
+   the npm registry for `storylark-worker`'s latest version and used it
+   to build the GitHub release tag, which is keyed by `storylark-core`'s
+   version instead. The two packages can now version independently under
+   changesets — a worker-only patch (this deployment's own earlier
+   self-deploy fixes) left them different for the first time, and the
+   admin portal's button (which always POSTs an empty body) 404'd
+   looking for a release that was never going to exist. Fixed by
+   resolving the default from `storylark-core`'s own registry entry.
+2. Azure's `server.mjs` sets `ENGINE_RELEASE_REPO` to `process.env.
+   ENGINE_RELEASE_REPO ?? ''` — an empty string when unset, not
+   `undefined` (Node env vars don't distinguish "absent" the way a
+   Cloudflare Workers binding does). `findEngineRelease()`'s default
+   resolved with `??`, which only falls back on `null`/`undefined`, so
+   the empty string produced a real `https://github.com//releases/...`
+   404. Fixed with a truthy check, matching how `ENGINE_RELEASE_BASE` was
+   already handled.
+3. `migrate-postgres.mjs` shipped in the published npm tarball (it was
+   listed in `package.json`'s `files`) but was missing from `exports` —
+   Node's strict exports-map resolution rejects any subpath not listed
+   there regardless of `files`. `self-deploy.mjs`'s
+   `createRequire(...).resolve()` threw, and the surrounding catch turned
+   that into a false "file is missing." This bug had been live since
+   Postgres migrations were added — `install.mjs`'s layer-2 `--update`
+   path never hit it, since it joins the path directly instead of asking
+   Node's module resolver, so only the one-click path was ever exposed to
+   it. Fixed by adding the missing `exports` entry.
+
+The fourth real attempt succeeded completely: real download, real
+checksum, real Postgres migrations (7 files applied), real staging (219
+engine files, 11 of the deployment's own brand files kept), a real 13.4MB
+zip accepted by Kudu, and the site immediately serving the new version
+with its content and admin session intact — confirmed by re-checking that
+`oneClick` stayed available afterward, same as the Cloudflare check.
 
 ## What was removed, and why
 
