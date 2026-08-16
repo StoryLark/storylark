@@ -172,51 +172,46 @@ test('a checksum file is parsed in sha256sum format, and only for the right name
 // ── finding, downloading and verifying a release, over real HTTP ────────────
 
 /** A server that answers like the GitHub Releases API and a release-asset CDN. */
+// Serves at the exact shape findEngineRelease's opts.base path constructs
+// (`${base}/${tag}/${asset}`) — findEngineRelease no longer calls out to
+// api.github.com at all (fixed live, 2026-08-16: that API is rate-limited
+// per source IP, and a Cloudflare Worker's outbound IP is shared across
+// unrelated tenants' traffic, which hit a real 429 on the very first live
+// one-click update; github.com's direct release-download URL convention
+// 302s to a separate, non-rate-limited asset host instead), so these tests
+// exercise the download+checksum+verify pipeline through the already-
+// supported ENGINE_RELEASE_BASE override path rather than re-mocking a
+// GitHub API call that no longer happens.
 async function releaseServer({ artifact, checksum, tag, version }) {
   const hits = [];
   const server = createServer((req, res) => {
     hits.push(req.url);
-    const origin = `http://127.0.0.1:${server.address().port}`;
-    if (req.url === `/repos/acme/engine/releases/tags/${encodeURIComponent(tag)}`) {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(
-        JSON.stringify({
-          html_url: 'https://example.invalid/release',
-          assets: [
-            { name: engineAssetName(version), browser_download_url: `${origin}/dl/${engineAssetName(version)}` },
-            { name: engineChecksumName(version), browser_download_url: `${origin}/dl/${engineChecksumName(version)}` },
-          ],
-        })
-      );
-    }
-    if (req.url === `/dl/${engineAssetName(version)}`) {
+    if (req.url === `/dl/${encodeURIComponent(tag)}/${engineAssetName(version)}`) {
       res.writeHead(200, { 'content-type': 'application/zip', 'content-length': String(artifact.byteLength) });
       return res.end(Buffer.from(artifact));
     }
-    if (req.url === `/dl/${engineChecksumName(version)}`) {
+    if (req.url === `/dl/${encodeURIComponent(tag)}/${engineChecksumName(version)}`) {
       res.writeHead(200, { 'content-type': 'text/plain' });
       return res.end(checksum);
     }
     res.writeHead(404).end('no');
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  return { server, hits, origin: `http://127.0.0.1:${server.address().port}` };
+  return { server, hits, origin: `http://127.0.0.1:${server.address().port}`, base: `http://127.0.0.1:${server.address().port}/dl` };
 }
 
 test('a release is located, downloaded over real HTTP, and verified against its published checksum', async () => {
   const built = await anEnginePackage();
   const digest = await sha256Hex(built.bytes);
   const version = '9.9.9';
-  const { server, origin } = await releaseServer({
+  const { server, base } = await releaseServer({
     artifact: built.bytes,
     checksum: `${digest}  ${engineAssetName(version)}\n`,
     tag: releaseTag(version),
     version,
   });
   try {
-    // The GitHub-API shape, with the API base pointed at the local server.
-    const patchedFetch = (url, init) => fetch(String(url).replace('https://api.github.com', origin), init);
-    const release = await findEngineRelease(version, { repo: 'acme/engine', fetchImpl: patchedFetch });
+    const release = await findEngineRelease(version, { base });
     assert.equal(release.tag, 'storylark-core@9.9.9');
     assert.ok(release.artifactUrl.endsWith(engineAssetName(version)));
 
@@ -237,15 +232,14 @@ test('a substituted artifact is caught by the checksum and nothing is installed'
   const evil = await anEnginePackage({ dist: engineDist({ 'assets/index-abc123.js': enc('export const engine = 666;') }) });
   const version = '9.9.9';
   // The checksum published is the REAL one; the bytes served are the other one.
-  const { server, origin } = await releaseServer({
+  const { server, base } = await releaseServer({
     artifact: evil.bytes,
     checksum: `${await sha256Hex(real.bytes)}  ${engineAssetName(version)}\n`,
     tag: releaseTag(version),
     version,
   });
   try {
-    const patchedFetch = (url, init) => fetch(String(url).replace('https://api.github.com', origin), init);
-    const release = await findEngineRelease(version, { repo: 'acme/engine', fetchImpl: patchedFetch });
+    const release = await findEngineRelease(version, { base });
     await assert.rejects(
       () => downloadEngineArtifact(release),
       (err) => {
@@ -261,13 +255,17 @@ test('a substituted artifact is caught by the checksum and nothing is installed'
 });
 
 test('a version with no published artifact says so, instead of half-installing something', async () => {
+  // findEngineRelease no longer checks existence — it just constructs the
+  // URL GitHub's direct-download convention implies. Non-existence now
+  // surfaces as a 404 on the actual download, caught by downloadEngineArtifact.
   const version = '9.9.9';
-  const { server, origin } = await releaseServer({ artifact: new Uint8Array(), checksum: '', tag: 'other', version });
+  const { server, base } = await releaseServer({ artifact: new Uint8Array(), checksum: '', tag: 'other', version });
   try {
-    const patchedFetch = (url, init) => fetch(String(url).replace('https://api.github.com', origin), init);
+    const release = await findEngineRelease(version, { base });
     await assert.rejects(
-      () => findEngineRelease(version, { repo: 'acme/engine', fetchImpl: patchedFetch }),
+      () => downloadEngineArtifact(release),
       (err) => {
+        assert.ok(err instanceof EngineReleaseError);
         assert.equal(err.code, 'no_release');
         assert.match(err.message, /installer command/);
         return true;

@@ -72,10 +72,25 @@ export class EngineReleaseError extends Error {
  * Two shapes are supported, and the second exists because "the update path must
  * not depend on one company" is a fair thing for an operator to want:
  *
- *   ENGINE_RELEASE_BASE unset  → the GitHub Releases API for ENGINE_RELEASE_REPO
+ *   ENGINE_RELEASE_BASE unset  → GitHub's own release-download URL convention,
+ *                                constructed directly, for ENGINE_RELEASE_REPO
  *   ENGINE_RELEASE_BASE set    → `<base>/<tag>/<asset>`, a plain static host
  *
- * Neither sends credentials.
+ * Neither sends credentials, and — confirmed live, this is why the shape
+ * changed from an earlier version that called the Releases REST API first —
+ * neither touches api.github.com at all. That API is rate-limited per source
+ * IP, and a Cloudflare Worker's outbound IP is shared across an unrelated
+ * pool of other Cloudflare tenants' traffic: a real deployment hit a real
+ * 429 from that shared pool on its very first live one-click update, despite
+ * a normal developer machine's own IP showing a fully-reset quota moments
+ * later — proof the failure was about the shared IP, not this deployment's
+ * own usage. `github.com/<repo>/releases/download/<tag>/<asset>` is GitHub's
+ * documented direct-download convention: it 302s to a separate,
+ * non-api.github.com asset host (release-assets.githubusercontent.com as of
+ * this writing) that isn't part of that same rate-limit bucket. A 404 on
+ * that redirect is exactly as informative as the API's 404 was, so nothing
+ * about error reporting gets worse for losing the API call — only a
+ * possible-failure gets removed.
  */
 export async function findEngineRelease(
   version: string,
@@ -84,7 +99,6 @@ export async function findEngineRelease(
   const tag = releaseTag(version);
   const asset = engineAssetName(version);
   const checksum = engineChecksumName(version);
-  const doFetch = opts.fetchImpl ?? fetch;
 
   if (opts.base) {
     const base = opts.base.replace(/\/+$/, '');
@@ -98,41 +112,9 @@ export async function findEngineRelease(
   }
 
   const repo = opts.repo ?? DEFAULT_RELEASE_REPO;
-  const api = `https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`;
-  const res = await doFetch(api, {
-    // GitHub rejects an API request with no User-Agent. No Authorization: a
-    // public release needs none, and this deployment holds no GitHub credential
-    // to send even if one would help.
-    headers: { accept: 'application/vnd.github+json', 'user-agent': 'storylark-update' },
-  });
-  if (!res.ok) {
-    throw new EngineReleaseError(
-      res.status === 404
-        ? `There is no published release "${tag}". The npm package is out ahead of the prebuilt artifact — take this update with the installer command instead.`
-        : `Could not reach the release index for "${tag}" (HTTP ${res.status}).`,
-      'no_release'
-    );
-  }
-  const release = (await res.json()) as {
-    html_url?: string;
-    assets?: { name: string; browser_download_url: string }[];
-  };
-  const find = (name: string) => release.assets?.find((a) => a.name === name)?.browser_download_url;
-  const artifactUrl = find(asset);
-  if (!artifactUrl) {
-    throw new EngineReleaseError(
-      `Release "${tag}" exists but carries no ${asset}. That release was cut before prebuilt artifacts existed, or its build failed — take this update with the installer command instead.`,
-      'no_artifact'
-    );
-  }
-  const checksumUrl = find(checksum);
-  if (!checksumUrl) {
-    throw new EngineReleaseError(
-      `Release "${tag}" carries ${asset} but no ${checksum}. Refusing to install an artifact nothing vouches for.`,
-      'no_checksum'
-    );
-  }
-  return { version, tag, artifactUrl, checksumUrl, releaseUrl: release.html_url ?? api };
+  const releaseUrl = `https://github.com/${repo}/releases/tag/${encodeURIComponent(tag)}`;
+  const download = (name: string) => `https://github.com/${repo}/releases/download/${encodeURIComponent(tag)}/${name}`;
+  return { version, tag, artifactUrl: download(asset), checksumUrl: download(checksum), releaseUrl };
 }
 
 /** Hard ceiling on what will be pulled into memory. A real artifact is ~3.5MB. */
@@ -158,6 +140,16 @@ export async function downloadEngineArtifact(
 
   const sumRes = await doFetch(release.checksumUrl, { headers: { 'user-agent': 'storylark-update' } });
   if (!sumRes.ok) {
+    // A 404 here almost always means the release itself doesn't have a
+    // prebuilt artifact (cut before Phase 5, or its build step failed) —
+    // there's no separate existence check anymore now that findEngineRelease
+    // constructs the URL directly instead of asking GitHub's API first.
+    if (sumRes.status === 404) {
+      throw new EngineReleaseError(
+        `There is no published prebuilt engine for "${release.tag}". That release was cut before prebuilt artifacts existed, its build step failed, or the version doesn't exist — take this update with the installer command instead.`,
+        'no_release'
+      );
+    }
     throw new EngineReleaseError(`Could not download the checksum for ${release.tag} (HTTP ${sumRes.status}).`, 'no_checksum');
   }
   const expected = parseChecksumFile(await sumRes.text(), engineAssetName(release.version));
