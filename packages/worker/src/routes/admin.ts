@@ -150,9 +150,10 @@ async function oneClickStatus(env: Parameters<typeof resolveSelfDeploy>[0]) {
  *
  * ── The order, and why every step is where it is ────────────────────────────
  *   1. Is there a target?      501 if not. No target, no button, no surprise.
- *   2. Which version?          The npm registry — the same source /update-status
- *                              showed the operator, so the number they clicked
- *                              on is the number they get.
+ *   2. Which version?          storylark-core's own npm registry entry — NOT
+ *                              storylark-worker's (see the note on the fetch
+ *                              below; found live, 2026-08-16, the two are not
+ *                              always the same number).
  *   3. Find + verify + read.   Checksum before unzip, manifest sha256 per file,
  *                              and a package carrying a brand.json is rejected
  *                              outright. Nothing has touched the deployment yet.
@@ -180,8 +181,21 @@ admin.post('/update-install', async (c) => {
   const body = await c.req.json<{ version?: string }>().catch(() => ({}) as { version?: string });
   let version = body.version;
   if (!version) {
+    // storylark-core, not storylark-worker: a GitHub release is tagged and its
+    // engine artifact attached by CORE's version (releaseTag() below builds
+    // `storylark-core@<version>`), and release.yml re-attaches that artifact
+    // — always built from the current commit, so always carrying whatever
+    // worker code most recently shipped — on EVERY publish, not only ones
+    // that bump core. So core's latest npm version always names a real,
+    // current release; worker's latest does not, whenever a worker-only
+    // changeset (e.g. a worker bugfix) leaves core's version behind. Found
+    // live, 2026-08-16: this deployment's own worker-only self-deploy fix
+    // (0.15.1) shipped with core still at 0.15.0, and the admin portal's
+    // "Install update" button — which always POSTs an empty body, so this is
+    // the only path it takes — 404'd looking for a nonexistent
+    // "storylark-core@0.15.1" release until this fix.
     try {
-      const res = await fetch('https://registry.npmjs.org/storylark-worker/latest');
+      const res = await fetch('https://registry.npmjs.org/storylark-core/latest');
       if (!res.ok) throw new Error(`registry ${res.status}`);
       version = ((await res.json()) as { version: string }).version;
     } catch {
