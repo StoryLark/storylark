@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "storylark-core": "0.13.0"
+    "storylark-core": "0.14.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

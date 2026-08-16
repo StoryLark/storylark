@@ -1,6 +1,6 @@
 {
   "name": "storylark-core",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "StoryLark engine — installable read-along PWA (library, reader, player, offline, sync) plus the defineStorylarkConfig Vite preset that builds a branded site from a theme folder.",
   "license": "Apache-2.0",
   "repository": {
@@ -31,7 +31,7 @@
     "ROADMAP.md"
   ],
   "dependencies": {
-    "storylark-contracts": "0.1.0",
+    "storylark-contracts": "0.2.0",
     "@fontsource/cinzel": "^5.1.0",
     "@fontsource/cormorant-garamond": "^5.1.0",
     "@fontsource/ibm-plex-mono": "^5.1.0",
