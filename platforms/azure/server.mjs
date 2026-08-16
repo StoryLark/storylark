@@ -19,6 +19,7 @@
 // complete standalone way to run a branded site.
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
+import { readFile } from 'node:fs/promises';
 import { Hono } from 'hono';
 import { app as workerApp } from 'storylark-worker';
 import { postgresDatabase } from 'storylark-worker/db/postgres';
@@ -71,8 +72,20 @@ const app = new Hono();
 // here is already a conforming Database & ConflictInsert (postgresDatabase),
 // so this bypasses the Cloudflare-specific D1-wrap in the worker's default
 // export entirely.
+const staticRoot = process.env.STATIC_ROOT ?? './app/dist';
 app.use('/api/*', async (c) => workerApp.fetch(c.req.raw, env, executionCtx));
-app.use('/*', serveStatic({ root: process.env.STATIC_ROOT ?? './app/dist' }));
+app.use('/*', serveStatic({ root: staticRoot }));
+// SPA fallback: Cloudflare's Workers+Assets binding does this natively
+// (not_found_handling: "single-page-application" in wrangler.jsonc) — the
+// Node server needs it spelled out. Without this, any client-side route
+// (e.g. /admin — confirmed live: a real GET to /admin 404s here while the
+// same route works fine on the Cloudflare deployment) 404s instead of
+// serving the app shell and letting the router take over.
+let indexHtmlCache;
+app.get('*', async (c) => {
+  indexHtmlCache ??= await readFile(`${staticRoot}/index.html`, 'utf8');
+  return c.html(indexHtmlCache);
+});
 
 const port = Number(process.env.PORT ?? 8787);
 serve({ fetch: app.fetch, port }, (info) => {

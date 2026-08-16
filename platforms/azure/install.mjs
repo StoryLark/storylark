@@ -50,6 +50,15 @@ const env = { ...loadEnvFile(envPath), ...process.env };
 
 const REQUIRED = ['BRAND_ID', 'AZURE_RESOURCE_GROUP', 'AZURE_LOCATION', 'DB_ADMIN_PASSWORD'];
 
+// This script runs from two different physical layouts: inside the engine
+// monorepo (platforms/azure/ two levels under repo root, the site lives in
+// app/) or inside a standalone `npm create storylark` scaffold (platforms/azure/
+// two levels under the site root, which IS the site — no app/ subfolder).
+// Detected once so the build step below can target the right one.
+const REPO_ROOT = join(__dirname, '..', '..');
+const IS_MONOREPO = existsSync(join(REPO_ROOT, 'app', 'package.json'));
+const SITE_ROOT = IS_MONOREPO ? join(REPO_ROOT, 'app') : REPO_ROOT;
+
 function verify() {
   console.log('Verifying install.env and Azure CLI state...\n');
   let ok = true;
@@ -142,7 +151,12 @@ function deploy() {
   const webAppName = `${env.BRAND_ID}-app`;
 
   console.log('\nApplying database migrations...');
-  run('node', [join(__dirname, '..', '..', 'packages', 'worker', 'migrate-postgres.mjs'), `--connection-string=${databaseUrl}`], { stdio: 'inherit' });
+  // migrate-postgres.mjs ships as part of storylark-worker itself (not the
+  // engine-repo-only path this used to hardcode) — resolves the same way in
+  // both the monorepo (platforms/azure's own standalone npm install) and a
+  // standalone scaffolded site, since both get storylark-worker from npm.
+  const migrateScript = join(__dirname, 'node_modules', 'storylark-worker', 'migrate-postgres.mjs');
+  run('node', [migrateScript, `--connection-string=${databaseUrl}`], { stdio: 'inherit' });
 
   const brandFolder = env.BRAND || env.BRAND_ID;
   console.log(`\nBuilding the app for brand "${brandFolder}"...`);
@@ -153,8 +167,9 @@ function deploy() {
   // (confirmed bug: without this, the deployed app hung on "Loading the
   // library..." forever, fetching content.storylark.dev's manifest instead
   // of this deployment's own storage).
-  run('npm', ['run', 'build', '-w', 'app', '--', '--mode', brandFolder], {
-    cwd: join(__dirname, '..', '..'),
+  const buildArgs = IS_MONOREPO ? ['run', 'build', '-w', 'app', '--', '--mode', brandFolder] : ['run', 'build'];
+  run('npm', buildArgs, {
+    cwd: REPO_ROOT,
     stdio: 'inherit',
     env: { ...process.env, STORYLARK_APP_ORIGIN: outputs.appOrigin.value, STORYLARK_CONTENT_ORIGIN: outputs.contentOrigin.value },
   });
@@ -165,7 +180,7 @@ function deploy() {
   cpSync(join(__dirname, 'server.mjs'), join(stage, 'server.mjs'));
   cpSync(join(__dirname, 'package.json'), join(stage, 'package.json'));
   if (existsSync(join(__dirname, 'package-lock.json'))) cpSync(join(__dirname, 'package-lock.json'), join(stage, 'package-lock.json'));
-  cpSync(join(__dirname, '..', '..', 'app', 'dist'), join(stage, 'app', 'dist'), { recursive: true });
+  cpSync(join(SITE_ROOT, 'dist'), join(stage, 'app', 'dist'), { recursive: true });
 
   const zipPath = join(tmpdir(), `storylark-azure-deploy-${Date.now()}.zip`);
   if (WIN) {
