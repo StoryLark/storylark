@@ -385,7 +385,24 @@ async function cloudflareApi({ knownHashes = new Set() } = {}) {
       res.end(JSON.stringify(obj));
     };
 
-    if (req.url.endsWith('/settings') && req.method === 'GET') return json({ success: true, result: { bindings: [] } });
+    if (req.url.endsWith('/settings') && req.method === 'GET') {
+      // A realistic settings response: a plain var WITH its value, a secret
+      // by name only (Cloudflare never returns a secret's value), a D1
+      // binding — so the test can assert all three come back unchanged on
+      // the swap, exactly as a real deployment's bindings would.
+      return json({
+        success: true,
+        result: {
+          compatibility_date: '2026-06-01',
+          compatibility_flags: ['nodejs_compat'],
+          bindings: [
+            { name: 'BRAND', type: 'plain_text', text: 'acme' },
+            { name: 'ADMIN_KEY', type: 'secret_text' },
+            { name: 'DB', type: 'd1', id: 'db-id-123' },
+          ],
+        },
+      });
+    }
 
     if (req.url.endsWith('/assets-upload-session')) {
       const manifest = JSON.parse(body.toString()).manifest;
@@ -408,7 +425,7 @@ async function cloudflareApi({ knownHashes = new Set() } = {}) {
       return json({ success: true, result: { jwt: 'COMPLETION-JWT' } }, 201);
     }
 
-    if (req.url.endsWith('/content') && req.method === 'PUT') {
+    if (req.url === '/accounts/acct/workers/scripts/acme' && req.method === 'PUT') {
       const text = body.toString('latin1');
       call.metadata = JSON.parse(/name="metadata"\r\n\r\n([\s\S]*?)\r\n--/.exec(text)[1]);
       return json({ success: true, result: { id: 'acme' } });
@@ -500,12 +517,35 @@ test('a Cloudflare update uploads the engine AND carries the deployment\'s own b
     assert.equal(api.uploaded.get(brandHash), toBase64(brandJson));
     assert.equal(api.uploaded.get(session.manifest['/icons/acme-mascot.png'].hash), toBase64(iconPng));
 
-    // 4. The script swap names the module and hands over the completion token,
-    //    and goes to /content so bindings, vars and secrets are not touched.
-    const put = api.calls.find((c) => c.method === 'PUT');
-    assert.equal(put.url, '/accounts/acct/workers/scripts/acme/content');
+    // 4. The script swap reads back this deployment's own bindings first
+    //    (confirmed live 2026-08-16: /content does not exist for an
+    //    asset-backed Worker; the plain script endpoint does, but replaces
+    //    the whole config, so bindings have to be resent, not avoided), then
+    //    PUTs to the plain script endpoint carrying them forward unchanged —
+    //    the plain var keeps its VALUE, the secret comes back by name only
+    //    (Cloudflare never returns a secret's value, and that is exactly how
+    //    "keep the stored value" is spelled) — plus the engine's own
+    //    asset-routing contract, which is NOT read back the same way: it is
+    //    the engine's routing architecture, not this deployment's state.
+    const settingsCall = api.calls.find((c) => c.url.endsWith('/settings'));
+    assert.equal(settingsCall.method, 'GET');
+    const put = api.calls.find((c) => c.method === 'PUT' && c.url === '/accounts/acct/workers/scripts/acme');
+    assert.ok(put, 'the swap must PUT to the plain script endpoint, not /content');
     assert.equal(put.auth, 'Bearer operator-token');
-    assert.deepEqual(put.metadata, { main_module: 'index.js', assets: { jwt: 'COMPLETION-JWT' } });
+    assert.deepEqual(put.metadata, {
+      main_module: 'index.js',
+      bindings: [
+        { name: 'BRAND', type: 'plain_text', text: 'acme' },
+        { name: 'ADMIN_KEY', type: 'secret_text' },
+        { name: 'DB', type: 'd1', id: 'db-id-123' },
+      ],
+      compatibility_date: '2026-06-01',
+      compatibility_flags: ['nodejs_compat'],
+      assets: {
+        jwt: 'COMPLETION-JWT',
+        config: { not_found_handling: 'single-page-application', run_worker_first: ['/*', '!/assets/*'] },
+      },
+    });
 
     // 5. The asset upload used the SESSION token, not the account token.
     const upload = api.calls.find((c) => c.url.startsWith('/accounts/acct/workers/assets/upload'));

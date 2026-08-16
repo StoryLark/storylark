@@ -124,32 +124,53 @@ const CF_API = 'https://api.cloudflare.com/client/v4';
  *   2. POST /accounts/:id/workers/assets/upload?base64=true
  *      multipart, one part per hash, base64 bodies, bearer = that JWT. The last
  *      response carries a COMPLETION token.
- *   3. PUT /accounts/:id/workers/scripts/:name/content
- *      multipart: `metadata` naming the main module and carrying the completion
- *      token, plus the module itself.
+ *   3. GET /accounts/:id/workers/scripts/:name/settings
+ *      to read back this deployment's OWN bindings/vars/secrets and
+ *      compatibility date/flags — see below for why this step exists.
+ *   4. PUT /accounts/:id/workers/scripts/:name
+ *      multipart: `metadata` naming the main module, the completion token, the
+ *      bindings just read back, and the engine's own asset-routing contract;
+ *      plus the module itself.
  *
- * Step 3 uses `/content` — "put script content without touching config or
- * metadata" — rather than the full script-upload endpoint ON PURPOSE. The full
- * endpoint replaces the Worker's configuration with whatever the request says,
- * which means an update would have to reconstruct every binding, var, secret,
- * route and cron trigger from the outside and would silently drop anything it
- * failed to reconstruct. `/content` leaves all of it alone. The deployment's D1
- * binding, R2 bucket, custom domain and ADMIN_KEY are not this feature's
- * business and it should not be able to touch them.
+ * ── CORRECTED LIVE, 2026-08-16: step 4 is NOT `/content` ────────────────────
+ * An earlier version of this file used `/content` — "put script content
+ * without touching config or metadata" — specifically to avoid steps 3 and 4
+ * below: reconstructing bindings looked like the riskier path, so the design
+ * chose the endpoint that could not need it. Confirmed live, against
+ * app.storylark.dev, that endpoint does not exist for an asset-backed Worker:
+ * `PUT .../content` returned "Assets cannot be provided on this endpoint. Use
+ * the correct upload endpoint for asset-backed Workers." — the one open
+ * question the original design flagged as unverified turned out to be answered
+ * "no."
  *
- * ── What is unverified, stated plainly ──────────────────────────────────────
- * This flow has NOT been executed against a real Cloudflare account: doing so
- * requires a token able to redeploy a live Worker, and creating one to test with
- * is precisely the risk this comment exists to be honest about. It is written
- * against the published contract and is exercised end to end against a local
- * server that implements that contract (packages/worker/test/self-deploy.test.mjs),
- * which proves the choreography, the payload shapes and the bytes — not
- * Cloudflare's agreement. The specific open question is whether `/content`
- * honours `assets.jwt`; the documented metadata shape says `assets` belongs to
- * "script, version and Workers-for-Platforms upload endpoints", and `/content`
- * is the fourth. If it does not, the first real run fails cleanly with the
- * API's own error and nothing is deployed — the failure mode is a 4xx in the
- * portal, not a broken site. See docs/design/update-flow.md.
+ * The actual answer is the plain script-upload endpoint
+ * (`PUT /accounts/:id/workers/scripts/:name`, no `/content`), which DOES
+ * accept `assets.jwt` — but does replace the Worker's whole configuration with
+ * whatever this request sends, so bindings genuinely have to be resupplied,
+ * not avoided. That is what step 3 is for: `GET .../settings` returns the
+ * live binding list — plain vars WITH their values, `secret_text` bindings by
+ * NAME ONLY (Cloudflare does not return a secret's value, and re-sending a
+ * `secret_text` binding with no `text` field is exactly how you tell it "keep
+ * whatever is already stored" — the same convention `wrangler secret put`
+ * relies on for every OTHER deploy that doesn't touch secrets either) — so the
+ * new upload carries forward exactly what was already there. Routes and cron
+ * triggers are independent Cloudflare resources that reference a script by
+ * name rather than living inside its content, so a script-content update does
+ * not touch them regardless of which endpoint is used.
+ *
+ * The asset-routing contract (`not_found_handling`, `run_worker_first`) is
+ * deliberately NOT read back the same way — it is not this deployment's own
+ * state to preserve, it is the ENGINE's routing architecture (Phase 2/4's
+ * "identical everywhere" requirement), so it comes from the same constants
+ * `wrangler.jsonc` declares, not from whatever a previous deploy happened to
+ * have.
+ *
+ * ── Verified live ────────────────────────────────────────────────────────────
+ * The full flow — download, checksum, migrate, upload assets, read back
+ * bindings, swap the script via the corrected endpoint — ran for real against
+ * app.storylark.dev (the project's own demo deployment, not a customer's) on
+ * 2026-08-16 and the site came back serving the new engine version with every
+ * binding intact. See docs/design/update-flow.md for the full account.
  */
 export function cloudflareSelfDeploy(env: Env): SelfDeployTarget {
   const account = env.CF_ACCOUNT_ID!;
@@ -247,12 +268,45 @@ export function cloudflareSelfDeploy(env: Env): SelfDeployTarget {
         log(`Uploaded batch ${i + 1} of ${buckets.length} (${bucket.length} files).`);
       }
 
-      // 3. Swap the code. `/content` so bindings, vars, secrets, routes and
-      //    cron triggers are untouched.
+      // 3. Read back this deployment's OWN bindings/vars/secrets and
+      //    compatibility settings — the plain script-upload endpoint replaces
+      //    the whole configuration with whatever this request sends, so
+      //    "leave bindings alone" has to mean "resend exactly what is already
+      //    there", the same principle step 2 already applies to brand assets.
+      //    secret_text bindings come back by NAME ONLY (Cloudflare never
+      //    returns a secret's value) — resending them with no `text` field is
+      //    the documented way to keep the stored value, the same convention
+      //    `wrangler secret put` relies on for every deploy that isn't
+      //    touching secrets either.
+      const settings = (await call(`/accounts/${account}/workers/scripts/${encodeURIComponent(script)}/settings`)) as {
+        compatibility_date?: string;
+        compatibility_flags?: string[];
+        bindings?: unknown[];
+      };
+      log(`Read back ${settings.bindings?.length ?? 0} existing binding(s) to carry forward unchanged.`);
+
+      // 4. Swap the code. Bindings above keep this deployment's D1/R2/vars/
+      //    secrets exactly as they were; the asset-routing contract below is
+      //    NOT read back the same way — it is the ENGINE's own routing
+      //    architecture (Phase 2/4's "identical everywhere" requirement), so
+      //    it comes from the same constants wrangler.jsonc declares, not from
+      //    whatever a previous deploy happened to have.
       const form = new FormData();
-      form.append('metadata', JSON.stringify({ main_module: 'index.js', assets: { jwt: completion } }));
+      form.append(
+        'metadata',
+        JSON.stringify({
+          main_module: 'index.js',
+          bindings: settings.bindings ?? [],
+          compatibility_date: settings.compatibility_date,
+          compatibility_flags: settings.compatibility_flags ?? [],
+          assets: {
+            jwt: completion,
+            config: { not_found_handling: 'single-page-application', run_worker_first: ['/*', '!/assets/*'] },
+          },
+        })
+      );
       form.append('index.js', new Blob([pkg.worker], { type: 'application/javascript+module' }), 'index.js');
-      await call(`/accounts/${account}/workers/scripts/${encodeURIComponent(script)}/content`, { method: 'PUT', body: form });
+      await call(`/accounts/${account}/workers/scripts/${encodeURIComponent(script)}`, { method: 'PUT', body: form });
 
       log(`Deployed storylark-core ${pkg.manifest.coreVersion} to the Worker "${script}".`);
       return {
