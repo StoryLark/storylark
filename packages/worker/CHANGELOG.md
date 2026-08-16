@@ -1,5 +1,11 @@
 # storylark-worker
 
+## 0.7.1
+
+### Patch Changes
+
+- Publish `migrate-postgres.mjs` and `migrations-postgres/` as part of the package. Previously only `migrations/` (D1) shipped, so a standalone Azure/Postgres deployment outside the engine monorepo had no way to actually apply its database schema — the migration script existed only in the engine repo's own source tree.
+
 ## 0.7.0
 
 ### Minor Changes
