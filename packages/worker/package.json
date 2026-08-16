@@ -40,6 +40,8 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260601.0",
-    "@types/pg": "^8.11.0"
+    "@types/pg": "^8.11.0",
+    "@electric-sql/pglite": "^0.5.5",
+    "@electric-sql/pglite-socket": "^0.2.8"
   }
 }
