@@ -146,7 +146,18 @@ function deploy() {
 
   const brandFolder = env.BRAND || env.BRAND_ID;
   console.log(`\nBuilding the app for brand "${brandFolder}"...`);
-  run('npm', ['run', 'build', '-w', 'app', '--', '--mode', brandFolder], { cwd: join(__dirname, '..', '..'), stdio: 'inherit' });
+  // brand.json's appOrigin/contentOrigin are fixed values (e.g. pointing at
+  // Cloudflare) — override them at build time to this deployment's real
+  // origins, so the client fetches its manifest from the Azure content it
+  // actually has instead of silently hitting a different platform's content
+  // (confirmed bug: without this, the deployed app hung on "Loading the
+  // library..." forever, fetching content.storylark.dev's manifest instead
+  // of this deployment's own storage).
+  run('npm', ['run', 'build', '-w', 'app', '--', '--mode', brandFolder], {
+    cwd: join(__dirname, '..', '..'),
+    stdio: 'inherit',
+    env: { ...process.env, STORYLARK_APP_ORIGIN: outputs.appOrigin.value, STORYLARK_CONTENT_ORIGIN: outputs.contentOrigin.value },
+  });
 
   console.log('\nStaging and deploying app code to App Service...');
   const stage = join(tmpdir(), `storylark-azure-deploy-${Date.now()}`);
@@ -167,7 +178,8 @@ function deploy() {
   rmSync(zipPath, { force: true });
 
   console.log(`\nDeployed. Live at: https://${webAppName}.azurewebsites.net`);
-  console.log('Publish content with: node ../../packages/pipeline/publish.mjs --brand <id> --source <path> --storage azure-blob');
+  const bucketHint = env.BRAND_ID !== brandFolder ? ` --bucket ${env.BRAND_ID}-content` : '';
+  console.log(`Publish content with: AZURE_STORAGE_CONNECTION_STRING=<from the app's own settings> node ../../packages/pipeline/publish.mjs --brand ${brandFolder}${bucketHint} --source <path> --storage azure-blob`);
 }
 
 if (args.has('--deploy')) deploy();

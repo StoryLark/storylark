@@ -45,6 +45,16 @@ export function defineStorylarkConfig(options = {}) {
     const brand = JSON.parse(readFileSync(resolve(brandDir, 'brand.json'), 'utf8'));
     const themeCss = readFileSync(resolve(brandDir, 'theme.css'), 'utf8');
 
+    // A brand's appOrigin/contentOrigin in brand.json is a single fixed value,
+    // but the SAME brand can be deployed to more than one platform (e.g. the
+    // base "storylark" brand running on both Cloudflare and Azure for
+    // dev/testing) — each deployment's content actually lives at a different
+    // URL. These env vars let a platform installer override just the origins
+    // at build time without needing a second brand folder. Unset = brand.json
+    // wins, unchanged from before this existed.
+    if (process.env.STORYLARK_APP_ORIGIN) brand.appOrigin = process.env.STORYLARK_APP_ORIGIN;
+    if (process.env.STORYLARK_CONTENT_ORIGIN) brand.contentOrigin = process.env.STORYLARK_CONTENT_ORIGIN;
+
     /** @type {import('vite').UserConfig} */
     const config = {
       plugins: [

@@ -21,6 +21,11 @@
 //   --dry-run                   parse + report, no TTS, no upload
 //   --manifest-only             regenerate + upload the manifest without re-publishing chapters
 //                               (use after a manifest-schema change, e.g. the UI v2 series metadata)
+//   --bucket <name>              override the content bucket/container (default: <brand>-content).
+//                               Needed when the same brand folder is deployed more than once with
+//                               different resource-naming ids (e.g. testing "storylark" on a second
+//                               platform as "storylark-dev") — each target needs its own bucket and
+//                               its own publish-state tracking, which this also keys by bucket.
 //
 // Voices: the brand's tts.voice picks the provider. Kokoro ids (af_heart,
 // bm_fable, …) run the bundled free local model — no account or key needed.
@@ -47,7 +52,7 @@ const MONTHLY_CHAR_BUDGET = 450_000; // hard stop below the F0 500K limit
 const args = parseArgs(process.argv.slice(2));
 const brandId = args.brand;
 const USAGE =
-  'Usage: node packages/pipeline/publish.mjs --brand <id> --source <path> --parser <module> [--book <id>] [--no-audio] [--local <dir>] [--dry-run] [--storage r2|azure-blob]';
+  'Usage: node packages/pipeline/publish.mjs --brand <id> --source <path> --parser <module> [--book <id>] [--no-audio] [--local <dir>] [--dry-run] [--storage r2|azure-blob] [--bucket <name>]';
 if (!brandId || typeof brandId !== 'string') {
   console.error(USAGE);
   process.exit(1);
@@ -67,10 +72,10 @@ if (args.local) {
   console.log(`Local publish → ${process.env.STORYLARK_LOCAL_R2} (no remote R2).`);
 }
 const brand = JSON.parse(await readFile(join(ROOT, 'brands', brandId, 'brand.json'), 'utf8'));
-const bucket = `${brandId}-content`;
+const bucket = typeof args.bucket === 'string' && args.bucket ? args.bucket : `${brandId}-content`;
 const { putJson, putAudio, putImage } = resolveProvider(args.storage);
-const stateFile = join(ROOT, '.storylark', 'state', `${brandId}.json`);
-const workRoot = join(ROOT, '.storylark', 'work', brandId);
+const stateFile = join(ROOT, '.storylark', 'state', `${bucket}.json`);
+const workRoot = join(ROOT, '.storylark', 'work', bucket);
 await mkdir(dirname(stateFile), { recursive: true });
 await mkdir(workRoot, { recursive: true });
 

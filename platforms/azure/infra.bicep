@@ -60,6 +60,27 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
 resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
   parent: storage
   name: 'default'
+  properties: {
+    // The app fetches manifest.json/chapters directly from this storage
+    // account (contentOrigin) from the App Service's own origin — a
+    // cross-origin browser fetch. Without this, the browser silently blocks
+    // it (confirmed live: curl succeeds fine, but no Access-Control-Allow-
+    // Origin header means a real browser fetch() fails with no server-side
+    // error to point at). Content here is already public by design
+    // (allowBlobPublicAccess/publicAccess: 'Blob' below), so '*' matches
+    // that — this isn't opening up anything that wasn't already public.
+    cors: {
+      corsRules: [
+        {
+          allowedOrigins: ['*']
+          allowedMethods: ['GET', 'HEAD', 'OPTIONS']
+          allowedHeaders: ['*']
+          exposedHeaders: ['*']
+          maxAgeInSeconds: 3600
+        }
+      ]
+    }
+  }
 }
 
 resource contentContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
@@ -161,3 +182,5 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
 output webAppUrl string = 'https://${webApp.properties.defaultHostName}'
 output storageAccountName string = storage.name
 output postgresHost string = postgres.properties.fullyQualifiedDomainName
+output appOrigin string = 'https://${webAppName}.azurewebsites.net'
+output contentOrigin string = 'https://${storage.name}.blob.core.windows.net/${brandId}-content'
