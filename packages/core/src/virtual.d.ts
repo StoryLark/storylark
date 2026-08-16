@@ -6,6 +6,16 @@ declare module 'virtual:storylark-config' {
   export default config;
 }
 
+// Deployment config as it stood at BUILD time (deployment/<id>/deployment.json
+// plus any STORYLARK_* build overrides). This is the fallback only — the live
+// values come from the serving platform at request time. Always read
+// ../deployment.ts's DEPLOYMENT rather than importing this directly.
+declare module 'virtual:storylark-deployment' {
+  import type { DeploymentConfig } from './lib/types';
+  const deployment: DeploymentConfig;
+  export default deployment;
+}
+
 // Side-effect module: @fontsource imports generated from the brand's `fonts`.
 declare module 'virtual:storylark-fonts';
 

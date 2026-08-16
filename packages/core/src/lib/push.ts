@@ -1,4 +1,4 @@
-import { BRAND } from '../brand';
+import { DEPLOYMENT } from '../deployment';
 import { api } from './api';
 
 export function pushSupported(): boolean {
@@ -29,7 +29,7 @@ export async function subscribe(): Promise<boolean> {
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.subscribe({
     userVisibleOnly: true,
-    applicationServerKey: b64urlToUint8(BRAND.vapidPublicKey) as unknown as ArrayBuffer,
+    applicationServerKey: b64urlToUint8(DEPLOYMENT.vapidPublicKey) as unknown as ArrayBuffer,
   });
   const json = sub.toJSON();
   await api.subscribePush({ endpoint: sub.endpoint, p256dh: json.keys?.p256dh ?? '', auth: json.keys?.auth ?? '' });

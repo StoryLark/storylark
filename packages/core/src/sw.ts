@@ -2,17 +2,52 @@
 /// <reference path="./virtual.d.ts" />
 declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: Array<{ url: string; revision: string | null }> };
 
-import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
+import { addPlugins, precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
 
 import BRAND from 'virtual:storylark-config';
+import { DEPLOYMENT, DEPLOYMENT_INJECTED, restampDeployment } from './deployment';
 
-const CONTENT_ORIGIN = BRAND.contentOrigin;
+// This deployment's content origin, read at script evaluation. The serving
+// platform prepends `self.__STORYLARK_DEPLOYMENT__ = {…}` to this file
+// (AB#7414), so the value is whatever the deployment's environment says right
+// now, not what was baked at build. It has to be resolved synchronously: the
+// fetch handler below decides whether to call respondWith() before it may
+// await anything.
+const CONTENT_ORIGIN = DEPLOYMENT.contentOrigin;
 const DOWNLOAD_CACHE = 'sr-downloads';
 const RUNTIME_CACHE = 'sr-runtime';
 
 // App shell — injected by vite-plugin-pwa at build time.
 precacheAndRoute(self.__WB_MANIFEST);
 cleanupOutdatedCaches();
+
+// The precached app shell carries the deployment config that was injected when
+// it was cached, and the precache is only refetched when the BUILD changes —
+// so on an installed PWA a changed origin would otherwise stay invisible to
+// the page indefinitely, even though this worker already knows about it. Stamp
+// the current values back into the shell on its way out of the cache.
+//
+// Skipped entirely when nothing injected this script: then the page's
+// build-time fallback and this worker's are the same values, and rewriting the
+// document would only risk breaking a static host for no gain.
+if (DEPLOYMENT_INJECTED) {
+  addPlugins([
+    {
+      async cachedResponseWillBeUsed({ cachedResponse }) {
+        if (!cachedResponse) return cachedResponse;
+        if (!(cachedResponse.headers.get('content-type') ?? '').includes('text/html')) return cachedResponse;
+        const html = await cachedResponse.clone().text();
+        const fresh = restampDeployment(html, DEPLOYMENT);
+        if (fresh === html) return cachedResponse;
+        return new Response(fresh, {
+          status: cachedResponse.status,
+          statusText: cachedResponse.statusText,
+          headers: cachedResponse.headers,
+        });
+      },
+    },
+  ]);
+}
 
 // Stay in the `waiting` state until the page asks this worker to take over —
 // only then do we skipWaiting(). Calling it unconditionally on install (the

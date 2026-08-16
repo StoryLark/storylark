@@ -12,20 +12,41 @@ the Cloudflare site and the Azure box, say — differ here and nowhere else, whi
 is why they are not in `brands/<id>/brand.json` and are never included when a
 brand is shared or packaged.
 
-Every value can be overridden at build time by an environment variable, which is
-how the platform installers configure a deployment they have just provisioned:
+## This file is the fallback, not the live value
 
-| Field | Env override |
-|---|---|
-| `appOrigin` | `STORYLARK_APP_ORIGIN` |
-| `contentOrigin` | `STORYLARK_CONTENT_ORIGIN` |
-| `vapidPublicKey` | `STORYLARK_VAPID_PUBLIC_KEY` |
-| `tts.voice` / `.rate` / `.outputFormat` / `.voices` | `STORYLARK_TTS_VOICE` / `_RATE` / `_OUTPUT_FORMAT` / `_VOICES` (comma-separated) |
+Since AB#7414 the running deployment is the source of truth. The platform
+serving the app reads its own environment on every request and injects the
+result into `index.html`, `admin.html` and `sw.js` as
+`self.__STORYLARK_DEPLOYMENT__` — Cloudflare in the Worker
+(`storylark-worker/lib/deployment`), Azure in `platforms/azure/server.mjs`.
+Change an app setting or a Worker var and the frontend picks it up on the next
+request, with **no rebuild and no redeploy of `dist/`**.
+
+| Field | Deployment env var (live) | Build env var (fallback) |
+|---|---|---|
+| `appOrigin` | `APP_ORIGIN` | `STORYLARK_APP_ORIGIN` |
+| `contentOrigin` | `CONTENT_ORIGIN` | `STORYLARK_CONTENT_ORIGIN` |
+| `vapidPublicKey` | `VAPID_PUBLIC_KEY` | `STORYLARK_VAPID_PUBLIC_KEY` |
+| `tts.voice` / `.rate` / `.outputFormat` / `.voices` | `TTS_VOICE` / `TTS_RATE` / `TTS_OUTPUT_FORMAT` / `TTS_VOICES` | `STORYLARK_TTS_VOICE` / `_RATE` / `_OUTPUT_FORMAT` / `_VOICES` |
+
+Both `*_VOICES` forms are comma-separated. The live column is the same
+environment the API already reads, so the frontend and the backend can no
+longer disagree about where content lives.
+
+What this file (plus the `STORYLARK_*` build overrides, which is how the
+platform installers configure a site they have just provisioned) still governs:
+any context with no server to inject — `vite dev`, `vite preview`, plain static
+hosting — and each key independently, so an unset `VAPID_PUBLIC_KEY` leaves the
+built-in one alone rather than blanking it.
+
+A live value that is not a valid origin (no scheme, or a path attached) is
+**ignored with a warning in the platform log**, and the build-time value is used
+instead — a typo in an app setting must not take the whole library offline.
 
 ## No secrets here
 
-Everything in this folder is public by definition — it is compiled into the
-browser bundle. The VAPID **public** key belongs here; the **private** key,
+Everything in this folder is public by definition — it reaches the browser, in
+the bundle or in the injected script. The VAPID **public** key belongs here; the **private** key,
 database URLs, storage connection strings and the admin key are platform
 secrets (`platforms/*/install.env`, `.env`, or `wrangler secret`) and must never
 be written to these files.

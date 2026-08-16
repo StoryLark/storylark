@@ -10,6 +10,7 @@ import { push } from './routes/push';
 import { admin } from './routes/admin';
 import { adminAuth } from './routes/admin-auth';
 import { checkForUpdateAndNotify } from './lib/update-check';
+import { deploymentConfigFromEnv, injectDeploymentIntoResponse } from './lib/deployment';
 
 const app = new Hono<AppContext>();
 
@@ -39,9 +40,48 @@ app.route('/api/admin', adminAuth);
 
 app.notFound((c) => {
   if (new URL(c.req.url).pathname.startsWith('/api/')) return c.json({ error: 'not_found' }, 404);
-  // Non-API paths under run_worker_first shouldn't occur, but fall back to assets.
-  return c.env.ASSETS.fetch(c.req.raw);
+  // Everything that isn't an API route is a static asset (AB#7414). The asset
+  // router still resolves it — /admin still lands on admin.html through its own
+  // html_handling, an unknown path still falls through to the SPA shell — but
+  // it does so via ASSETS.fetch here rather than before the Worker runs, so
+  // documents can be stamped with this deployment's live config on the way out.
+  return serveAsset(c.req.raw, c.env);
 });
+
+/**
+ * Serve a static asset with the deployment's current config injected
+ * (AB#7414 — plan §0d Phase 1).
+ *
+ * `run_worker_first` in wrangler.jsonc is what routes documents here at all:
+ * it lists `/*` minus the hashed-asset directories, so navigations, /admin and
+ * /sw.js reach the Worker while /assets/*, /icons/* and manifest.webmanifest
+ * keep being served straight off the asset router with no Worker invocation.
+ *
+ * Conditional headers are stripped before handing the request on. Without that
+ * the asset router would happily answer a revalidating browser with a bodyless
+ * 304 — there would be nothing to inject into, and the browser would go on
+ * using the copy it cached under the PREVIOUS deployment config. That is the
+ * same split brain this whole change exists to close, arriving by a different
+ * door.
+ */
+async function serveAsset(request: Request, env: Env): Promise<Response> {
+  const headers = new Headers(request.headers);
+  headers.delete('if-none-match');
+  headers.delete('if-modified-since');
+  const response = await env.ASSETS.fetch(new Request(request, { headers }));
+
+  // Content type, not path, decides which injection applies — a request for
+  // /sw.js on a build that has no service worker comes back as the SPA shell,
+  // and prepending a JS prelude to HTML would break the page.
+  const type = response.headers.get('content-type') ?? '';
+  if (new URL(request.url).pathname === '/sw.js' && /javascript|ecmascript/i.test(type)) {
+    return injectDeploymentIntoResponse(response, deploymentConfigFromEnv(env), 'script');
+  }
+  if (type.includes('text/html')) {
+    return injectDeploymentIntoResponse(response, deploymentConfigFromEnv(env), 'html');
+  }
+  return response;
+}
 
 app.onError((err, c) => {
   console.error(err);

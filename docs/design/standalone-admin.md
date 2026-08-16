@@ -75,8 +75,12 @@ precache, `/admin` fails outright.
 `html_handling` (`auto-trailing-slash`), a request for `/admin` resolves to
 the `/admin.html` asset *before* `not_found_handling: "single-page-application"`
 ever runs, and `/admin/` and `/admin.html` both 307 to the canonical
-`/admin`. Reader routes still hit the SPA fallback exactly as before. Assets
-are served without invoking the Worker (`run_worker_first` is `/api/*` only).
+`/admin`. Reader routes still hit the SPA fallback exactly as before. Since
+AB#7414 the Worker does run first for documents (`run_worker_first` is `/*`
+minus `/assets/*`, `/icons/*` and the manifest) so it can inject deployment
+config, but it serves them by calling `env.ASSETS.fetch()` — the asset router
+still does the `/admin` → `/admin.html` resolution and the 307s, unchanged.
+Hashed assets and icons are still served without invoking the Worker.
 
 **Azure** (`platforms/azure/server.mjs`) — three explicit routes reproduce
 that behaviour, registered *before* the static handler and the SPA

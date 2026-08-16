@@ -27,10 +27,12 @@ tap → focus or open the app at /
 
 ## Keys
 
-Per-brand VAPID P-256 keypair (`packages/pipeline/gen-vapid.mjs`): public key baked into the app
-via `deployment/<id>/deployment.json` (or `STORYLARK_VAPID_PUBLIC_KEY`), private key =
-Worker secret. Rotating keys = new keypair + redeploy
-+ users re-toggle notifications (old subscriptions die off via the strike rule).
+Per-brand VAPID P-256 keypair (`packages/pipeline/gen-vapid.mjs`): private key = deployment
+secret; public key = the deployment's `VAPID_PUBLIC_KEY` (Worker var / App Service setting),
+injected into the app at request time (AB#7414), with `deployment/<id>/deployment.json` — or
+`STORYLARK_VAPID_PUBLIC_KEY` at build — as the fallback for a context nothing injects into.
+Rotating keys = new keypair + set both halves on the deployment + users re-toggle notifications
+(old subscriptions die off via the strike rule). No site rebuild needed for the public half.
 
 ## Platform notes
 

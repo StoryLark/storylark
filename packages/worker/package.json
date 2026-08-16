@@ -17,7 +17,8 @@
     "./db/postgres": "./src/db/postgres.ts",
     "./db/d1": "./src/db/d1.ts",
     "./db/types": "./src/db/types.ts",
-    "./lib/update-check": "./src/lib/update-check.ts"
+    "./lib/update-check": "./src/lib/update-check.ts",
+    "./lib/deployment": "./src/lib/deployment.ts"
   },
   "files": [
     "src/",

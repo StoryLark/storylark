@@ -6,7 +6,11 @@
   "assets": {
     "directory": "dist",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*"],
+    // Documents run through the Worker so it can stamp this deployment's live
+    // origins / VAPID key into them (see storylark-worker/lib/deployment).
+    // /assets/*, /icons/* and the manifest stay on the asset router and cost
+    // no Worker invocation.
+    "run_worker_first": ["/*", "!/assets/*", "!/icons/*", "!/manifest.webmanifest"],
     "not_found_handling": "single-page-application"
   },
   "observability": { "enabled": true },

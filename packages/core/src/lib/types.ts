@@ -1,19 +1,24 @@
 // Content types — mirror of the R2 chapter/timings/manifest schemas
 // produced by the publish pipeline (tools/).
 
+/**
+ * Brand identity + look, and the presentation keys the engine reads today.
+ *
+ * Deliberately carries NO addresses and NO keys (AB#7413/7414): `appOrigin`,
+ * `contentOrigin`, `vapidPublicKey` and `tts` describe one particular
+ * deployment, not the brand, and live in DeploymentConfig below. That
+ * separation is what lets the same brand run on two platforms.
+ */
 export interface Brand {
   id: string;
   name: string;
   appName: string;
   shortName?: string;
   tagline: string;
-  appOrigin: string;
-  contentOrigin: string;
   themeColor: string;
   backgroundColor: string;
   defaultTheme: 'dark' | 'light';
   author: string;
-  vapidPublicKey: string;
   /**
    * Library shape. 'flat' — standalone units shown in one flat list (no
    * collection level). 'series' — units are grouped into collections.
@@ -22,7 +27,26 @@ export interface Brand {
   /** What a content unit and its collection are called throughout the UI. */
   nouns: ContentNouns;
   fonts?: { display: string; headers: string; body: string; mono: string };
-  tts?: { voice: string; rate: string; outputFormat: string };
+}
+
+/**
+ * Where this copy of the app lives and what it talks to (AB#7414).
+ *
+ * Resolved at RUNTIME, not baked: the platform serving the document injects
+ * the values from its own environment, and the build-time values from
+ * deployment/<id>/deployment.json are only the fallback for a context with no
+ * server-side injection (`vite dev`, `vite preview`, a bare static host). See
+ * ../deployment.ts.
+ */
+export interface DeploymentConfig {
+  /** Where the app is served, e.g. https://app.example.com. */
+  appOrigin: string;
+  /** Where published content is served from; '' means same-origin. */
+  contentOrigin: string;
+  /** Web-push VAPID public key (base64url). '' disables the push toggle. */
+  vapidPublicKey: string;
+  /** Narration config — consumed by the publish pipeline, not by the app. */
+  tts?: { voice?: string; rate?: string; outputFormat?: string; voices?: string[] };
 }
 
 /**

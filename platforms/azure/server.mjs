@@ -25,6 +25,25 @@ import { app as workerApp } from 'storylark-worker';
 import { postgresDatabase } from 'storylark-worker/db/postgres';
 import { checkForUpdateAndNotify } from 'storylark-worker/lib/update-check';
 
+// Serve-time deployment config (AB#7414) arrived in storylark-worker 0.9.0.
+// This process runs its own `npm install` and can legitimately be a version
+// behind mid-update — the same reason /admin falls back to the app shell below
+// — so an older worker package degrades to the build-time config instead of
+// failing to boot. Imported dynamically for exactly that reason; a static
+// import would make the whole site refuse to start.
+let deploymentConfigFromEnv = () => ({});
+let injectDeploymentIntoHtml = (html) => html;
+let injectDeploymentIntoScript = (js) => js;
+try {
+  ({ deploymentConfigFromEnv, injectDeploymentIntoHtml, injectDeploymentIntoScript } = await import(
+    'storylark-worker/lib/deployment'
+  ));
+} catch {
+  console.warn(
+    'storylark: this storylark-worker has no lib/deployment (needs >= 0.9.0). Serving the deployment config that was baked in at build — changing APP_ORIGIN/CONTENT_ORIGIN will not reach the frontend until storylark-worker is updated.'
+  );
+}
+
 const required = ['DATABASE_URL', 'BRAND', 'APP_ORIGIN', 'CONTENT_ORIGIN', 'MAIL_FROM', 'APP_NAME'];
 const missing = required.filter((k) => !process.env[k]);
 if (missing.length > 0) {
@@ -83,6 +102,27 @@ app.use('/api/*', async (c) => workerApp.fetch(c.req.raw, env, executionCtx));
 // /admin.html 307 back to the canonical /admin (verified against a real
 // `wrangler dev`). These three routes reproduce that behaviour exactly, so
 // the URL an operator bookmarks behaves the same on either platform.
+/**
+ * This deployment's live config (AB#7414 — plan §0d Phase 1), read from the
+ * process environment rather than from the values compiled into the bundle.
+ * Change CONTENT_ORIGIN in the App Service application settings and the
+ * frontend picks it up on the next request, with no rebuild and no redeploy of
+ * app/dist — which until now was the one thing the backend could do and the
+ * frontend could not.
+ *
+ * Resolved once, at startup, because that IS request time here: changing an
+ * App Service application setting restarts the process, so there is no state
+ * in which process.env has moved on and this has not.
+ */
+const deployment = deploymentConfigFromEnv(process.env);
+
+/** An HTML document, with the deployment config stamped in. */
+function document(c, body) {
+  if (body == null) return c.notFound();
+  c.header('Cache-Control', 'no-store');
+  return c.html(injectDeploymentIntoHtml(body, deployment));
+}
+
 const htmlCache = new Map();
 async function html(name) {
   if (!htmlCache.has(name)) {
@@ -97,10 +137,31 @@ app.get('/admin', async (c) => {
   // its own page — if a build from an older storylark-core has no admin.html.
   // This process serves assets it didn't build, so the two can legitimately
   // be a version apart mid-update; a 500 there would be the wrong answer.
-  return c.html((await html('admin.html')) ?? (await html('index.html')));
+  return document(c, (await html('admin.html')) ?? (await html('index.html')));
 });
 app.get('/admin/', (c) => c.redirect('/admin', 307));
 app.get('/admin.html', (c) => c.redirect('/admin', 307));
+// Every route that can produce the app shell has to be claimed BEFORE
+// serveStatic (AB#7414): its directory-index handling answers `/` with
+// app/dist/index.html straight off disk, which would skip the injection for the
+// single most-requested URL on the site. `/index.html` redirects to `/` for the
+// same reason plus parity — Cloudflare's default html_handling already does it,
+// so there is one canonical URL for the shell on both platforms.
+app.get('/', async (c) => document(c, await html('index.html')));
+app.get('/index.html', (c) => c.redirect('/', 307));
+
+// The service worker gets the same deployment config as the documents, as a
+// prelude on the script (AB#7414). It needs the content origin synchronously
+// inside its fetch handler and has no document to read a global out of, so the
+// script itself is the only place to put it. Registered ahead of serveStatic,
+// which would otherwise serve the built file untouched.
+app.get('/sw.js', async (c) => {
+  const js = await readFile(`${staticRoot}/sw.js`, 'utf8').catch(() => null);
+  if (js === null) return c.notFound();
+  c.header('Content-Type', 'text/javascript; charset=utf-8');
+  c.header('Cache-Control', 'no-store');
+  return c.body(injectDeploymentIntoScript(js, deployment));
+});
 
 app.use('/*', serveStatic({ root: staticRoot }));
 // SPA fallback for the reader app: Cloudflare's Workers+Assets binding does
@@ -108,7 +169,7 @@ app.use('/*', serveStatic({ root: staticRoot }));
 // wrangler.jsonc) — the Node server needs it spelled out. Without this, any
 // client-side route (e.g. /library/<id>, /read/<book>/<chapter>) 404s instead
 // of serving the app shell and letting the router take over.
-app.get('*', async (c) => c.html(await html('index.html')));
+app.get('*', async (c) => document(c, await html('index.html')));
 
 const port = Number(process.env.PORT ?? 8787);
 serve({ fetch: app.fetch, port }, (info) => {

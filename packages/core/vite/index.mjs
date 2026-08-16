@@ -63,7 +63,7 @@ export function defineStorylarkConfig(options = {}) {
     const siteRoot = process.cwd();
     const brandId = options.brandId ?? (mode && !BUILTIN_MODES.has(mode) ? mode : 'storylark');
     const brandDir = resolve(siteRoot, options.brandsRoot ?? 'brands', brandId);
-    const brand = loadStorylarkConfig(siteRoot, brandId, brandDir, options);
+    const { brand, deployment } = loadStorylarkConfig(siteRoot, brandId, brandDir, options);
     const themeCss = readFileSync(resolve(brandDir, 'theme.css'), 'utf8');
 
     /** @type {import('vite').UserConfig} */
@@ -71,6 +71,7 @@ export function defineStorylarkConfig(options = {}) {
       plugins: [
         preact(),
         configModulePlugin(brand),
+        deploymentModulePlugin(deployment),
         buildInfoPlugin(resolveBuildInfo(siteRoot, brandId)),
         fontsModulePlugin(brand),
         themePlugin(themeCss),
@@ -96,7 +97,7 @@ export function defineStorylarkConfig(options = {}) {
             // admin entry's own js/css are the only outputs matching these.
             globIgnores: ['**/node_modules/**/*', 'admin.html', 'assets/admin-*'],
             maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
-            buildPlugins: { vite: [configModulePlugin(brand)] },
+            buildPlugins: { vite: [configModulePlugin(brand), deploymentModulePlugin(deployment)] },
           },
         }),
       ],
@@ -121,8 +122,13 @@ export function defineStorylarkConfig(options = {}) {
 }
 
 /**
- * Loads the three contracts a build needs and resolves them into the single
- * object the app sees as `virtual:storylark-config` (typed as `Brand`).
+ * Loads the three contracts a build needs and resolves them into the two
+ * objects the app sees:
+ *
+ *   virtual:storylark-config      brand identity + look + presentation (Brand)
+ *   virtual:storylark-deployment  origins, VAPID public key, tts
+ *
+ * from:
  *
  *   brands/<id>/brand.json                identity + look   — portable
  *   presentation/<id>/presentation.json   shape             — portable
@@ -140,8 +146,12 @@ export function defineStorylarkConfig(options = {}) {
  *                  Env wins because that is how an installer configures a
  *                  deployment it just provisioned.
  *
- * Still fully baked at build time — this function changed WHERE the data comes
- * from, not when it is read.
+ * The brand half is still baked, by design (plan §0d Phase 2 is what makes it
+ * runtime). The deployment half is now only a FALLBACK: the platform serving
+ * the app injects the live values into the document at response time
+ * (AB#7414 — packages/worker/src/lib/deployment.ts), and what is compiled in
+ * here is what a context with no injection uses — `vite dev`, `vite preview`,
+ * a plain static host.
  */
 function loadStorylarkConfig(siteRoot, brandId, brandDir, options = {}) {
   const brandFile = resolve(brandDir, 'brand.json');
@@ -169,7 +179,10 @@ function loadStorylarkConfig(siteRoot, brandId, brandDir, options = {}) {
         '  contracts. Run `npm run migrate-brand` to split it (it backs up the original).\n'
     );
     const { layout, nouns, appOrigin, contentOrigin, vapidPublicKey, tts, ...identity } = raw;
-    return resolveConfig(identity, { layout, nouns }, deploymentFromEnv({ appOrigin, contentOrigin, vapidPublicKey, tts }));
+    return {
+      brand: resolveConfig(identity, { layout, nouns }),
+      deployment: deploymentFromEnv({ appOrigin, contentOrigin, vapidPublicKey, tts }),
+    };
   }
 
   const identity = readContract(brandFile, BRAND_SCHEMA, { label: relative(siteRoot, brandFile) || brandFile });
@@ -180,15 +193,24 @@ function loadStorylarkConfig(siteRoot, brandId, brandDir, options = {}) {
     ? readContract(deploymentFile, DEPLOYMENT_SCHEMA, { label: relative(siteRoot, deploymentFile) })
     : {};
 
-  return resolveConfig(identity, presentation, deploymentFromEnv(deployment));
+  return { brand: resolveConfig(identity, presentation), deployment: deploymentFromEnv(deployment) };
 }
 
 /**
- * Deployment config from env, falling back to the file. The origin overrides
- * already existed (added while fixing the Azure content bug, and still how the
- * Azure installer points a build at the site it just provisioned); the VAPID
- * and TTS overrides are the same idea applied to the rest of what is now
- * deployment config, so nothing in this contract is file-only.
+ * The build-time deployment fallback: env override, else the file, else the
+ * core default.
+ *
+ * These STORYLARK_* overrides are deliberately KEPT now that serve-time
+ * injection exists (AB#7414). They are not a competing mechanism — they set
+ * the value a build carries for contexts nothing injects into, and that is
+ * still load-bearing in three places: both platform installers use them to
+ * point a freshly provisioned site's build at itself, `vite preview` and plain
+ * static hosting have no server to inject, and a document served by a platform
+ * mid-update may come from an older engine that does not inject yet. Removing
+ * them would break all three to delete six lines.
+ *
+ * The layering to keep in mind: env-at-BUILD > file > core default, and then
+ * env-at-SERVE beats the whole stack at request time.
  */
 function deploymentFromEnv(deployment) {
   const env = process.env;
@@ -212,16 +234,19 @@ function deploymentFromEnv(deployment) {
 }
 
 /**
- * Merge the three contracts into the flat object the app already expects.
+ * Merge identity + presentation into the flat `Brand` object the app expects.
  *
- * The key order below is the order the single pre-split brand.json used. That
- * is deliberate, not cosmetic: the resolved object is JSON.stringify'd into the
- * bundle, so keeping the order makes the built output byte-identical across the
- * split — which is how "Phase 0 changes no behaviour" gets proved rather than
- * asserted. Presentation keys beyond layout/nouns are passed through at the end
- * for whatever reads them later; nothing does today.
+ * Deployment config is NOT merged in any more (AB#7414): it has its own
+ * virtual module because it has a different lifetime — the brand is what the
+ * site is and changes only with a rebuild, while origins and keys belong to
+ * whichever deployment happens to be serving the bundle right now. Keeping
+ * them in one object is what let one deployment's URLs travel inside a brand
+ * in the first place.
+ *
+ * Presentation keys beyond layout/nouns are passed through at the end for
+ * whatever reads them later; nothing does today.
  */
-function resolveConfig(identity, presentation, deployment) {
+function resolveConfig(identity, presentation) {
   const { contractVersion: _v, layout, nouns, ...restPresentation } = presentation ?? {};
   // Rule 2 for real: an unknown key is *ignored*, not just warned about, so it
   // never reaches the bundle and can never be depended on by accident.
@@ -234,16 +259,12 @@ function resolveConfig(identity, presentation, deployment) {
     appName: identity.appName,
     shortName: identity.shortName,
     tagline: identity.tagline,
-    appOrigin: deployment.appOrigin,
-    contentOrigin: deployment.contentOrigin,
     themeColor: identity.themeColor,
     backgroundColor: identity.backgroundColor,
     defaultTheme: identity.defaultTheme,
     author: identity.author,
     layout: layout ?? PRESENTATION_DEFAULTS.layout,
     nouns: { ...PRESENTATION_DEFAULTS.nouns, ...stripUndefined(nouns ?? {}) },
-    tts: deployment.tts,
-    vapidPublicKey: deployment.vapidPublicKey,
     fonts: identity.fonts,
     ...stripUndefined(known),
   });
@@ -315,6 +336,27 @@ function configModulePlugin(brand) {
     },
     load(id) {
       if (id === '\0storylark-config') return `export default ${JSON.stringify(brand)};`;
+    },
+  };
+}
+
+/**
+ * Serves the build-time deployment fallback as `virtual:storylark-deployment`
+ * (AB#7414).
+ *
+ * A separate module from the brand on purpose, and not just for tidiness: it
+ * is the only part of the compiled config the running deployment is allowed to
+ * override, so the seam has to be visible in the code. src/deployment.ts reads
+ * this and lets the injected `self.__STORYLARK_DEPLOYMENT__` win key by key.
+ */
+function deploymentModulePlugin(deployment) {
+  return {
+    name: 'storylark-deployment-module',
+    resolveId(id) {
+      if (id === 'virtual:storylark-deployment') return '\0storylark-deployment';
+    },
+    load(id) {
+      if (id === '\0storylark-deployment') return `export default ${JSON.stringify(deployment)};`;
     },
   };
 }

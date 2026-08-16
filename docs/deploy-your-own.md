@@ -82,8 +82,22 @@ and a `logo.svg` — supply your own equivalents if your HTML references them.)
 }
 ```
 
-The Worker serves `app/dist` as static assets and runs code only for `/api/*`
-(`run_worker_first: ["/api/*"]`), with SPA fallback for everything else.
+The Worker serves `app/dist` as static assets, with SPA fallback for anything
+that isn't a file. `run_worker_first` sends `/api/*`, navigations, `/admin` and
+`/sw.js` through the Worker — documents so it can stamp this deployment's live
+origins and VAPID key into them on the way out (see "Changing config after
+deploy" below) — while `/assets/*`, `/icons/*` and `manifest.webmanifest` are
+served straight off the asset router with no Worker invocation.
+
+### Changing config after deploy
+
+`APP_ORIGIN`, `CONTENT_ORIGIN`, `VAPID_PUBLIC_KEY` and the optional `TTS_*`
+vars are read from the environment on every request and injected into the
+document, so changing them in `wrangler.jsonc` (or the dashboard) and
+redeploying the Worker is enough — **no site rebuild required**. The values in
+`deployment/<id>/deployment.json` are the fallback a build carries for contexts
+that have no server to inject: `vite dev`, `vite preview`, plain static
+hosting.
 
 ## 3. Provision Cloudflare resources
 

@@ -1,6 +1,5 @@
 {
   // StoryLark — one Worker per brand, selected with --env.
-  // Static assets are served free of Worker invocations; only /api/* runs code.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "storylark",
   "main": "packages/worker/src/index.ts",
@@ -8,7 +7,15 @@
   "assets": {
     "directory": "app/dist",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*"],
+    // Documents run through the Worker so it can stamp this deployment's live
+    // origins / VAPID key into them (AB#7414 — see packages/worker/src/lib/
+    // deployment.ts). The negative rules keep the bulk of the site — hashed
+    // JS/CSS/fonts, icons, the manifest — on the asset router, served with no
+    // Worker invocation exactly as before; what now costs an invocation is a
+    // navigation, /admin and /sw.js, i.e. one per page load rather than one
+    // per file. Deep links still resolve here and fall through to the SPA
+    // shell via ASSETS.fetch, so not_found_handling below still governs them.
+    "run_worker_first": ["/*", "!/assets/*", "!/icons/*", "!/manifest.webmanifest"],
     "not_found_handling": "single-page-application"
   },
   "observability": { "enabled": true },

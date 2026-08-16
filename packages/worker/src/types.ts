@@ -12,6 +12,15 @@ export interface Env {
   CONTENT_ORIGIN: string;
   MAIL_FROM: string;
   APP_NAME: string;
+  // Narration config (AB#7414). Optional, and read by nothing in the Worker —
+  // they exist so the deployment contract injected into the documents is whole
+  // (see lib/deployment.ts). The publish pipeline is what consumes narration
+  // config today; deployment/<id>/deployment.json remains its source.
+  TTS_VOICE?: string;
+  TTS_RATE?: string;
+  TTS_OUTPUT_FORMAT?: string;
+  /** Comma-separated list of voice ids. */
+  TTS_VOICES?: string;
   // secrets
   VAPID_PRIVATE_KEY: string;
   RESEND_API_KEY: string;

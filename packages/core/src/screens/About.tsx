@@ -1,5 +1,6 @@
 import type { JSX } from 'preact';
 import { BRAND, NOUNS, countUnits } from '../brand';
+import { DEPLOYMENT } from '../deployment';
 import { BUILD } from '../version';
 import { navigate } from '../router';
 import { manifest } from '../lib/state';
@@ -8,11 +9,11 @@ import changelogMd from '../../RELEASE-NOTES.md?raw';
 import roadmapMd from '../../ROADMAP.md?raw';
 
 /**
- * The brand's marketing install-guide page. Brand config carries app/content
- * origins only; the marketing-site origin is the app origin without its `app.`
- * label (e.g. https://app.example.com → https://example.com/app).
+ * The brand's marketing install-guide page. The marketing-site origin is this
+ * deployment's app origin without its `app.` label (e.g.
+ * https://app.example.com → https://example.com/app).
  */
-const INSTALL_PAGE_URL = `${BRAND.appOrigin.replace('://app.', '://')}/app`;
+const INSTALL_PAGE_URL = `${DEPLOYMENT.appOrigin.replace('://app.', '://')}/app`;
 
 export function About(): JSX.Element {
   const m = manifest.value;
@@ -71,7 +72,7 @@ export function About(): JSX.Element {
         <h2>Install {BRAND.appName} on your device</h2>
         <p class="about-install-note">
           {BRAND.appName} installs straight from your browser. No app store needed. Open{' '}
-          <strong>{BRAND.appOrigin.replace(/^https?:\/\//, '')}</strong> on the device you want it on, then:
+          <strong>{DEPLOYMENT.appOrigin.replace(/^https?:\/\//, '')}</strong> on the device you want it on, then:
         </p>
         <ul class="about-list">
           <li>
