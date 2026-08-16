@@ -60,9 +60,12 @@ everything else. This template does that by design.
    ```
    cp platforms/azure/install.env.example platforms/azure/install.env
    ```
-   Set `BRAND_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_LOCATION`, `DB_ADMIN_PASSWORD`
-   — run the region checks above first. See `install.env.example` for the
-   optional overrides (`DB_LOCATION`, `APP_SERVICE_SKU`, `BRAND`).
+   Set `BRAND_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_LOCATION`, `DB_ADMIN_PASSWORD`,
+   `APP_NAME` — run the region checks above first. `APP_NAME` is the
+   human-readable display name (WebAuthn passkey prompt, transactional
+   emails); set it to the same value you'd use for a Cloudflare install of
+   the same brand. See `install.env.example` for the optional overrides
+   (`DB_LOCATION`, `APP_SERVICE_SKU`, `BRAND`).
 2. **Verify before provisioning anything** (creates nothing — checks your
    values, that you're logged into Azure, and that the infrastructure
    template compiles):

@@ -64,7 +64,7 @@ function loadEnvFile(path) {
 const envPath = join(__dirname, 'install.env');
 const env = { ...loadEnvFile(envPath), ...process.env };
 
-const REQUIRED = ['BRAND_ID', 'AZURE_RESOURCE_GROUP', 'AZURE_LOCATION', 'DB_ADMIN_PASSWORD'];
+const REQUIRED = ['BRAND_ID', 'AZURE_RESOURCE_GROUP', 'AZURE_LOCATION', 'DB_ADMIN_PASSWORD', 'APP_NAME'];
 
 // This script runs from two different physical layouts: inside the engine
 // monorepo (platforms/azure/ two levels under repo root, the site lives in
@@ -527,7 +527,18 @@ async function deploy() {
   }
 
   console.log(`\nDeploying infrastructure for brand "${env.BRAND_ID}" to resource group "${env.AZURE_RESOURCE_GROUP}"...`);
-  const parameters = [`brandId=${env.BRAND_ID}`, `location=${env.AZURE_LOCATION}`, `dbAdminPassword=${env.DB_ADMIN_PASSWORD}`];
+  const parameters = [
+    `brandId=${env.BRAND_ID}`,
+    `location=${env.AZURE_LOCATION}`,
+    `dbAdminPassword=${env.DB_ADMIN_PASSWORD}`,
+    // Explicit, required (see REQUIRED above) — matches the Cloudflare
+    // installer's own APP_NAME field. infra.bicep has no default for this
+    // anymore: it used to silently fall back to the brandId/brand folder
+    // slug (e.g. "storylark"), which is a resource-naming id, not a display
+    // name, and diverged from what a Cloudflare install of the same brand
+    // shows in the UI, emails, and WebAuthn prompts.
+    `appName=${env.APP_NAME}`,
+  ];
   // Optional: run a brands/<id>/ folder that differs from the Azure resource
   // naming prefix (BRAND_ID) — e.g. testing BRAND_ID=my-brand-dev against the
   // real brands/my-brand/ folder.

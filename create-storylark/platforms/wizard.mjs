@@ -33,6 +33,7 @@ const PLATFORMS = {
       ['AZURE_RESOURCE_GROUP', 'Azure resource group name'],
       ['AZURE_LOCATION', 'Azure region (e.g. eastus)'],
       ['DB_ADMIN_PASSWORD', 'Postgres admin password (12+ characters)'],
+      ['APP_NAME', 'App display name'],
     ],
   },
 };

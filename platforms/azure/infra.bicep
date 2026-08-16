@@ -31,8 +31,8 @@ param dbAdminPassword string
 @description('App Service plan SKU. B1 is the smallest that supports Always On, needed so the Node process (and its background push/email sends) stays warm.')
 param appServiceSku string = 'B1'
 
-@description('Human-readable app name shown in the UI (About screen, mail templates). Defaults to brand if not set.')
-param appName string = brand
+@description('Human-readable app name — the WebAuthn passkey prompt name and the From: display name for transactional/update-check emails (does NOT drive the admin portal title, which reads brand.json\'s appName at runtime). Required, no default: this used to silently default to the brand-folder id (e.g. "storylark", a resource-naming slug, not a display name), which diverged from what a Cloudflare install of the same brand shows. The installer always passes this explicitly — see install.env\'s APP_NAME.')
+param appName string
 
 @description('The From: address for transactional email, e.g. "Your App <noreply@example.com>". Update once you have a real domain — the default is a placeholder.')
 param mailFrom string = '${appName} <noreply@example.com>'
