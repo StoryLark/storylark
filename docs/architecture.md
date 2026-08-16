@@ -38,7 +38,7 @@ Changesets (see `.changeset/` and the Release workflow).
 
 ## Load-bearing decisions
 
-- **One Worker per brand, one repo.** Brand is baked at build time (`vite build --mode <brand>`); zero runtime brand logic. Adding a brand = new `brands/<id>/` folder + wrangler env + bootstrap. No shared-code changes (Phase 9 acceptance test).
+- **One Worker per brand, one repo.** A build selects the brand (`vite build --mode <brand>`), but identity and theme leave the build as files the deployment serves and re-reads per request, so swapping them needs no rebuild ([design note](design/runtime-brand.md)). Adding a brand = new `brands/<id>/` folder + wrangler env + bootstrap. No shared-code changes (Phase 9 acceptance test).
 - **D1 per brand.** No cross-brand queries exist, so isolation beats a shared DB with a brand column.
 - **Content on R2 custom domain, not through the Worker.** Audio bytes and Range requests never spend Worker CPU/requests; Cloudflare edge caches them; egress is free.
 - **Cookie sessions (HttpOnly, SameSite=Lax).** App and API are same-origin, so cookies just work — including from the service worker. CSRF covered by the `X-Requested-With: storylark` header requirement on mutations.

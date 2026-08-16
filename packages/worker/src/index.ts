@@ -10,7 +10,20 @@ import { push } from './routes/push';
 import { admin } from './routes/admin';
 import { adminAuth } from './routes/admin-auth';
 import { checkForUpdateAndNotify } from './lib/update-check';
-import { deploymentConfigFromEnv, injectDeploymentIntoResponse } from './lib/deployment';
+import { deploymentConfigFromEnv, injectDeploymentIntoHtml, injectDeploymentIntoScript } from './lib/deployment';
+import {
+  BRAND_ASSET,
+  FONTS_ASSET,
+  THEME_ASSET,
+  injectBrandIntoHtml,
+  injectBrandIntoScript,
+  manifestFromBrand,
+  readBrandAsset,
+  readFontRegistry,
+  themeCssWithFonts,
+  type BrandIdentity,
+  type FontRegistry,
+} from './lib/brand';
 
 const app = new Hono<AppContext>();
 
@@ -37,6 +50,29 @@ app.route('/api/admin', admin);
 // already owns (/setup, /status, ...) keep their handlers; the three routes
 // here (/setup/reset, /setup/claim, /recover) don't overlap with any of them.
 app.route('/api/admin', adminAuth);
+
+/**
+ * The PWA manifest, generated from the live brand (AB#7415 — plan §0d Phase 2).
+ *
+ * A real route rather than a rewritten asset, because there is nothing of the
+ * built file worth keeping: every field in it comes from brand.json. The static
+ * dist/manifest.webmanifest the build still emits is the fallback for contexts
+ * with no injector (`vite preview`, a bare static host) and the source of the
+ * icon list here, so icon paths stay a build concern.
+ *
+ * `manifest.webmanifest` was excluded from `run_worker_first` until now; it is
+ * back in, which costs one Worker invocation per install prompt — rare enough
+ * not to matter, and the alternative is an installed app named after whichever
+ * brand happened to be current at the last build.
+ */
+app.get('/manifest.webmanifest', async (c) => {
+  const [brand, baked] = await Promise.all([liveBrand(c.req.raw, c.env), bakedManifest(c.req.raw, c.env)]);
+  if (!brand) return serveAsset(c.req.raw, c.env); // no brand asset — serve the built file untouched
+  return c.json(manifestFromBrand(brand, baked), 200, {
+    'Content-Type': 'application/manifest+json',
+    'Cache-Control': 'no-store',
+  });
+});
 
 app.notFound((c) => {
   if (new URL(c.req.url).pathname.startsWith('/api/')) return c.json({ error: 'not_found' }, 404);
@@ -65,22 +101,130 @@ app.notFound((c) => {
  * door.
  */
 async function serveAsset(request: Request, env: Env): Promise<Response> {
-  const headers = new Headers(request.headers);
-  headers.delete('if-none-match');
-  headers.delete('if-modified-since');
-  const response = await env.ASSETS.fetch(new Request(request, { headers }));
+  const response = await rawAsset(request, env);
 
   // Content type, not path, decides which injection applies — a request for
   // /sw.js on a build that has no service worker comes back as the SPA shell,
   // and prepending a JS prelude to HTML would break the page.
   const type = response.headers.get('content-type') ?? '';
-  if (new URL(request.url).pathname === '/sw.js' && /javascript|ecmascript/i.test(type)) {
-    return injectDeploymentIntoResponse(response, deploymentConfigFromEnv(env), 'script');
+  const path = new URL(request.url).pathname;
+
+  // theme.css (AB#7415): the brand's own stylesheet, with the live font
+  // selection appended. Served from the asset the deployment ships rather than
+  // from the JS bundle, so replacing dist/theme.css restyles the site with no
+  // rebuild — which is the whole point of the phase.
+  if (path === THEME_ASSET && /\btext\/css\b/i.test(type)) {
+    const [css, brand, registry] = await Promise.all([
+      response.text(),
+      liveBrand(request, env),
+      fontRegistry(request, env),
+    ]);
+    return rewritten(response, themeCssWithFonts(css, brand, registry));
   }
+
+  if (path === '/sw.js' && /javascript|ecmascript/i.test(type)) {
+    const [js, brand] = await Promise.all([response.text(), liveBrand(request, env)]);
+    // Brand first, so the deployment statement stays on line 1 where Phase 1's
+    // own prelude regex expects to find it.
+    const branded = brand ? injectBrandIntoScript(js, brand) : js;
+    return rewritten(response, injectDeploymentIntoScript(branded, deploymentConfigFromEnv(env)));
+  }
+
   if (type.includes('text/html')) {
-    return injectDeploymentIntoResponse(response, deploymentConfigFromEnv(env), 'html');
+    const [html, brand] = await Promise.all([response.text(), liveBrand(request, env)]);
+    const withDeployment = injectDeploymentIntoHtml(html, deploymentConfigFromEnv(env));
+    return rewritten(response, brand ? injectBrandIntoHtml(withDeployment, brand) : withDeployment);
   }
+
   return response;
+}
+
+/** The asset router's answer, with conditional headers stripped (see above). */
+async function rawAsset(request: Request, env: Env): Promise<Response> {
+  const headers = new Headers(request.headers);
+  headers.delete('if-none-match');
+  headers.delete('if-modified-since');
+  return env.ASSETS.fetch(new Request(request, { headers }));
+}
+
+/**
+ * Same headers policy as Phase 1's injectDeploymentIntoResponse: `ETag` and
+ * `Last-Modified` describe the file on disk and this body is no longer that
+ * file, so leaving them would let a client revalidate its way back to a stale
+ * copy; `no-store` keeps the rewritten document out of every cache in between.
+ */
+function rewritten(response: Response, body: string): Response {
+  const headers = new Headers(response.headers);
+  headers.delete('etag');
+  headers.delete('last-modified');
+  headers.set('cache-control', 'no-store');
+  return new Response(body, { status: response.status, statusText: response.statusText, headers });
+}
+
+/**
+ * This deployment's brand, read from its own static assets on every request
+ * (AB#7415 — plan §0d Phase 2).
+ *
+ * Per request, not memoised: swapping dist/brand.json is meant to take effect
+ * on the next request, and an isolate-lifetime cache would make that "on the
+ * next cold start", which is unpredictable and untestable. The cost is one
+ * `env.ASSETS.fetch` — a binding call inside the same colo, issued in parallel
+ * with the document fetch it accompanies, not a network round trip.
+ *
+ * Returns undefined when the deployment ships no brand.json (a site built by an
+ * older core) or when the file is unusable; callers then skip brand injection
+ * and the frontend falls back to the brand baked in at build. A broken file
+ * must never take the library down.
+ */
+async function liveBrand(request: Request, env: Env): Promise<BrandIdentity | undefined> {
+  const text = await assetText(request, env, BRAND_ASSET);
+  return text === undefined ? undefined : readBrandAsset(text);
+}
+
+/**
+ * The curated font registry, memoised for the life of the isolate.
+ *
+ * Unlike the brand this is ENGINE data: dist/fonts.json is emitted from
+ * storylark-core's font registry by the same build that shipped the font files,
+ * so it can only change when the site is rebuilt and redeployed — which starts
+ * new isolates anyway. Caching it keeps the per-request cost of /theme.css at
+ * one asset read rather than two.
+ */
+let fontRegistryCache: FontRegistry | undefined | null = null;
+async function fontRegistry(request: Request, env: Env): Promise<FontRegistry | undefined> {
+  if (fontRegistryCache !== null) return fontRegistryCache;
+  const text = await assetText(request, env, FONTS_ASSET);
+  fontRegistryCache = text === undefined ? undefined : readFontRegistry(text);
+  return fontRegistryCache;
+}
+
+/** The built manifest, for the icon list Phase 2 leaves as a build concern. */
+async function bakedManifest(request: Request, env: Env): Promise<Record<string, unknown> | undefined> {
+  const text = await assetText(request, env, '/manifest.webmanifest');
+  if (text === undefined) return undefined;
+  try {
+    const doc = JSON.parse(text) as Record<string, unknown>;
+    return doc && typeof doc === 'object' ? doc : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read one static asset as text.
+ *
+ * `env.ASSETS.fetch` on a missing path does not 404 here — `not_found_handling`
+ * is `single-page-application`, so it answers with the app shell. The
+ * content-type check is what distinguishes "no such asset" from "the asset",
+ * and it is why this returns undefined rather than an empty string: an HTML
+ * body parsed as brand JSON would produce a warning on every single request.
+ */
+async function assetText(request: Request, env: Env, path: string): Promise<string | undefined> {
+  const response = await env.ASSETS.fetch(new Request(new URL(path, request.url), { headers: { accept: '*/*' } }));
+  if (!response.ok) return undefined;
+  const type = response.headers.get('content-type') ?? '';
+  if (type.includes('text/html')) return undefined; // SPA fallback — the asset is not there
+  return response.text();
 }
 
 app.onError((err, c) => {

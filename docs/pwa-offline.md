@@ -4,8 +4,8 @@
 
 | Cache | Filled by | Strategy |
 |---|---|---|
-| precache (`workbox`) | build (injectManifest) | App shell: JS/CSS/fonts/icons/HTML. New deploy = new precache, old cleaned up. |
-| `sr-runtime` | browsing | `manifest.json` + covers: stale-while-revalidate. Hashed chapter/timing JSON: cache-first (immutable). |
+| precache (`workbox`) | build (injectManifest) | App shell: JS/CSS/icons/HTML. New deploy = new precache, old cleaned up. The shell is re-stamped with the current deployment config and brand on its way out of the cache, so an installed app never serves a stale one. |
+| `sr-runtime` | browsing | `manifest.json` + covers: stale-while-revalidate. Hashed chapter/timing JSON: cache-first (immutable). `theme.css`: network-first, cached only as the offline floor — a swapped brand must not survive in cache. Font files: cache-first, added the first time something renders in that family. |
 | `sr-downloads` | the **Download button only** | Full copies of chapter text + timings + MP3 for offline. |
 
 Navigations fall back to the cached shell (SPA), so the app opens with no network.
@@ -34,4 +34,8 @@ on reconnect/app-focus. Last-writer-wins server-side makes replay order irreleva
 
 - Installable on Android/desktop (manifest + SW + icons); iOS via Share → Add to Home Screen.
 - iOS kills background audio if the page is evicted — the app keeps ONE `<audio>` element alive across chapters (never recreated), and positions save every 30 s so recovery is cheap.
-- Theme color / icons / name are per-brand, baked at build time.
+- Theme color and name come from the deployment's `brand.json` at request time,
+  so the manifest follows a brand swap immediately; the icon *files* are
+  build-time assets. An app that is **already installed** may keep its old
+  home-screen name and icon until it is reinstalled — the operating system owns
+  that copy of the manifest, and no web app can force it to update.

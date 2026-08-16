@@ -16,7 +16,7 @@
 import { render } from 'preact';
 import { BRAND } from './brand';
 import { Admin } from './screens/Admin';
-import 'virtual:storylark-theme.css';
+// theme.css is linked from admin.html, not bundled (AB#7415) — see mount.tsx.
 import 'virtual:storylark-fonts';
 import './styles/base.css';
 import './styles/ui2.css';

@@ -18,7 +18,8 @@
     "./db/d1": "./src/db/d1.ts",
     "./db/types": "./src/db/types.ts",
     "./lib/update-check": "./src/lib/update-check.ts",
-    "./lib/deployment": "./src/lib/deployment.ts"
+    "./lib/deployment": "./src/lib/deployment.ts",
+    "./lib/brand": "./src/lib/brand.ts"
   },
   "files": [
     "src/",

@@ -83,11 +83,11 @@ and a `logo.svg` — supply your own equivalents if your HTML references them.)
 ```
 
 The Worker serves `app/dist` as static assets, with SPA fallback for anything
-that isn't a file. `run_worker_first` sends `/api/*`, navigations, `/admin` and
-`/sw.js` through the Worker — documents so it can stamp this deployment's live
-origins and VAPID key into them on the way out (see "Changing config after
-deploy" below) — while `/assets/*`, `/icons/*` and `manifest.webmanifest` are
-served straight off the asset router with no Worker invocation.
+that isn't a file. `run_worker_first` sends `/api/*`, navigations, `/admin`,
+`/sw.js`, `/theme.css` and `manifest.webmanifest` through the Worker — so it can
+stamp this deployment's live origins, VAPID key and brand into them on the way
+out (see below) — while `/assets/*` and `/icons/*` are served straight off the
+asset router with no Worker invocation.
 
 ### Changing config after deploy
 
@@ -98,6 +98,16 @@ redeploying the Worker is enough — **no site rebuild required**. The values in
 `deployment/<id>/deployment.json` are the fallback a build carries for contexts
 that have no server to inject: `vite dev`, `vite preview`, plain static
 hosting.
+
+### Changing your brand after deploy
+
+Same idea, different source. `dist/brand.json` and `dist/theme.css` are read
+from the deployed assets on every request, so replacing those two files and
+uploading the assets changes the site's name, colours, fonts and PWA manifest —
+again **no site rebuild**, no new JavaScript, no hashed asset touched. See
+[Changing your brand without rebuilding](build-your-own-theme.md#changing-your-brand-without-rebuilding)
+for the full list of what does and doesn't follow, and
+[the design note](design/runtime-brand.md) for how it works.
 
 ## 3. Provision Cloudflare resources
 

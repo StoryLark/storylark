@@ -8,14 +8,20 @@
     "directory": "app/dist",
     "binding": "ASSETS",
     // Documents run through the Worker so it can stamp this deployment's live
-    // origins / VAPID key into them (AB#7414 — see packages/worker/src/lib/
-    // deployment.ts). The negative rules keep the bulk of the site — hashed
-    // JS/CSS/fonts, icons, the manifest — on the asset router, served with no
-    // Worker invocation exactly as before; what now costs an invocation is a
-    // navigation, /admin and /sw.js, i.e. one per page load rather than one
-    // per file. Deep links still resolve here and fall through to the SPA
-    // shell via ASSETS.fetch, so not_found_handling below still governs them.
-    "run_worker_first": ["/*", "!/assets/*", "!/icons/*", "!/manifest.webmanifest"],
+    // origins / VAPID key (AB#7414 — packages/worker/src/lib/deployment.ts) and
+    // its live brand (AB#7415 — .../lib/brand.ts) into them. The negative rules
+    // keep the bulk of the site — hashed JS/CSS/fonts and the icon files — on
+    // the asset router, served with no Worker invocation exactly as before;
+    // what costs an invocation is a navigation, /admin, /sw.js, /theme.css and
+    // the manifest, i.e. a handful per page load rather than one per file.
+    // Deep links still resolve here and fall through to the SPA shell via
+    // ASSETS.fetch, so not_found_handling below still governs them.
+    //
+    // manifest.webmanifest lost its exclusion in Phase 2: it is now generated
+    // from the live brand on every request, so an operator who swaps
+    // brand.json gets an installable app with the new name and colours without
+    // rebuilding anything.
+    "run_worker_first": ["/*", "!/assets/*", "!/icons/*"],
     "not_found_handling": "single-page-application"
   },
   "observability": { "enabled": true },

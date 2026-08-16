@@ -1,19 +1,97 @@
 /// <reference path="./virtual.d.ts" />
+// Brand identity, resolved at runtime (AB#7415 — plan §0d Phase 2).
+//
+// Two layers, in this order — the same shape Phase 1 gave deployment config:
+//
+//   1. What the platform serving this document injected, from the deployment's
+//      OWN dist/brand.json, at response time — `self.__STORYLARK_BRAND__`,
+//      written into the `<head>` of index.html/admin.html and prepended to
+//      sw.js by packages/worker/src/lib/brand.ts (Cloudflare Worker) and
+//      platforms/azure/server.mjs (Node).
+//   2. What the build baked in — brands/<id>/brand.json, compiled into
+//      `virtual:storylark-config`.
+//
+// Layer 2 is a FALLBACK. It exists so the app still works where nothing
+// injects: `vite dev`, `vite preview`, a plain static host, or a document
+// served by a platform running an older engine mid-update. On a real deployment
+// layer 1 wins, which is what makes replacing dist/brand.json change the live
+// site without rebuilding the bundle.
+//
+// Per-key, not all-or-nothing: an injected brand that omits `tagline` keeps the
+// built-in one. A blank field in a hand-edited file must not wipe a value out.
+//
+// ── Where the boundary is, and why ──────────────────────────────────────────
+// Only IDENTITY is runtime. `layout` and `nouns` are PRESENTATION and stay
+// baked (plan §0d Phase 3 moves them, separately) — IDENTITY_KEYS below is the
+// enforcement, not a comment: an injected object carrying a `layout` cannot
+// reach BRAND through this function, so no half-migrated presentation can
+// appear by accident.
+
 import type { Brand, ContentNouns } from './lib/types';
 import config from 'virtual:storylark-config';
 import { DEPLOYMENT } from './deployment';
 
 /**
- * Brand identity + presentation, baked in at build time from
- * brands/<id>/brand.json and presentation/<id>/presentation.json.
+ * The global the serving platform writes.
  *
- * Baked is correct for these: they are what the site IS, and changing them is
- * a rebuild by definition (theme.css, icons and the PWA manifest all change
- * with them). Making brand data runtime is plan §0d Phase 2, separately. What
- * is NOT here any more is anything about where this copy of the site lives —
- * that is DEPLOYMENT, resolved at runtime (AB#7414).
+ * Keep in sync with BRAND_GLOBAL in packages/worker/src/lib/brand.ts. Core
+ * deliberately does not import the worker package — the frontend must not
+ * depend on the backend — so the name is spelled out in both places.
  */
-export const BRAND: Brand = config;
+export const BRAND_GLOBAL = '__STORYLARK_BRAND__';
+
+/** `id` of the injected `<script>`. Same sync note as above. */
+export const BRAND_SCRIPT_ID = 'storylark-brand';
+
+/** The identity a deployment may state. Everything else in `Brand` is baked. */
+const IDENTITY_KEYS = [
+  'id',
+  'name',
+  'appName',
+  'shortName',
+  'tagline',
+  'author',
+  'themeColor',
+  'backgroundColor',
+  'defaultTheme',
+  'fonts',
+] as const;
+
+type BrandIdentity = Partial<Pick<Brand, (typeof IDENTITY_KEYS)[number]>>;
+
+function injected(): BrandIdentity | undefined {
+  const value = (globalThis as unknown as Record<string, unknown>)[BRAND_GLOBAL];
+  return value !== null && typeof value === 'object' ? (value as BrandIdentity) : undefined;
+}
+
+/** True when this document/worker was served by a platform that injects. */
+export const BRAND_INJECTED: boolean = injected() !== undefined;
+
+/** Resolve the live brand. Exported for the service worker, which re-resolves. */
+export function resolveBrand(): Brand {
+  const live = injected();
+  if (!live) return config;
+  const resolved: Brand = { ...config };
+  for (const key of IDENTITY_KEYS) {
+    const value = live[key];
+    if (value !== undefined) (resolved as unknown as Record<string, unknown>)[key] = value;
+  }
+  return resolved;
+}
+
+/**
+ * Brand identity + presentation.
+ *
+ * Identity comes from the deployment (see above). Presentation — `layout`,
+ * `nouns` — is still baked in at build time from
+ * presentation/<id>/presentation.json, deliberately: making it runtime is plan
+ * §0d Phase 3, and it touches every component that reads a noun.
+ *
+ * Read at module evaluation, which is safe because the injected `<script>` sits
+ * in `<head>` ahead of the module bundle — no extra round trip, nothing to
+ * await, and no flash of the previous brand's name.
+ */
+export const BRAND: Brand = resolveBrand();
 
 export function contentUrl(path: string): string {
   return `${DEPLOYMENT.contentOrigin}/${path.replace(/^\//, '')}`;
@@ -21,12 +99,46 @@ export function contentUrl(path: string): string {
 
 /**
  * Brand content nouns — what a content unit is called in the UI, taken straight
- * from the brand config (see ContentNouns in lib/types). Every user-visible
- * string uses these instead of hardcoding "story"/"chapter"/"book".
+ * from the presentation config (see ContentNouns in lib/types). Every
+ * user-visible string uses these instead of hardcoding "story"/"chapter"/"book".
  */
 export const NOUNS: ContentNouns = BRAND.nouns;
 
 /** "3 chapters" / "1 story" — count with the right brand noun. */
 export function countUnits(n: number): string {
   return `${n} ${n === 1 ? NOUNS.unit : NOUNS.unitPlural}`;
+}
+
+/**
+ * Re-stamp an HTML document with a given brand.
+ *
+ * Used by the service worker on the app shell it serves out of the precache:
+ * that copy carries whatever brand was injected the day it was cached, while
+ * the service worker's own script is re-injected by the platform on every
+ * update and therefore holds the current one. Mirrors injectBrandIntoHtml in
+ * packages/worker/src/lib/brand.ts, and is a no-op on a document that carries
+ * no injected tag (a static host, where the fallback already agrees).
+ *
+ * The `<title>` is re-stamped too, for the same reason the injector writes it:
+ * it is what the tab shows before any of this bundle has evaluated.
+ */
+export function restampBrand(html: string, brand: Brand): string {
+  const re = new RegExp(`<script id="${BRAND_SCRIPT_ID}">[\\s\\S]*?</script>`);
+  if (!re.test(html)) return html;
+  const identity: BrandIdentity = {};
+  for (const key of IDENTITY_KEYS) {
+    const value = brand[key];
+    if (value !== undefined) (identity as Record<string, unknown>)[key] = value;
+  }
+  const json = JSON.stringify(identity).replace(/</g, '\\u003c');
+  return html
+    .replace(re, `<script id="${BRAND_SCRIPT_ID}">self.${BRAND_GLOBAL}=${json};</script>`)
+    .replace(/<title data-storylark-title="(app|admin)">[\s\S]*?<\/title>/, (match, kind: string) => {
+      if (!brand.appName) return match;
+      const title = kind === 'admin' ? `Admin — ${brand.appName}` : brand.appName;
+      return `<title data-storylark-title="${kind}">${title
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')}</title>`;
+    });
 }

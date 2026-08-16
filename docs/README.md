@@ -61,6 +61,9 @@ the same codebase.
   Cloudflare and Azure side by side, with a diagram.
 - **[Standalone Admin](design/standalone-admin.md)** — why `/admin` is a
   separate page and bundle, how it's built, and how each platform routes it.
+- **[Runtime Brand](design/runtime-brand.md)** — why `brand.json` and
+  `theme.css` are files the deployment serves rather than bundle contents, how
+  fonts work, and where staleness can still bite.
 - **[Content Flow](design/content-flow.md)** — the add-a-story pipeline end to
   end, with a diagram.
 - **[Update Flow](design/update-flow.md)** — the update mechanism, why the

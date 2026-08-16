@@ -7,7 +7,11 @@ import { startSyncLoop } from './lib/progress-sync';
 import { initDownloadStates } from './lib/downloads';
 import { initAutoSync } from './lib/autosync';
 import { initServiceWorker } from './lib/update';
-import 'virtual:storylark-theme.css';
+// The brand's theme.css is NOT imported here any more (AB#7415 — plan §0d
+// Phase 2). It ships as dist/theme.css and is linked from the document, so
+// replacing that one file restyles a deployed site with no rebuild. What is
+// imported is the curated font set — @font-face declarations for every family
+// a brand may pick, so the pick itself can change at runtime.
 import 'virtual:storylark-fonts';
 import './styles/base.css';
 import './styles/reader.css';

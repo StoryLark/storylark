@@ -105,17 +105,25 @@ The Vite build **mode is the brand id**. The `defineStorylarkConfig` preset
 (from `storylark-core/vite`, used by `app/vite.config.ts`) reads
 `--mode <brandId>`, loads `brands/<brandId>/brand.json` + `brands/<brandId>/theme.css`,
 plus `presentation/<brandId>/presentation.json` and
-`deployment/<brandId>/deployment.json`, and bakes them into the bundle:
+`deployment/<brandId>/deployment.json`, and turns them into the site:
 
-- The three JSON files resolve into one object served as the virtual module
-  `virtual:storylark-config` and
-  read at runtime through `packages/core/src/brand.ts` (`BRAND`, `NOUNS`,
-  `contentUrl()`) — the service worker consumes the same module.
-- `theme.css` is served as `virtual:storylark-theme.css`, and the brand's font
-  families become `@fontsource` imports via `virtual:storylark-fonts` (both
-  imported in `packages/core/src/mount.tsx`).
-- `manifest.webmanifest` and the brand icons are generated / copied into
-  `app/dist` at build time.
+- Identity and theme are **output files, not bundle contents** — `dist/brand.json`
+  and `dist/theme.css`. The platform serving the site reads them on every request
+  and injects them into the document, so replacing either on a deployed site
+  changes the brand with no rebuild (see
+  [the design note](design/runtime-brand.md)). The same values are also compiled
+  into `virtual:storylark-config` as the fallback for contexts with no server to
+  inject — `vite dev`, `vite preview`, plain static hosting — and read through
+  `packages/core/src/brand.ts` (`BRAND`, `NOUNS`, `contentUrl()`), which the
+  service worker consumes too.
+- `layout` and `nouns` from `presentation.json` really are baked, for now.
+- The whole curated font set becomes `@fontsource` imports via
+  `virtual:storylark-fonts` (imported in `packages/core/src/mount.tsx`); the
+  brand's `fonts` chooses among them at request time. `dist/fonts.json` is the
+  set, emitted for the server to read.
+- `manifest.webmanifest` is emitted as a static fallback but generated per
+  request from `dist/brand.json` on a real deployment; the brand icons are
+  copied into `app/dist/icons` at build time.
 
 The built-in Vite modes (`development`, `production`, `test`) fall back to the
 `storylark` brand. Any other `--mode` value is treated as a brand id, so
@@ -142,7 +150,7 @@ Inside `packages/core/src/`:
 - `screens/` — Home, Library, Book, Reader, NowPlaying, Settings, About
 - `reader/` — read-along engine (AudioController, Highlighter, BlockRenderer, SpeechFallback)
 - `lib/` — API client, IndexedDB, downloads, sync, push, player state
-- `router.ts`, `brand.ts`, `sw.ts`, `mount.tsx` — routing, baked-in brand, service worker, the `mount()` entry
+- `router.ts`, `brand.ts`, `sw.ts`, `mount.tsx` — routing, brand resolution, service worker, the `mount()` entry
 
 ## Next steps
 

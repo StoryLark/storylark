@@ -4,7 +4,7 @@ declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: Array<{ url: str
 
 import { addPlugins, precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
 
-import BRAND from 'virtual:storylark-config';
+import { BRAND, BRAND_INJECTED, restampBrand } from './brand';
 import { DEPLOYMENT, DEPLOYMENT_INJECTED, restampDeployment } from './deployment';
 
 // This deployment's content origin, read at script evaluation. The serving
@@ -17,27 +17,49 @@ const CONTENT_ORIGIN = DEPLOYMENT.contentOrigin;
 const DOWNLOAD_CACHE = 'sr-downloads';
 const RUNTIME_CACHE = 'sr-runtime';
 
+/** Where this app is served from — always right, whatever `appOrigin` says. */
+const APP_ORIGIN = self.location.origin;
+
+/**
+ * The brand's stylesheet, served by the platform from dist/theme.css with the
+ * live font selection appended (AB#7415). Deliberately NOT precached: the
+ * precache is keyed to the build, so a precached theme would keep an installed
+ * PWA on the brand it was installed with, which is the exact staleness Phase 2
+ * exists to remove.
+ */
+const THEME_PATH = '/theme.css';
+
+/** Font files. Hashed and immutable, so cache-first is safe and permanent. */
+const FONT_RE = /\.(woff2?|ttf|otf)$/i;
+
 // App shell — injected by vite-plugin-pwa at build time.
 precacheAndRoute(self.__WB_MANIFEST);
 cleanupOutdatedCaches();
 
-// The precached app shell carries the deployment config that was injected when
-// it was cached, and the precache is only refetched when the BUILD changes —
-// so on an installed PWA a changed origin would otherwise stay invisible to
-// the page indefinitely, even though this worker already knows about it. Stamp
-// the current values back into the shell on its way out of the cache.
+// The precached app shell carries the deployment config AND the brand that were
+// injected when it was cached, and the precache is only refetched when the
+// BUILD changes — so on an installed PWA a changed origin or a swapped brand
+// would otherwise stay invisible to the page indefinitely, even though this
+// worker already knows about both. Stamp the current values back into the shell
+// on its way out of the cache.
+//
+// This worker's own copies are current because the platform re-injects sw.js on
+// every fetch of it and serves it `no-store`, so the browser's update check
+// picks up a changed brand or origin and installs a byte-different worker.
 //
 // Skipped entirely when nothing injected this script: then the page's
-// build-time fallback and this worker's are the same values, and rewriting the
+// build-time fallbacks and this worker's are the same values, and rewriting the
 // document would only risk breaking a static host for no gain.
-if (DEPLOYMENT_INJECTED) {
+if (DEPLOYMENT_INJECTED || BRAND_INJECTED) {
   addPlugins([
     {
       async cachedResponseWillBeUsed({ cachedResponse }) {
         if (!cachedResponse) return cachedResponse;
         if (!(cachedResponse.headers.get('content-type') ?? '').includes('text/html')) return cachedResponse;
         const html = await cachedResponse.clone().text();
-        const fresh = restampDeployment(html, DEPLOYMENT);
+        let fresh = html;
+        if (DEPLOYMENT_INJECTED) fresh = restampDeployment(fresh, DEPLOYMENT);
+        if (BRAND_INJECTED) fresh = restampBrand(fresh, BRAND);
         if (fresh === html) return cachedResponse;
         return new Response(fresh, {
           status: cachedResponse.status,
@@ -64,7 +86,31 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  if (url.origin !== CONTENT_ORIGIN || event.request.method !== 'GET') return;
+  if (event.request.method !== 'GET') return;
+
+  // Brand assets on the app's own origin (AB#7415). Checked before the content
+  // origin because the two are the same host on a single-origin deployment.
+  if (url.origin === APP_ORIGIN) {
+    // Network-first, cache as the offline floor. Never stale-while-revalidate:
+    // that would show the previous brand's colours for one whole launch after a
+    // swap, and "the service worker must not serve a stale brand" is the point.
+    // The cost is one small conditional-free request on a blocking stylesheet;
+    // offline, the fetch fails immediately and the cache answers.
+    if (url.pathname === THEME_PATH) {
+      event.respondWith(networkFirst(event.request));
+      return;
+    }
+    // Fonts are cached on demand rather than precached. The curated set ships
+    // every family so a brand can switch to any of them without a rebuild —
+    // precaching all of them would make every reader download six typefaces to
+    // use one. A font only enters the cache once something actually renders in it.
+    if (FONT_RE.test(url.pathname)) {
+      event.respondWith(cacheFirst(event.request));
+      return;
+    }
+  }
+
+  if (url.origin !== CONTENT_ORIGIN) return;
 
   if (url.pathname.includes('/audio/')) {
     event.respondWith(serveAudio(event.request));
@@ -85,6 +131,20 @@ async function cacheFirst(request: Request): Promise<Response> {
   const res = await fetch(request);
   if (res.ok) void runtime.put(request, res.clone());
   return res;
+}
+
+/** Fresh if the network answers, the last good copy if it does not. */
+async function networkFirst(request: Request): Promise<Response> {
+  const runtime = await caches.open(RUNTIME_CACHE);
+  try {
+    const res = await fetch(request);
+    if (res.ok) void runtime.put(request, res.clone());
+    return res;
+  } catch {
+    const cached = await runtime.match(request);
+    if (cached) return cached;
+    throw new Error(`storylark: ${request.url} is unavailable offline and was never cached.`);
+  }
 }
 
 async function staleWhileRevalidate(request: Request): Promise<Response> {

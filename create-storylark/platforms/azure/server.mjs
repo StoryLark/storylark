@@ -44,6 +44,20 @@ try {
   );
 }
 
+// Serve-time brand identity (AB#7415 — plan §0d Phase 2) arrived in
+// storylark-worker 0.10.0. Same dynamic-import reasoning as above: this process
+// installs its own dependencies and can legitimately be a version behind
+// mid-update, and an older worker package must degrade to the brand baked into
+// the bundle rather than refuse to start.
+let brandLib = null;
+try {
+  brandLib = await import('storylark-worker/lib/brand');
+} catch {
+  console.warn(
+    'storylark: this storylark-worker has no lib/brand (needs >= 0.10.0). Serving the brand that was baked in at build — swapping brand.json or theme.css will not reach the frontend until storylark-worker is updated.'
+  );
+}
+
 const required = ['DATABASE_URL', 'BRAND', 'APP_ORIGIN', 'CONTENT_ORIGIN', 'MAIL_FROM', 'APP_NAME'];
 const missing = required.filter((k) => !process.env[k]);
 if (missing.length > 0) {
@@ -116,11 +130,49 @@ app.use('/api/*', async (c) => workerApp.fetch(c.req.raw, env, executionCtx));
  */
 const deployment = deploymentConfigFromEnv(process.env);
 
-/** An HTML document, with the deployment config stamped in. */
-function document(c, body) {
+/**
+ * This deployment's brand (AB#7415 — plan §0d Phase 2), read from
+ * <staticRoot>/brand.json on EVERY request.
+ *
+ * Unlike the deployment config above, this is deliberately not resolved once at
+ * startup. Its source is a file, not the process environment: an operator (or,
+ * later, the admin portal) replaces brand.json on the deployed site and the
+ * next request must serve the new brand. Caching it would turn "swap the file"
+ * back into "swap the file and restart the app", which is most of what Phase 2
+ * exists to delete. A ~400-byte read per request out of the OS page cache is
+ * not a cost worth trading that for.
+ *
+ * A missing or broken file yields undefined, and every caller then falls back
+ * to what the build baked in — the same rule Phase 1 uses for a bad env var.
+ */
+async function liveBrand() {
+  if (!brandLib) return undefined;
+  const text = await readFile(`${staticRoot}/brand.json`, 'utf8').catch(() => null);
+  return text === null ? undefined : brandLib.readBrandAsset(text);
+}
+
+/**
+ * The curated font registry, read once. Engine data emitted by the site build
+ * (dist/fonts.json), so it can only change when the site is rebuilt — and a new
+ * site build on App Service means a new process.
+ */
+let fontRegistry;
+async function fonts() {
+  if (fontRegistry === undefined && brandLib) {
+    const text = await readFile(`${staticRoot}/fonts.json`, 'utf8').catch(() => null);
+    fontRegistry = text === null ? null : (brandLib.readFontRegistry(text) ?? null);
+  }
+  return fontRegistry ?? undefined;
+}
+
+/** An HTML document, with the deployment config and the live brand stamped in. */
+async function document(c, body) {
   if (body == null) return c.notFound();
   c.header('Cache-Control', 'no-store');
-  return c.html(injectDeploymentIntoHtml(body, deployment));
+  let out = injectDeploymentIntoHtml(body, deployment);
+  const brand = await liveBrand();
+  if (brand) out = brandLib.injectBrandIntoHtml(out, brand);
+  return c.html(out);
 }
 
 const htmlCache = new Map();
@@ -160,7 +212,48 @@ app.get('/sw.js', async (c) => {
   if (js === null) return c.notFound();
   c.header('Content-Type', 'text/javascript; charset=utf-8');
   c.header('Cache-Control', 'no-store');
-  return c.body(injectDeploymentIntoScript(js, deployment));
+  // Brand first, so the deployment statement stays on line 1 where Phase 1's
+  // own prelude regex expects to find it.
+  const brand = await liveBrand();
+  const branded = brand ? brandLib.injectBrandIntoScript(js, brand) : js;
+  return c.body(injectDeploymentIntoScript(branded, deployment));
+});
+
+// The brand's stylesheet, with the live font selection appended (AB#7415).
+// Claimed before serveStatic for the same reason `/` is: served off disk it
+// would be the file the build wrote, and the font selection in it would be
+// whichever brand was current at build time.
+app.get('/theme.css', async (c) => {
+  const css = await readFile(`${staticRoot}/theme.css`, 'utf8').catch(() => null);
+  if (css === null) return c.notFound();
+  c.header('Content-Type', 'text/css; charset=utf-8');
+  c.header('Cache-Control', 'no-store');
+  if (!brandLib) return c.body(css);
+  const [brand, registry] = await Promise.all([liveBrand(), fonts()]);
+  return c.body(brandLib.themeCssWithFonts(css, brand, registry));
+});
+
+// The PWA manifest, generated from the live brand rather than served as the
+// file the build emitted — so a swapped brand.json changes the installed app's
+// name, short name, description and colours with no rebuild.
+app.get('/manifest.webmanifest', async (c) => {
+  const baked = await readFile(`${staticRoot}/manifest.webmanifest`, 'utf8').catch(() => null);
+  const brand = await liveBrand();
+  if (!brandLib || !brand) {
+    if (baked === null) return c.notFound();
+    c.header('Content-Type', 'application/manifest+json');
+    return c.body(baked);
+  }
+  let bakedDoc;
+  try {
+    bakedDoc = baked === null ? undefined : JSON.parse(baked);
+  } catch {
+    bakedDoc = undefined;
+  }
+  c.header('Cache-Control', 'no-store');
+  return c.json(brandLib.manifestFromBrand(brand, bakedDoc), 200, {
+    'Content-Type': 'application/manifest+json',
+  });
 });
 
 app.use('/*', serveStatic({ root: staticRoot }));

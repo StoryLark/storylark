@@ -30,9 +30,15 @@ brands/<your-id>/
 | `presentation/<id>/presentation.json` | Shape — `layout`, `nouns` ([presentation guide](build-your-own-presentation.md)) | **Yes** |
 | `deployment/<id>/deployment.json` | Where it lives — `appOrigin`, `contentOrigin`, `vapidPublicKey`, `tts` | **No** — set per install |
 
-The build mode selects the folder: `vite build --mode <your-id>` bakes that
-brand's `brand.json`, its presentation and deployment files, `theme.css`,
-manifest, and icons into `app/dist`.
+The build mode selects the folder: `vite build --mode <your-id>` builds that
+brand's site into `app/dist`.
+
+> **Your brand is no longer baked into the JavaScript (2026-08).** `brand.json`
+> and `theme.css` are copied into `app/dist` as **real files**, and the platform
+> serving your site reads them on every request. Replace either one on a
+> deployed site and the next page load has the new brand — no rebuild, no
+> redeploy of the app bundle. See
+> [Changing your brand without rebuilding](#changing-your-brand-without-rebuilding).
 
 ### `contractVersion`
 
@@ -76,6 +82,11 @@ auto). Retune these values; keep the names.
 | `--highlight-word` | Read-along **word** highlight fill (the "sung" word). Deliberately a warm, distinct color so it reads against the interactive accent. |
 | `--highlight-block` | Read-along **block/paragraph** highlight fill (paragraph-level read-along and the active-block wash). |
 
+The four `--font-*` tokens are the ones your `brand.json` can take over: name a
+[curated family](#fonts--pick-from-the-curated-set) for a role and that role's
+token is set from the brand when the stylesheet is served, overriding the value
+below. Leave a role out of `brand.json` and your theme's value stands.
+
 Minimum shape:
 
 ```css
@@ -105,21 +116,47 @@ Minimum shape:
 }
 ```
 
-## Fonts
+## Fonts — pick from the curated set
 
-`brand.json` names the font families in `fonts` (`display`, `headers`, `body`,
-`mono`), and `theme.css` references those families in the `--font-*` tokens.
-The **font files** are bundled automatically: at build time the
-`storylark-core` Vite preset turns each family name into the matching
-`@fontsource/*` imports (e.g. `Newsreader` → `@fontsource/newsreader`), with
-sensible weights per role (body text gets italics; mono doesn't). Families
-bundled with core today: Newsreader, Inter, Lora, Cinzel, Cormorant Garamond,
-IBM Plex Mono.
+StoryLark ships a **curated font set** with the engine. Every build carries all
+of it, so switching your brand from one family to another is a `brand.json`
+edit, not a rebuild.
 
-To ship a typeface outside that set, add your own self-hosted `@font-face` CSS
-to `theme.css` and reference the family in the `--font-*` tokens — unknown
-family names simply produce no `@fontsource` import. Keep fonts self-hosted so
-the offline app shell works without a network.
+| Family | Kind |
+|---|---|
+| Newsreader | serif (reading) |
+| Lora | serif (reading) |
+| Cormorant Garamond | serif (reading) |
+| Cinzel | display |
+| Inter | sans |
+| IBM Plex Mono | monospace |
+
+Name them in `brand.json`:
+
+```json
+"fonts": { "display": "Cinzel", "headers": "Cinzel", "body": "Lora", "mono": "IBM Plex Mono" }
+```
+
+Each role sets the matching CSS custom property — `fonts.body` becomes
+`--font-body`, and so on — appended to your `theme.css` when it is served, so it
+overrides whatever `--font-*` values your theme declares. Matching is
+case- and space-insensitive (`ibm plex mono` works).
+
+**A family that isn't in the set is ignored, with a warning in the platform
+log,** and your theme's own `--font-*` value stands. Nothing else would work:
+the font files ship with the engine, so a name outside the set has no faces to
+render with.
+
+To use a typeface outside the set today, self-host it: add your own `@font-face`
+rules to `theme.css` and set the `--font-*` tokens there, and leave that role out
+of `brand.json` so nothing overrides it. Keep it self-hosted, so the offline app
+shell works without a network. **Uploading a custom font as part of a brand is a
+later phase** — the curated set is deliberately what exists first.
+
+A browser downloads a font file only when something actually renders in that
+family, so the five families your brand isn't using cost you nothing over the
+wire. They are also **not** in the offline precache for the same reason — a font
+enters the cache the first time it is used, and stays.
 
 ## `brand.json` — fields
 
@@ -164,6 +201,64 @@ notifications is bound to that exact key. A deployment that loses or changes it
 can no longer notify any of them until each reader re-subscribes. The matching
 **private** key is a platform secret (`VAPID_PRIVATE_KEY`) and never appears in
 any of these files.
+
+## Changing your brand without rebuilding
+
+A build writes these into `app/dist`:
+
+| File | What it is | Change it without rebuilding? |
+|---|---|---|
+| `dist/brand.json` | your identity, copied from `brands/<id>/brand.json` | **Yes** |
+| `dist/theme.css` | your theme, copied from `brands/<id>/theme.css` | **Yes** |
+| `dist/manifest.webmanifest` | generated per request from `dist/brand.json` | n/a — follows `brand.json` |
+| `dist/icons/*` | your icon files, copied from `brands/<id>/assets/icons/` | **Yes** — replace the files |
+| `dist/fonts.json` | the curated font set this build shipped | No — engine data |
+
+Replace `dist/brand.json` or `dist/theme.css` on a deployed site and the next
+request serves the new brand. The document's `<title>`, the brand data the app
+reads, the PWA manifest and the stylesheet all come from those files at response
+time, not from the JavaScript bundle. Nothing needs recompiling, and no hashed
+asset changes.
+
+The mechanics differ slightly per platform, because "the files on the deployed
+site" mean different things:
+
+- **Azure / any Node host** — the files are on disk. Overwrite them; the running
+  process re-reads `brand.json` on every request. No restart.
+- **Cloudflare** — Workers have no filesystem, so the files live in the deployed
+  asset bundle. Upload the changed assets (`wrangler deploy` with the same
+  `dist/`); the Worker reads them through its asset binding on every request.
+  You are re-uploading files, not rebuilding the engine.
+
+Keep `brands/<id>/` in sync with whatever you put in `dist/`, or the next real
+build will put the old brand back.
+
+### Things to know before you change a live brand
+
+- **An installed PWA can keep the old name and icon until it is reinstalled.**
+  Once someone installs the app, the *operating system* owns the copy of the
+  manifest it installed with — the app's name on the home screen, and its icon.
+  StoryLark serves a current manifest immediately, and browsers do re-read it,
+  but when (and whether) an already-installed app is updated is entirely the
+  platform's decision and outside this system's control. Assume existing
+  installs keep the old label until they are removed and re-added. Everything
+  *inside* the app — title, text, colours, fonts — updates normally.
+- **The offline copy does not go stale.** `theme.css` is fetched from the
+  network first and only falls back to the cached copy offline, and the service
+  worker re-stamps the brand into the cached app shell every time it serves it.
+  A swapped brand shows up on the next launch of an installed app, not
+  eventually.
+- **Icon *files* are files.** The manifest updates itself from `brand.json`, but
+  the pictures at `/icons/icon-192.png` and friends change only when you replace
+  those files. Keep the names.
+- **There is a small cost.** Each page load carries a little extra HTML (the
+  injected brand, a few hundred bytes) and fetches `theme.css` as its own
+  request rather than getting it inside a bundled stylesheet. That request is
+  render-blocking by design: it is what stops a flash of the wrong brand.
+- **A broken file never takes the site down.** Unparseable `brand.json`, a
+  `themeColor` that isn't a colour, a `defaultTheme` that isn't `light`/`dark` —
+  each bad *value* is logged and ignored, and the brand compiled in at build
+  time fills the gap. Check the platform log after a change.
 
 ## Swapping icons
 

@@ -7,10 +7,11 @@
     "directory": "dist",
     "binding": "ASSETS",
     // Documents run through the Worker so it can stamp this deployment's live
-    // origins / VAPID key into them (see storylark-worker/lib/deployment).
-    // /assets/*, /icons/* and the manifest stay on the asset router and cost
-    // no Worker invocation.
-    "run_worker_first": ["/*", "!/assets/*", "!/icons/*", "!/manifest.webmanifest"],
+    // origins / VAPID key (storylark-worker/lib/deployment) and its live brand
+    // (storylark-worker/lib/brand) into them. /assets/* and /icons/* stay on
+    // the asset router and cost no Worker invocation. The manifest is generated
+    // from the live brand.json, so it goes through the Worker too.
+    "run_worker_first": ["/*", "!/assets/*", "!/icons/*"],
     "not_found_handling": "single-page-application"
   },
   "observability": { "enabled": true },

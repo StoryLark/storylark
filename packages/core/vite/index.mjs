@@ -6,8 +6,8 @@
 //   export default defineStorylarkConfig();
 //
 // The preset owns the build mechanics (preact, PWA/service worker, virtual
-// config/theme/fonts modules, manifest + icons) so a `npm update
-// storylark-core` upgrades the build without touching the site's files.
+// config/fonts modules, brand + theme + manifest + icon outputs) so a `npm
+// update storylark-core` upgrades the build without touching the site's files.
 //
 // Brand selection: the Vite mode IS the brand id (`vite build --mode <id>`,
 // matching brands/<id>/ under the site root). With no brand mode, `storylark`.
@@ -31,6 +31,7 @@ import {
   DEPLOYMENT_DEFAULTS,
   readContract,
 } from '../schemas/validate.mjs';
+import { CURATED_FONTS, fontBlockCss, fontRegistry } from './fonts.mjs';
 
 const CORE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const requireFromCore = createRequire(import.meta.url);
@@ -63,8 +64,8 @@ export function defineStorylarkConfig(options = {}) {
     const siteRoot = process.cwd();
     const brandId = options.brandId ?? (mode && !BUILTIN_MODES.has(mode) ? mode : 'storylark');
     const brandDir = resolve(siteRoot, options.brandsRoot ?? 'brands', brandId);
-    const { brand, deployment } = loadStorylarkConfig(siteRoot, brandId, brandDir, options);
-    const themeCss = readFileSync(resolve(brandDir, 'theme.css'), 'utf8');
+    const { brand, identity, deployment } = loadStorylarkConfig(siteRoot, brandId, brandDir, options);
+    const themeFile = resolve(brandDir, 'theme.css');
 
     /** @type {import('vite').UserConfig} */
     const config = {
@@ -73,9 +74,9 @@ export function defineStorylarkConfig(options = {}) {
         configModulePlugin(brand),
         deploymentModulePlugin(deployment),
         buildInfoPlugin(resolveBuildInfo(siteRoot, brandId)),
-        fontsModulePlugin(brand),
-        themePlugin(themeCss),
-        brandAssetsPlugin(brandDir, brand),
+        fontsModulePlugin(),
+        themePlugin(themeFile, identity),
+        brandAssetsPlugin(brandDir, identity),
         adminPagePlugin(brand, siteRoot),
         VitePWA({
           strategies: 'injectManifest',
@@ -89,13 +90,28 @@ export function defineStorylarkConfig(options = {}) {
           injectRegister: false,
           manifest: false, // manifest.webmanifest is emitted by brandAssetsPlugin
           injectManifest: {
-            globPatterns: ['**/*.{js,css,html,woff2,svg,png,webmanifest}'],
+            // What is NOT precached is the interesting part (AB#7415):
+            //
+            //   *.woff2 — the curated set ships every family so a brand can
+            //     switch fonts without a rebuild; precaching all of them would
+            //     make every reader download six typefaces to use one. sw.ts
+            //     caches a font the first time something renders in it.
+            //   *.webmanifest — generated per request from the live brand, so a
+            //     precached copy would name the app after whichever brand was
+            //     current at the last build.
+            //   theme.css / brand.json — the two files an operator swaps. A
+            //     precache entry is keyed to the BUILD, so precaching them is
+            //     exactly the "service worker serves a stale brand" failure the
+            //     plan warns about. theme.css is network-first in sw.ts;
+            //     brand.json is never fetched by the client at all (it arrives
+            //     injected, and the worker re-stamps the cached shell).
+            globPatterns: ['**/*.{js,css,html,svg,png}'],
             // The admin page is deliberately NOT part of the installable app
             // (AB#7404): readers who install the PWA must not carry operator
             // code, and the operator must never be looking at a stale cached
             // admin UI while pushing a platform update. admin.html and the
             // admin entry's own js/css are the only outputs matching these.
-            globIgnores: ['**/node_modules/**/*', 'admin.html', 'assets/admin-*'],
+            globIgnores: ['**/node_modules/**/*', 'admin.html', 'assets/admin-*', 'theme.css'],
             maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
             buildPlugins: { vite: [configModulePlugin(brand), deploymentModulePlugin(deployment)] },
           },
@@ -146,12 +162,17 @@ export function defineStorylarkConfig(options = {}) {
  *                  Env wins because that is how an installer configures a
  *                  deployment it just provisioned.
  *
- * The brand half is still baked, by design (plan §0d Phase 2 is what makes it
- * runtime). The deployment half is now only a FALLBACK: the platform serving
- * the app injects the live values into the document at response time
- * (AB#7414 — packages/worker/src/lib/deployment.ts), and what is compiled in
- * here is what a context with no injection uses — `vite dev`, `vite preview`,
- * a plain static host.
+ * Neither half is the source of truth on a real deployment any more. The
+ * platform serving the app injects the live deployment config (AB#7414 —
+ * packages/worker/src/lib/deployment.ts, from environment variables) and the
+ * live brand IDENTITY (AB#7415 — .../lib/brand.ts, from dist/brand.json) into
+ * every document at response time; what is compiled in here is the fallback for
+ * a context with no injection — `vite dev`, `vite preview`, a plain static
+ * host, or a platform mid-update still running an older engine.
+ *
+ * What IS still genuinely baked is presentation — `layout` and `nouns` —
+ * because nothing reads them at runtime yet. Making them runtime is plan §0d
+ * Phase 3, and it touches every component that names a content unit.
  */
 function loadStorylarkConfig(siteRoot, brandId, brandDir, options = {}) {
   const brandFile = resolve(brandDir, 'brand.json');
@@ -181,6 +202,7 @@ function loadStorylarkConfig(siteRoot, brandId, brandDir, options = {}) {
     const { layout, nouns, appOrigin, contentOrigin, vapidPublicKey, tts, ...identity } = raw;
     return {
       brand: resolveConfig(identity, { layout, nouns }),
+      identity: resolveIdentity(identity),
       deployment: deploymentFromEnv({ appOrigin, contentOrigin, vapidPublicKey, tts }),
     };
   }
@@ -193,7 +215,42 @@ function loadStorylarkConfig(siteRoot, brandId, brandDir, options = {}) {
     ? readContract(deploymentFile, DEPLOYMENT_SCHEMA, { label: relative(siteRoot, deploymentFile) })
     : {};
 
-  return { brand: resolveConfig(identity, presentation), deployment: deploymentFromEnv(deployment) };
+  return {
+    brand: resolveConfig(identity, presentation),
+    identity: resolveIdentity(identity),
+    deployment: deploymentFromEnv(deployment),
+  };
+}
+
+/**
+ * The identity half on its own — what gets written to dist/brand.json
+ * (AB#7415 — plan §0d Phase 2).
+ *
+ * Deliberately NOT the same object as `brand`: this one carries identity only,
+ * with `layout`/`nouns` excluded by construction rather than by convention. It
+ * is the file an operator swaps on a deployed site, and the file the serving
+ * platform re-reads on every request, so anything that leaked in here would
+ * quietly become runtime-swappable before the phase that is supposed to make it
+ * so. `contractVersion` is kept — the file stays a valid brand.json, which is
+ * what makes "download it, edit it, upload it" a coherent operation.
+ */
+function resolveIdentity(identity) {
+  const keys = [
+    'contractVersion',
+    'id',
+    'name',
+    'appName',
+    'shortName',
+    'tagline',
+    'author',
+    'themeColor',
+    'backgroundColor',
+    'defaultTheme',
+    'fonts',
+  ];
+  const out = stripUndefined(Object.fromEntries(keys.map((k) => [k, identity[k]])));
+  if (out.contractVersion === undefined) out.contractVersion = 1; // a pre-split brand becomes a current one on the way out
+  return out;
 }
 
 /**
@@ -362,12 +419,24 @@ function deploymentModulePlugin(deployment) {
 }
 
 /**
- * Serves `virtual:storylark-fonts`: @fontsource imports generated from the
- * brand's `fonts` (display/headers/body/mono family names). Families without
- * a matching @fontsource package resolve to nothing — the theme is expected
- * to provide its own @font-face (or accept the system fallback stack).
+ * Serves `virtual:storylark-fonts`: the @fontsource imports for the WHOLE
+ * curated set, and emits the registry as dist/fonts.json (AB#7415).
+ *
+ * It used to import only the families the brand named. That cannot survive
+ * Phase 2: the brand's font choice is now a runtime value, so a deployment can
+ * change it between two requests, and a family whose @font-face never shipped
+ * renders as the browser default however correctly it was selected. Shipping
+ * the set once — the same files for every brand — is what makes the selection
+ * swappable at all.
+ *
+ * What this costs is @font-face CSS for six families instead of two (a few KB
+ * gzipped) in the bundle. What it does NOT cost is the typefaces themselves: a
+ * browser downloads a font file only when something on the page renders in it,
+ * so an unused family in the set is declarations, not bytes over the wire. See
+ * also the precache note in defineStorylarkConfig — they are not precached
+ * either, for the same reason.
  */
-function fontsModulePlugin(brand) {
+function fontsModulePlugin() {
   return {
     name: 'storylark-fonts-module',
     resolveId(id) {
@@ -375,27 +444,12 @@ function fontsModulePlugin(brand) {
     },
     load(id) {
       if (id !== '\0storylark-fonts') return;
-      // Weights per role — reading text needs italics; UI chrome and code don't.
-      const ROLE_FILES = {
-        display: ['400.css', '600.css', '700.css'],
-        headers: ['400.css', '600.css', '700.css'],
-        body: ['400.css', '400-italic.css', '600.css', '700.css'],
-        mono: ['400.css', '600.css'],
-      };
-      const wanted = new Map(); // @fontsource pkg -> Set of css files
-      for (const [role, family] of Object.entries(brand.fonts ?? {})) {
-        if (!family || !ROLE_FILES[role]) continue;
-        const pkg = family.toLowerCase().replace(/\s+/g, '-');
-        const files = wanted.get(pkg) ?? new Set();
-        for (const f of ROLE_FILES[role]) files.add(f);
-        wanted.set(pkg, files);
-      }
       const imports = [];
-      for (const [pkg, files] of wanted) {
-        for (const file of files) {
+      for (const font of CURATED_FONTS) {
+        for (const file of font.files) {
           try {
-            requireFromCore.resolve(`@fontsource/${pkg}/${file}`);
-            imports.push(`import '@fontsource/${pkg}/${file}';`);
+            requireFromCore.resolve(`@fontsource/${font.pkg}/${file}`);
+            imports.push(`import '@fontsource/${font.pkg}/${file}';`);
           } catch {
             // that weight/style isn't published for this family — skip
           }
@@ -403,18 +457,59 @@ function fontsModulePlugin(brand) {
       }
       return imports.join('\n') || 'export {};';
     },
+    generateBundle() {
+      // The registry, as a build output rather than as something the server
+      // package duplicates. storylark-worker reads this to turn the live
+      // brand's font names into --font-* declarations; emitting it here means
+      // the stacks the server serves always match the files this build shipped.
+      this.emitFile({
+        type: 'asset',
+        fileName: 'fonts.json',
+        source: JSON.stringify({ families: fontRegistry() }, null, 2),
+      });
+    },
   };
 }
 
-/** Serves the brand's theme.css as `virtual:storylark-theme.css`. */
-function themePlugin(themeCss) {
+/**
+ * The brand's theme.css, as a real static file (AB#7415 — plan §0d Phase 2).
+ *
+ * It used to be `virtual:storylark-theme.css`, imported by mount.tsx and
+ * therefore compiled into a content-hashed CSS chunk — which meant retuning a
+ * colour required rebuilding the engine. Now it is emitted as `dist/theme.css`
+ * and linked from the document, so replacing that one file on a deployed site
+ * restyles it with no rebuild, and the platform can append the live brand's
+ * font selection to it on the way out (see themeCssWithFonts in
+ * packages/worker/src/lib/brand.ts).
+ *
+ * The build bakes the brand's own font block onto the end, so `vite preview`, a
+ * bare static host and `vite dev` — none of which have an injector — still get
+ * the brand's fonts. The server replaces that block rather than appending a
+ * second one; the markers are what make that possible.
+ */
+function themePlugin(themeFile, identity) {
+  const compose = () => {
+    const css = readFileSync(themeFile, 'utf8').trimEnd();
+    const block = fontBlockCss(identity.fonts);
+    return block ? `${css}\n${block}\n` : `${css}\n`;
+  };
   return {
     name: 'storylark-theme',
-    resolveId(id) {
-      if (id === 'virtual:storylark-theme.css') return '\0storylark-theme.css';
+    configureServer(server) {
+      // `vite dev` has no dist/. Serve the same composed stylesheet straight
+      // from the brand folder, and watch it, so editing theme.css is still a
+      // save-and-see loop rather than a restart.
+      server.watcher.add(themeFile);
+      server.middlewares.use((req, res, next) => {
+        if ((req.url ?? '').split('?')[0] !== '/theme.css') return next();
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'text/css; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(compose());
+      });
     },
-    load(id) {
-      if (id === '\0storylark-theme.css') return themeCss;
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'theme.css', source: compose() });
     },
   };
 }
@@ -436,8 +531,9 @@ function adminHtml(brand, scriptSrc, cssHrefs) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="robots" content="noindex, nofollow" />
-    <title>Admin — ${brand.appName}</title>
+    <title data-storylark-title="admin">Admin — ${brand.appName}</title>
     <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+    <link rel="stylesheet" href="/theme.css" />
 ${styles}  </head>
   <body>
     <div id="admin" data-storylark-admin="standalone"></div>
@@ -505,8 +601,27 @@ function adminPagePlugin(brand, siteRoot) {
   };
 }
 
-/** Brand-titles index.html and emits manifest.webmanifest + brand icons. */
-function brandAssetsPlugin(brandDir, brand) {
+/**
+ * Emits the brand's runtime assets and wires the document to them.
+ *
+ *   dist/brand.json           the live identity, re-read by the server on every
+ *                             request — the file an operator swaps (AB#7415)
+ *   dist/manifest.webmanifest the static fallback; a real deployment generates
+ *                             this per request from brand.json instead
+ *   dist/icons/               the icon FILES, still build-time (see below)
+ *
+ * and, in index.html: `<link rel="stylesheet" href="/theme.css">` plus the
+ * `data-storylark-title` marker the server needs to retitle the page without
+ * knowing which page it is.
+ *
+ * Icons stay a build concern on purpose. A manifest is JSON and can be
+ * generated from current data at zero cost; an icon is a picture, and swapping
+ * one means putting different bytes at /icons/icon-192.png — which needs no
+ * code, only a file. Generating icons from brand data (rasterising a colour and
+ * a letter, say) would be inventing a feature nobody asked for; importing them
+ * as part of a brand package is Phase 4's job.
+ */
+function brandAssetsPlugin(brandDir, identity) {
   let outDir = 'dist';
   let root = process.cwd();
   return {
@@ -515,28 +630,48 @@ function brandAssetsPlugin(brandDir, brand) {
       outDir = config.build.outDir;
       root = config.root;
     },
-    transformIndexHtml(html, ctx) {
-      // The standalone admin page titles itself ("Admin — <appName>") and is
-      // served by adminPagePlugin, not from a site file — leave it alone.
-      if (ctx?.path?.startsWith('/admin')) return html;
-      // Brand-driven document title: follows whatever theme builds.
-      return html.replace(/<title>[\s\S]*?<\/title>/, `<title>${brand.appName}</title>`);
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html, ctx) {
+        // The standalone admin page titles itself ("Admin — <appName>") and is
+        // served by adminPagePlugin, not from a site file — leave it alone.
+        if (ctx?.path?.startsWith('/admin')) return html;
+        // Brand-driven document title, marked so the serving platform can
+        // rewrite it from the live brand before any JavaScript has run.
+        const titled = html.replace(
+          /<title>[\s\S]*?<\/title>/,
+          `<title data-storylark-title="app">${identity.appName}</title>`
+        );
+        // The theme link goes in by hand rather than through `tags`, because
+        // `injectTo: 'head-prepend'` would put a stylesheet ahead of
+        // `<meta charset>`. It has to come BEFORE the app's own stylesheets —
+        // where it sat when it was an import at the top of mount.tsx — and
+        // Vite appends those at the end of <head>, so anywhere near the top
+        // works. Immediately after the charset declaration is both.
+        const link = '\n    <link rel="stylesheet" href="/theme.css" />';
+        const charset = /<meta charset=[^>]*>/i.exec(titled);
+        if (charset) return titled.slice(0, charset.index + charset[0].length) + link + titled.slice(charset.index + charset[0].length);
+        const head = /<head[^>]*>/i.exec(titled);
+        if (head) return titled.slice(0, head.index + head[0].length) + link + titled.slice(head.index + head[0].length);
+        return titled;
+      },
     },
     generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'brand.json', source: `${JSON.stringify(identity, null, 2)}\n` });
       this.emitFile({
         type: 'asset',
         fileName: 'manifest.webmanifest',
         source: JSON.stringify(
           {
-            name: `${brand.appName}: ${brand.name}`,
-            short_name: brand.shortName ?? brand.appName,
-            description: brand.tagline,
+            name: `${identity.appName}: ${identity.name}`,
+            short_name: identity.shortName ?? identity.appName,
+            description: identity.tagline,
             id: '/',
             start_url: '/',
             scope: '/',
             display: 'standalone',
-            theme_color: brand.themeColor,
-            background_color: brand.backgroundColor,
+            theme_color: identity.themeColor,
+            background_color: identity.backgroundColor,
             icons: [
               { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
               { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
