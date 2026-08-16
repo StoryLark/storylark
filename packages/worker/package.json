@@ -1,6 +1,6 @@
 {
   "name": "storylark-worker",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "StoryLark API Worker — Hono app over D1 + R2 (auth, progress sync, push, admin publish). Import the default export from your site's worker entry; migrations ship in ./migrations.",
   "license": "Apache-2.0",
   "repository": {
@@ -32,7 +32,7 @@
     "migrate-postgres.mjs"
   ],
   "dependencies": {
-    "storylark-contracts": "0.2.0",
+    "storylark-contracts": "0.3.0",
     "@simplewebauthn/server": "^13.3.2",
     "hono": "^4.6.0",
     "pg": "^8.13.0"
