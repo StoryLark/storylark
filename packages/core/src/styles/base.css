@@ -341,6 +341,57 @@ select:focus-visible {
 
 /* ---- Admin portal ---- */
 
+/* The admin portal is a stack of unrelated jobs — status, content, narration,
+   themes, updates, publishing — and as flat sections divided by a hairline they
+   ran together into one wall of text. Each section is a card here: its own
+   surface, its own border, real padding, and space between it and the next, so
+   where one job ends and the next begins is visible at a glance rather than
+   inferred from a rule.
+
+   Scoped to .admin-screen on purpose. The reader-facing Settings screen shares
+   .settings-section and is a short list of related preferences, where the flat
+   treatment reads better than a stack of boxes. */
+.admin-screen .settings-section {
+  border: 1px solid var(--rule);
+  border-top: 1px solid var(--rule); /* overrides the flat rule's dashed top */
+  border-radius: 12px;
+  background: var(--bg-sunken);
+  padding: 1.1rem 1.25rem 1.25rem;
+  margin: 0 0 1rem;
+}
+
+/* A titled header, separated from the card's body — the fastest way to scan
+   the page is down the headings, so they need to read as headings. */
+.admin-screen .settings-section > h2 {
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding-bottom: 0.6rem;
+  margin: 0 0 0.9rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* Rows inside a card need separating from each other too, not just the cards
+   from each other. Last child keeps no line so the card doesn't end on one. */
+.admin-screen .settings-section > .settings-row {
+  border-bottom: 1px solid var(--rule);
+  padding: 0.6rem 0;
+}
+
+.admin-screen .settings-section > .settings-row:last-child {
+  border-bottom: 0;
+}
+
+/* Inset elements are sunken relative to the PAGE, but a card is already sunken —
+   left alone these would disappear into it. Inside a card they take the page
+   colour instead, which keeps the same figure/ground relationship the flat
+   layout had. */
+.admin-screen .settings-section .admin-command,
+.admin-screen .settings-section .admin-markdown-input,
+.admin-screen .settings-section .admin-preview {
+  background: var(--bg);
+}
+
 .admin-error {
   color: var(--accent-strong);
 }
