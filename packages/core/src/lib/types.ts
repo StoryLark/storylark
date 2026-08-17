@@ -271,6 +271,14 @@ export interface BookEntry {
   origin?: ContentOrigin;
   /** Present when `origin` is `sync`: the external source of truth it copies. */
   syncSource?: SyncSource;
+  /**
+   * Derived per-book presentation (content-management wave 2, design §3):
+   * true = presents as a single (cover straight into the text), false = a book
+   * with a chapter list. Absent — every manifest written before this field —
+   * means "follow the library-wide layout", which is exactly the old behaviour,
+   * so a mixed library is possible without any older library changing.
+   */
+  single?: boolean;
 }
 
 export interface ChapterEntry {

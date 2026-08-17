@@ -11,8 +11,10 @@ import { admin } from './routes/admin';
 import { adminAuth } from './routes/admin-auth';
 import { adminContent } from './routes/admin-content';
 import { adminNarration } from './routes/admin-narration';
+import { adminSync } from './routes/admin-sync';
 import { adminThemes } from './routes/admin-themes';
 import { contentApi } from './routes/content-api';
+import { scheduledContentSync } from './lib/repo-sync';
 import { IMMUTABLE, SHORT, r2ContentStore } from './lib/content-store';
 import { readActiveTheme, readActiveCss, readActiveIcon, type ActiveTheme } from './lib/theme-store';
 import { readActiveEngineCached, readEngineFile, findEngineAsset, type ActiveEngine } from './lib/engine-store';
@@ -88,6 +90,10 @@ app.route('/api/admin', adminThemes);
 // browser and no cookie, and a session-only gate mounted in front of it would
 // answer 401 whatever key it sent.
 app.route('/api/admin', adminNarration);
+// The Connections surface (wave 2 — content source, repo sync, scoped
+// content-API tokens). Session-gated like adminContent, and registered before
+// it so its /content-source and /content-tokens paths own their handlers.
+app.route('/api/admin', adminSync);
 app.route('/api/admin', adminContent);
 
 /**
@@ -745,7 +751,20 @@ export default {
   // Same env, same check as the in-portal GET /api/admin/update-status —
   // this just also emails the operator when RESEND_API_KEY + ADMIN_EMAIL
   // are configured, so they hear about it without opening /admin.
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(checkForUpdateAndNotify(env));
+  //
+  // Content sync (wave 2 — design §10.3) is a SECOND JOB on this same cron,
+  // deliberately: §6.4's whole argument is no new infrastructure, so the
+  // schedule stays `0 13 * * *` and the sync job self-gates on its configured
+  // interval. A deployment with no repo connection pays one database read and
+  // does nothing.
+  async scheduled(_event: ScheduledEvent, env: unknown, ctx: ExecutionContext) {
+    // The same in-place binding fetch() performs: Cloudflare hands the raw D1
+    // binding and the raw R2 bucket; the sync job needs the seams.
+    const raw = env as Env & { DB: D1Database };
+    if (!(raw.DB as unknown as { insertIgnore?: unknown }).insertIgnore) {
+      (raw as unknown as { DB: unknown }).DB = d1Database(raw.DB);
+    }
+    if (raw.CONTENT && !raw.CONTENT_STORE) raw.CONTENT_STORE = r2ContentStore(raw.CONTENT);
+    ctx.waitUntil(Promise.allSettled([checkForUpdateAndNotify(raw), scheduledContentSync(raw)]));
   },
 };

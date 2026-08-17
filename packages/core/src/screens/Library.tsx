@@ -302,7 +302,15 @@ function StoryLibrary({ books }: { books: BookEntry[] }): JSX.Element {
     <>
       <LibraryControls query={query} onQuery={setQuery} arrangement={arrangement} onArrangement={setArrangement} />
       {list.length === 0 && <p class="empty-state">{fillCopy(PRESENTATION.emptyState.librarySearch, { query })}</p>}
-      <Shelf sections={sections} listClass="story-list" row={(book) => <StoryRow book={book} chapter={book.chapters[0]} />} />
+      {/* Per-book `single` (design §3): a multi-chapter book in a flat library
+          presents as a book — cover, then a chapter list — instead of being
+          squeezed into a story row that could only open its first chapter.
+          Absent (older manifests) keeps the layout-wide behaviour exactly. */}
+      <Shelf
+        sections={sections}
+        listClass="story-list"
+        row={(book) => (book.single === false ? <SeriesBookCard book={book} /> : <StoryRow book={book} chapter={book.chapters[0]} />)}
+      />
     </>
   );
 }
@@ -366,7 +374,7 @@ function GridCard({ book }: { book: BookEntry }): JSX.Element {
       class="new-card"
       aria-label={`Open ${book.title}`}
       onClick={() =>
-        isStoryBrand() && chapter
+        (book.single ?? isStoryBrand()) && chapter && book.chapters.length === 1
           ? openItem(book.id, chapter.id)
           : navigate(`/library/${encodeURIComponent(book.id)}`)
       }
@@ -416,7 +424,20 @@ function SeriesLibrary({ books }: { books: BookEntry[] }): JSX.Element {
     <>
       <LibraryControls query={query} onQuery={setQuery} arrangement={arrangement} onArrangement={setArrangement} />
       {list.length === 0 && <p class="empty-state">{fillCopy(PRESENTATION.emptyState.librarySearch, { query })}</p>}
-      <Shelf sections={sections} listClass="series-book-list" row={(book) => <SeriesBookCard book={book} />} />
+      {/* Per-book `single` (design §3): a standalone story in a series library
+          opens straight into its text like any story would, instead of showing
+          a one-item chapter list. Absent keeps the old behaviour. */}
+      <Shelf
+        sections={sections}
+        listClass="series-book-list"
+        row={(book) =>
+          book.single === true && book.chapters.length === 1 ? (
+            <StoryRow book={book} chapter={book.chapters[0]} />
+          ) : (
+            <SeriesBookCard book={book} />
+          )
+        }
+      />
     </>
   );
 }

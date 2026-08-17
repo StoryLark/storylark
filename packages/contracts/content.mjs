@@ -95,6 +95,11 @@ export const CONTENT_ERROR_CODES = Object.freeze([
   'invalid_cover',
   'invalid_contract_version',
   'unsupported_contract_version',
+  // Manifest-context rejections (design §10.5 / §10.7): the gate itself is
+  // pure, so these are produced by the helpers below, which every transport
+  // with storage context calls — same codes, same messages, whichever door.
+  'unknown_book',
+  'book_owned_elsewhere',
 ]);
 
 // Byte-identical to readFrontmatter's boundary in md.mjs / md.ts (BOM strip
@@ -236,6 +241,22 @@ export function readStorylarkBlock(source, where = {}) {
   return { present, fields, fieldLines, line: blockLine, errors };
 }
 
+/**
+ * Is this file a candidate for repo ingestion at all? The governing rule — a
+ * file without a `storylark:` block is not StoryLark content — plus its one
+ * honest edge: a file whose frontmatter fence never closes has no readable
+ * block, but if the broken frontmatter MENTIONS `storylark:` it is a broken
+ * candidate, not a bystander, and silently ignoring it would turn a missing
+ * `---` into content quietly vanishing. The transport asks this one question
+ * and hands candidates to the gate; the judgement lives here so no transport
+ * grows its own opinion of what counts.
+ */
+export function isRepoCandidate(source) {
+  const src = String(source).replace(/^﻿/, '');
+  if (readStorylarkBlock(src).present) return true;
+  return /^---\r?\n/.test(src) && !FRONTMATTER_RE.test(src) && /^storylark:/m.test(src);
+}
+
 const TYPES = new Set(['book', 'chapter', 'story']);
 
 function checkId(value, field, line, where, errors) {
@@ -291,6 +312,29 @@ export function validateChapterCandidate(candidate, opts = {}) {
   if (opens && !/^﻿?---\r?\n[\s\S]*?\r?\n---\r?\n?/.test(markdown)) {
     errors.push(err('unclosed_frontmatter', 'The front matter block starts with --- but never closes. Add a closing --- line.', { ...where, line: 1 }));
     return { ok: false, errors };
+  }
+
+  // Transport-supplied identity is an explicit statement, but it is still
+  // identity, and the id rule has one home. A URL segment or a filename that
+  // cannot be a storage key is refused HERE rather than by each transport
+  // spelling the rule again.
+  if (candidate.bookId !== undefined && !CONTENT_ID_RE.test(String(candidate.bookId))) {
+    errors.push(
+      err(
+        'invalid_id',
+        `"${String(candidate.bookId)}" is not a usable book id. Ids are 1-64 characters of lowercase letters, digits or hyphens, starting with a letter or digit — they are storage keys and URL segments.`,
+        { ...where, line: 1 }
+      )
+    );
+  }
+  if (candidate.chapterId !== undefined && !CONTENT_ID_RE.test(String(candidate.chapterId))) {
+    errors.push(
+      err(
+        'invalid_id',
+        `"${String(candidate.chapterId)}" is not a usable chapter id. Ids are 1-64 characters of lowercase letters, digits or hyphens, starting with a letter or digit — they are storage keys and URL segments.`,
+        { ...where, line: 1 }
+      )
+    );
   }
 
   const { body } = splitFrontmatter(markdown);
@@ -373,6 +417,20 @@ export function validateChapterCandidate(candidate, opts = {}) {
     }
   } else if (Number.isInteger(candidate.order)) {
     order = candidate.order;
+  }
+
+  // In repo mode the folder tree is organisation, never meaning — so a
+  // `type: book` file has nothing to inherit an id from and must name its own
+  // book. The portal and the API address a book in the request itself, which
+  // is why this is required only where no transport identity exists.
+  if (type === 'book' && opts.requireBlock && book === undefined && f.book === undefined) {
+    errors.push(
+      err(
+        'missing_field',
+        '`storylark.book` is required for type "book" in a repo: the folder name is organisation, not an id, so the file must say which book it declares.',
+        at('book')
+      )
+    );
   }
 
   if (type === 'chapter') {
@@ -494,6 +552,15 @@ export function validateChapterCandidate(candidate, opts = {}) {
  * `order:`), because transport-supplied positions are unique by construction —
  * an array has no ties to detect.
  *
+ * **The stored manifest joins the tie check** (design §10.6): the caller passes
+ * `bookCandidate.existingChapters` — the book's already-published chapters with
+ * their declared orders, where they declared one — and a new chapter claiming
+ * an order an incumbent already holds is the SAME `order_tie`, same message,
+ * whether the incumbent arrived in this batch or last month. Two carve-outs,
+ * both statements rather than inference: a chapter re-declaring the order it
+ * already owns is not a tie, and an incumbent this same arrival re-declares is
+ * judged by its new declaration, not its old one — an arrival is a set.
+ *
  * Returns `{ ok, records, errors }`; `records[i]` is null where chapter i
  * failed. Callers wanting skip-and-report (a repo sync, a best-effort batch)
  * read per-chapter results; callers wanting all-or-nothing read `ok`.
@@ -509,21 +576,87 @@ export function validateBookCandidate(bookCandidate, opts = {}) {
   }
 
   const seen = new Map(); // declared order -> first claimant's name
+  // Stored incumbents claim their orders first — they were there first. An
+  // incumbent this arrival itself re-declares is skipped: its new statement is
+  // already in `records`, and holding it to the superseded one would make the
+  // check depend on what the book USED to say.
+  const arrivalNames = new Set(records.filter(Boolean).map((r) => r.chapter).filter((c) => c !== undefined));
+  for (const existing of bookCandidate.existingChapters ?? []) {
+    if (!Number.isInteger(existing.order)) continue;
+    if (existing.chapter !== undefined && arrivalNames.has(existing.chapter)) continue;
+    if (!seen.has(existing.order)) seen.set(existing.order, existing.chapter ?? `order ${existing.order}`);
+  }
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
     if (!record || record.declaredOrder === undefined) continue;
     const name = chapters[i].file ?? record.chapter ?? `chapters[${i}]`;
     const prior = seen.get(record.declaredOrder);
-    if (prior !== undefined) {
+    // Re-declaring the order this same chapter already owns is not a tie.
+    if (prior !== undefined && prior !== record.chapter) {
       errors.push(
         err('order_tie', `"${prior}" and "${name}" both declare \`storylark.order: ${record.declaredOrder}\`. Order ties are an error, never silently resolved — renumber one of them.`, {
           ...(chapters[i].file !== undefined ? { file: chapters[i].file } : {}),
         })
       );
       records[i] = null;
-    } else {
+    } else if (prior === undefined) {
       seen.set(record.declaredOrder, name);
     }
   }
   return { ok: errors.length === 0, records, errors };
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Manifest-context rejections (design §10.5 / §10.7)
+ *
+ * The gate above is pure — it never reads storage — so the two rules that need
+ * the library's current state are expressed as error BUILDERS here, called by
+ * whichever transport holds that state. The codes and the sentences live in
+ * this module for the same reason everything else does: the same collision must
+ * read identically whichever door it came through.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * §10.7 — a chapter naming a `book:` that neither the library holds nor this
+ * arrival declares. The arrival is evaluated as a SET: the caller only builds
+ * this error after checking the whole arrival for a `type: book` (or book push)
+ * declaring the id, so file order can never matter.
+ */
+export function unknownBookError(bookId, where = {}) {
+  return err(
+    'unknown_book',
+    `\`storylark.book: ${bookId}\` names a book this library does not hold, and nothing in this arrival declares it. ` +
+      `Add a \`type: book\` file declaring "${bookId}" to the same arrival, or fix the id — a book is never auto-created from a reference.`,
+    where
+  );
+}
+
+/**
+ * §10.5 — the first writer owns a `bookId`. A later arrival from a DIFFERENT
+ * source is rejected with the owner named, because an error naming the owner is
+ * a five-minute fix and a silent overwrite is two systems fighting forever.
+ * `owner` is `{ origin, syncSource }` straight off the manifest entry.
+ */
+export function bookOwnedElsewhereError(bookId, owner, where = {}) {
+  return err(
+    'book_owned_elsewhere',
+    `"${bookId}" already exists in this library and belongs to ${describeContentOwner(owner)}. ` +
+      `The first writer owns a book id: pick a different id, or remove the book from its current owner first. Nothing from this arrival was written to it.`,
+    where
+  );
+}
+
+/** The owner of a book, in words a rejection can carry. */
+export function describeContentOwner(owner) {
+  const origin = typeof owner?.origin === 'string' ? owner.origin : 'cli';
+  const source = owner?.syncSource;
+  if (origin === 'sync' && source?.kind === 'git') {
+    return `the git repository ${source.url}${source.ref ? ` (branch ${source.ref})` : ''}`;
+  }
+  if (origin === 'sync' && source?.kind === 'feed') return `the feed at ${source.url}`;
+  if (origin === 'sync' && source?.kind === 'api') {
+    return `${source.system || 'an external system'} pushing over the content API`;
+  }
+  if (origin === 'portal') return 'this deployment’s own portal (origin: portal)';
+  return 'this deployment’s own publish pipeline (origin: cli)';
 }

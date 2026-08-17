@@ -25,7 +25,8 @@
     "./lib/theme-store": "./src/lib/theme-store.ts",
     "./lib/engine-store": "./src/lib/engine-store.ts",
     "./lib/self-deploy": "./src/lib/self-deploy.ts",
-    "./lib/engine-release": "./src/lib/engine-release.ts"
+    "./lib/engine-release": "./src/lib/engine-release.ts",
+    "./lib/repo-sync": "./src/lib/repo-sync.ts"
   },
   "files": [
     "src/",

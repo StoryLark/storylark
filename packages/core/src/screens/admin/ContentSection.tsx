@@ -114,6 +114,9 @@ interface BookSummary {
   origin?: ContentOrigin;
   readOnly?: boolean;
   syncSource?: SyncSource;
+  /** Derived presentation (design §3): true = a single/story, false = a book
+   *  with chapters. Absent on entries older than the field — follow `layout`. */
+  single?: boolean;
 }
 
 interface LibraryResponse {
@@ -327,9 +330,11 @@ export function ContentSection(): JSX.Element {
       flat={flat}
       onOpen={(bookId) => {
         const book = library.books.find((b) => b.id === bookId);
-        // A flat library's story IS its one chapter, so opening a story opens
-        // the editor directly rather than showing a one-item chapter list.
-        if (flat && book && book.chapters.length === 1) {
+        // A story IS its one chapter, so opening one opens the editor directly
+        // rather than a one-item chapter list. Per-book `single` (design §3)
+        // decides where it is stated; the library-wide layout is the fallback
+        // for entries that predate the flag.
+        if (book && book.chapters.length === 1 && (book.single ?? flat)) {
           setView({ name: 'chapter', bookId, chapterId: book.chapters[0].id });
         } else {
           setView({ name: 'book', bookId });
@@ -371,6 +376,11 @@ function LibraryView({
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const noun = flat ? 'story' : 'book';
+  // A library holding both shapes at once (design §3) says "Library" and labels
+  // each row, instead of calling everything by one noun that is wrong for half
+  // of it. Entries without the flag count as whatever the layout says.
+  const singles = library.books.filter((b) => b.single ?? flat).length;
+  const mixed = singles > 0 && singles < library.books.length;
 
   /**
    * Create the book/story through the public content API (see apiCreateBook),
@@ -406,7 +416,7 @@ function LibraryView({
   }
   return (
     <section class="settings-section">
-      <h2>{flat ? 'Stories' : 'Books'}</h2>
+      <h2>{mixed ? 'Library' : flat ? 'Stories' : 'Books'}</h2>
       <p class="settings-note">
         {library.books.length} {library.books.length === 1 ? noun : `${noun}s`} · library version {library.libraryVersion}
         {library.announceVersion !== library.libraryVersion ? ` (announced ${library.announceVersion})` : ''} ·{' '}
@@ -422,6 +432,7 @@ function LibraryView({
       <ul class="admin-content-list">
         {library.books.map((b) => {
           const stale = b.chapters.some((ch) => ch.audioStale);
+          const isSingle = b.single ?? flat;
           return (
             <li key={b.id}>
               <button class="admin-content-row" onClick={() => onOpen(b.id)}>
@@ -429,10 +440,11 @@ function LibraryView({
                   <strong>{b.title ?? b.id}</strong>
                   <span class="admin-content-row-meta">
                     {b.author ? `${b.author} · ` : ''}
-                    {flat ? `${b.chapters[0]?.wordCount ?? 0} words` : `${b.chapterCount} chapter${b.chapterCount === 1 ? '' : 's'}`}
+                    {isSingle ? `${b.chapters[0]?.wordCount ?? 0} words` : `${b.chapterCount} chapter${b.chapterCount === 1 ? '' : 's'}`}
                     {b.cover ? ' · cover' : ''}
                   </span>
                 </span>
+                {mixed && <span class="admin-badge">{isSingle ? 'story' : 'book'}</span>}
                 <OriginBadge readOnly={b.readOnly} />
                 {stale && <span class="admin-badge admin-badge-warn">audio out of date</span>}
               </button>

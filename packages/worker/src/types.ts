@@ -28,6 +28,18 @@ export interface Env {
   CONTENT_REVISIONS?: string;
   /** Ceiling for a portal image upload, in bytes. Default 8MB. */
   CONTENT_MAX_UPLOAD_BYTES?: string;
+  /**
+   * Read-only credential for the repo content sync (wave 2 — design §6.1), as
+   * a PLATFORM SECRET: `wrangler secret put CONTENT_SYNC_TOKEN` / an App
+   * Service setting — the same posture STORYLARK_SYNC_TOKEN has on the
+   * pipeline side. Never in deployment.json (a hard error there), never echoed
+   * by any route. When absent, a token entered in the portal's connection form
+   * (stored in the database, the self_update_oauth precedent) is the fallback;
+   * this secret wins when both exist. Optional: a public repo syncs without one.
+   */
+  CONTENT_SYNC_TOKEN?: string;
+  /** Test seam only — points the provider archive fetch at a local server. Never set in production. */
+  CONTENT_SYNC_ARCHIVE_BASE?: string;
   /** Theme versions kept for rollback (AB#7417 — plan §0c). Default 5; see lib/theme-store.ts. */
   THEME_VERSIONS?: string;
   /** Engine versions kept for rollback (AB#7418). Default 5, floor 2; see lib/engine-store.ts. */
@@ -181,5 +193,7 @@ export type AppContext = {
   Variables: {
     user: User;
     sessionId: string;
+    /** Set when a scoped content-API token authenticated this request (wave 2, build step 10). */
+    contentToken?: { id: string; name: string };
   };
 };

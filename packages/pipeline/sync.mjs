@@ -125,16 +125,35 @@ async function resolveConfig(brand, cli) {
   let fromFile = {};
   if (existsSync(file)) {
     const deployment = JSON.parse(await readFile(file, 'utf8'));
-    fromFile = deployment.sync ?? {};
+    // The content-source block (content-management wave 2, design §4):
+    //
+    //   "contentSource": { "mode": "portal" | "repo" | "api",
+    //     "repo": { "provider": "github", "url": "…", "branch": "main",
+    //               "path": "content", "intervalHours": 24 } }
+    //
+    // `contentSource.repo` is the successor of the legacy `sync` block and
+    // wins when both exist; the legacy block keeps working untouched, so no
+    // existing deployment's config breaks. (`branch` here is `ref` there —
+    // the portal's connection form and this file use the same words.)
+    const contentSource = deployment.contentSource ?? {};
+    const repoBlock = contentSource.repo;
+    if (repoBlock && (contentSource.mode === undefined || contentSource.mode === 'repo')) {
+      fromFile = { kind: 'git', url: repoBlock.url, ref: repoBlock.branch ?? repoBlock.ref, path: repoBlock.path };
+    } else {
+      fromFile = deployment.sync ?? {};
+    }
     // A committed file must never carry a credential. This is a hard stop, not
     // a warning: a warning gets scrolled past and the secret is in git forever.
-    for (const forbidden of ['token', 'password', 'secret', 'accessToken']) {
-      if (fromFile[forbidden] !== undefined) {
-        console.error(
-          `${file} has sync.${forbidden}. That file is committed — a credential must never be in it. ` +
-            `Remove it and set STORYLARK_SYNC_TOKEN in the environment instead.`
-        );
-        process.exit(1);
+    // Checked in BOTH shapes — the new block inherits the old block's hard line.
+    for (const block of [deployment.sync ?? {}, repoBlock ?? {}]) {
+      for (const forbidden of ['token', 'password', 'secret', 'accessToken']) {
+        if (block[forbidden] !== undefined) {
+          console.error(
+            `${file} carries a "${forbidden}" inside its sync/contentSource block. That file is committed — a credential must never be in it. ` +
+              `Remove it and set STORYLARK_SYNC_TOKEN in the environment instead.`
+          );
+          process.exit(1);
+        }
       }
     }
   }

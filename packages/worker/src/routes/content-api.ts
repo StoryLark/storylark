@@ -45,6 +45,7 @@ import {
   isPullManaged,
   managedExternallyMessage,
   readManifest,
+  refreshSingle,
   syncSourceOf,
   writeManifest,
 } from '../lib/content';
@@ -66,6 +67,10 @@ import {
 import { enqueue } from '../lib/narration';
 import { recordPublish } from '../lib/notify';
 import { unzip, ZipError } from 'storylark-contracts/zip';
+import { sha256Hex } from '../lib/crypto';
+import { providerOf } from '../lib/sync-providers';
+import { readSyncState } from '../lib/sync-state';
+import { runRepoSync } from '../lib/repo-sync';
 
 export const contentApi = new Hono<AppContext>();
 
@@ -73,12 +78,97 @@ function hasAdminKey(c: Context<AppContext>): boolean {
   return !!c.env.ADMIN_KEY && c.req.header('x-admin-key') === c.env.ADMIN_KEY;
 }
 
+/**
+ * The scoped-token door (wave 2, build step 10): `Authorization: Bearer sct_…`.
+ * Content-API only by construction — the check exists solely on this router,
+ * so a leaked token can push and read content and do NOTHING else: no admin
+ * setup links, no updates, no theme writes. Only the token's SHA-256 is
+ * stored; `last_used_at` is what makes a forgotten integration visible.
+ */
+async function bearerToken(c: Context<AppContext>): Promise<boolean> {
+  const m = /^Bearer\s+(sct_[A-Za-z0-9_-]+)$/i.exec(c.req.header('authorization') ?? '');
+  if (!m) return false;
+  try {
+    const hash = await sha256Hex(m[1]);
+    const row = await c.env.DB.prepare('SELECT id, name FROM content_api_tokens WHERE token_hash = ? AND revoked_at IS NULL')
+      .bind(hash)
+      .first<{ id: string; name: string }>();
+    if (!row) return false;
+    c.set('contentToken', { id: row.id, name: row.name });
+    c.executionCtx.waitUntil(
+      c.env.DB.prepare('UPDATE content_api_tokens SET last_used_at = ? WHERE id = ?').bind(Date.now(), row.id).run()
+    );
+    return true;
+  } catch {
+    return false; // a database predating migration 0009 has no token table — the other two doors still work
+  }
+}
+
 function requireAdminOrKey() {
   return async (c: Context<AppContext>, next: Next) => {
     if (hasAdminKey(c)) return next();
+    if (await bearerToken(c)) return next();
     return requireAdmin()(c, next);
   };
 }
+
+/**
+ * POST /api/content/v1/sync/webhook — the push trigger (wave 2, design §6.2).
+ *
+ * Registered BEFORE the auth middleware, deliberately: its credential is the
+ * provider's signature over the raw body, verified with the secret the portal
+ * generated — a caller with no signature or a forged one is rejected, never
+ * trusted, and no session or key can substitute. The handler confirms the push
+ * touched the configured branch and path, then runs the sync in the background:
+ * the provider's delivery timeout is seconds, a sync may not be.
+ */
+contentApi.post('/v1/sync/webhook', async (c) => {
+  const state = await readSyncState(c.env);
+  if (!state?.webhookSecret) {
+    return c.json({ error: 'webhook_not_configured', message: 'This deployment has no webhook secret. Generate one in the portal’s Connections section first.' }, 404);
+  }
+  const repo = state.config?.mode === 'repo' ? state.config.repo : undefined;
+  const provider = repo ? providerOf(repo.provider) : undefined;
+  if (!repo || !provider) {
+    return c.json({ error: 'no_repo_connection', message: 'The content source is not a repo, so a push has nothing to sync.' }, 409);
+  }
+
+  const rawBody = await c.req.text();
+  const verified = await provider.verifyWebhook({
+    rawBody,
+    signatureHeader: c.req.header(provider.signatureHeaderName),
+    secret: state.webhookSecret,
+  });
+  if (!verified) {
+    return c.json({ error: 'invalid_signature', message: 'The webhook signature does not verify. An unverified webhook is rejected, never trusted — check the secret pasted into the repository’s webhook settings.' }, 401);
+  }
+
+  const event = c.req.header(provider.eventHeaderName) ?? provider.pushEventName;
+  if (event === 'ping') return c.json({ ok: true, pong: true });
+  if (event !== provider.pushEventName) return c.json({ ok: true, synced: false, reason: `"${event}" events are ignored; only pushes sync.` });
+
+  let payload: unknown = null;
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    /* a verified but unparseable payload still syncs — the repo is the truth, not the notification */
+  }
+  const branch = provider.pushedBranch(payload);
+  if (branch !== undefined && branch !== repo.branch) {
+    return c.json({ ok: true, synced: false, reason: `The push was to "${branch}"; this connection follows "${repo.branch}".` });
+  }
+  const paths = provider.pushedPaths(payload);
+  if (repo.path && paths !== undefined && paths.length > 0 && !paths.some((p) => p === repo.path || p.startsWith(`${repo.path}/`))) {
+    return c.json({ ok: true, synced: false, reason: `The push touched nothing under "${repo.path}".` });
+  }
+
+  c.executionCtx.waitUntil(
+    runRepoSync(c.env, { trigger: 'webhook', actor: 'webhook', waitUntil: (p) => c.executionCtx.waitUntil(p) }).catch((err) =>
+      console.error(`storylark: webhook-triggered sync failed: ${(err as Error).message}`)
+    )
+  );
+  return c.json({ ok: true, queued: true, message: 'Sync queued. Watch it in the portal’s Connections section.' }, 202);
+});
 
 contentApi.use('/v1', requireAdminOrKey());
 contentApi.use('/v1/*', requireAdminOrKey());
@@ -99,8 +189,10 @@ function noStore(c: Context<AppContext>) {
   );
 }
 
-/** Who to record on the revisions this push creates. */
+/** Who to record on the revisions this push creates. A scoped token names itself. */
 function actor(c: Context<AppContext>): string {
+  const token = c.get('contentToken');
+  if (token) return `token:${token.name}`;
   const user = c.get('user');
   return user?.email || user?.username || 'content-api';
 }
@@ -151,6 +243,7 @@ contentApi.get('/v1', (c) => {
       'DELETE /api/content/v1/books/:bookId',
       'POST   /api/content/v1/books',
       'POST   /api/content/v1/import',
+      'POST   /api/content/v1/sync/webhook',
     ],
   });
 });
@@ -367,6 +460,7 @@ contentApi.delete('/v1/books/:bookId/chapters/:chapterId', async (c) => {
   if (!findChapter(book, chapterId)) return c.json({ contractVersion: CONTENT_API_VERSION, error: 'not_found' }, 404);
 
   book.chapters = book.chapters.filter((ch) => ch.id !== chapterId);
+  refreshSingle(book);
   const libraryVersion = await bumpManifest(store, manifest);
   await recordPublish(c.env, (p) => c.executionCtx.waitUntil(p), libraryVersion, false);
   return c.json({ contractVersion: CONTENT_API_VERSION, ok: true, deleted: chapterId, libraryVersion });

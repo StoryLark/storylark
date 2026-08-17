@@ -51,6 +51,7 @@ import {
   originOf,
   readManifest,
   readRevision,
+  refreshSingle,
   reorderChapters,
   revisionLimit,
   saveChapter,
@@ -59,7 +60,7 @@ import {
   writeManifest,
 } from '../lib/content';
 import { chapterMeta, parseBlocks, readFrontmatter } from '../lib/md';
-import { PUBLISH_WITHHELD_MESSAGE, validateChapterCandidate } from 'storylark-contracts/content';
+import { PUBLISH_WITHHELD_MESSAGE, validateBookCandidate, validateChapterCandidate } from 'storylark-contracts/content';
 import { sha256Bytes } from '../lib/crypto';
 import { recordPublish } from '../lib/notify';
 import { enqueue } from '../lib/narration';
@@ -233,6 +234,9 @@ adminContent.get('/content/books', async (c) => {
       origin: originOf(b),
       readOnly: originOf(b) === 'sync',
       syncSource: syncSourceOf(b),
+      // Derived presentation (design §3): lets the portal label a mixed
+      // library's rows story/book. Absent on entries older than the field.
+      single: typeof b.single === 'boolean' ? b.single : undefined,
       chapters: (b.chapters ?? []).map((ch) => ({
         id: ch.id,
         title: ch.title,
@@ -375,6 +379,24 @@ adminContent.put('/content/books/:bookId/chapters/:chapterId', async (c) => {
   const gate = await requireWritable(c, store, bookId, chapterId);
   if (gate instanceof Response) return gate;
   const isNew = !gate.chapter;
+
+  // §10.6 — the stored manifest joins the tie check. A declared order that
+  // collides with a sibling's is the same `order_tie`, same message, whether
+  // the incumbent arrived in this request or last month. Same call the API and
+  // the repo sync make, so the three doors cannot drift.
+  if (verdict.record.declaredOrder !== undefined && gate.book) {
+    const tie = validateBookCandidate({
+      bookId,
+      chapters: [{ chapterId, markdown: body.markdown }],
+      existingChapters: (gate.book.chapters ?? []).map((ch) => ({
+        chapter: ch.id,
+        order: typeof ch.order === 'number' && Number.isInteger(ch.order) ? ch.order : undefined,
+      })),
+    });
+    if (!tie.ok) {
+      return c.json({ error: tie.errors[0].code, message: tie.errors[0].message, errors: tie.errors }, 422);
+    }
+  }
 
   if (verdict.record.publish === false) {
     // Valid content whose own frontmatter says "not yet". Not an error, and
@@ -553,6 +575,7 @@ adminContent.delete('/content/books/:bookId/chapters/:chapterId', async (c) => {
   if (!manifest || !book || !chapter) return c.json({ error: 'not_found' }, 404);
 
   book.chapters = book.chapters.filter((ch) => ch.id !== chapterId);
+  refreshSingle(book);
   manifest.libraryVersion = (manifest.libraryVersion ?? 0) + 1;
   (manifest as { announceVersion?: number }).announceVersion = announceVersionOf(manifest);
   manifest.generatedAt = new Date().toISOString();

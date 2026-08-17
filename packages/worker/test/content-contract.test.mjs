@@ -34,8 +34,10 @@ import {
   CONTENT_ERROR_CODES,
   CONTENT_ID_RE,
   PUBLISH_WITHHELD_MESSAGE,
+  bookOwnedElsewhereError,
   readStorylarkBlock,
   splitFrontmatter,
+  unknownBookError,
   validateBookCandidate,
   validateChapterCandidate,
 } from 'storylark-contracts/content';
@@ -162,6 +164,20 @@ test('every stable error code in the vocabulary is real, with a message and a lo
   assert.match(tieError.message, /a\/one\.md/, 'the tie names both claimants');
   assert.match(tieError.message, /a\/two\.md/);
   produced.add('order_tie');
+
+  // The two manifest-context codes (wave 2 — design §10.5 / §10.7) come from
+  // the contract's error builders, called by whichever transport holds the
+  // library state. Same codes, same sentences, whichever door.
+  const unknown = unknownBookError('the-missing-book', { file: 'their-repo/ch.md' });
+  assert.equal(unknown.code, 'unknown_book');
+  assert.match(unknown.message, /the-missing-book/, 'names the missing book');
+  assert.equal(unknown.file, 'their-repo/ch.md');
+  produced.add(unknown.code);
+
+  const owned = bookOwnedElsewhereError('taken-book', { origin: 'sync', syncSource: { kind: 'git', url: 'https://github.com/a/b', ref: 'main' } });
+  assert.equal(owned.code, 'book_owned_elsewhere');
+  assert.match(owned.message, /https:\/\/github\.com\/a\/b/, 'names the current owner');
+  produced.add(owned.code);
 
   // The vocabulary and the implementation are the same set — no dead codes, no
   // undeclared ones.

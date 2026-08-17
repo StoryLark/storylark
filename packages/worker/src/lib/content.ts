@@ -123,6 +123,25 @@ export function findChapter(book: BookEntry | undefined, chapterId: string): Cha
 }
 
 /**
+ * Recompute the DERIVED `single` presentation flag (design §3) after a write
+ * changed a book's chapter set. One rule, one place, every writer calls it:
+ *
+ *   • more (or fewer) than one chapter → a book. A story that gained a second
+ *     chapter became a book by definition.
+ *   • exactly one chapter → a single, UNLESS that chapter's own block declared
+ *     `type: chapter` — the author stating "this is a book being built", which
+ *     is the one case where a one-chapter book must keep its chapter list.
+ *
+ * Never authored: `storylark.type` is the authored truth, this is bookkeeping
+ * computed from it. Manifests written by older pipelines simply lack the field
+ * and the reader falls back to the library-wide layout, as it always did.
+ */
+export function refreshSingle(book: BookEntry): void {
+  const chapters = book.chapters ?? [];
+  book.single = chapters.length === 1 && chapters[0].declaredType !== 'chapter';
+}
+
+/**
  * The version readers are told about, as distinct from the version that makes
  * them re-fetch.
  *
@@ -507,9 +526,26 @@ export async function saveChapter(opts: SaveOptions): Promise<SaveResult> {
     audioStale,
     origin: opts.origin ?? (existing ? originOf(existing) : 'portal'),
   };
+  // What the block itself declared, remembered on the entry (design §3 / §10.6):
+  // `declaredType` feeds the derived `single` flag, `order` lets a later
+  // arrival's declared order collide with this one's. Both are the author's own
+  // statements carried through, never inferred — and both are CLEARED when a
+  // save stops declaring them, so the entry never claims a statement the
+  // current source no longer makes.
+  if (declared.present && (declared.fields.type === 'chapter' || declared.fields.type === 'story')) {
+    entry.declaredType = declared.fields.type;
+  } else {
+    delete entry.declaredType;
+  }
+  if (declared.present && typeof declared.fields.order === 'number' && Number.isInteger(declared.fields.order)) {
+    entry.order = declared.fields.order;
+  } else {
+    delete entry.order;
+  }
   book.chapters = existing
     ? book.chapters.map((ch) => (ch.id === chapterId ? entry : ch))
     : [...(book.chapters ?? []), entry];
+  refreshSingle(book);
 
   const libraryVersion = (manifest.libraryVersion ?? 0) + 1;
   const announceVersion = correction ? announceVersionOf(manifest) : libraryVersion;

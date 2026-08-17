@@ -156,6 +156,21 @@ export interface ChapterEntry {
    * `sync` is the only value that makes a chapter read-only in the portal.
    */
   origin?: ContentOrigin;
+  /**
+   * What the chapter's own `storylark:` block declared it to be, where it
+   * declared anything (content-management wave 2, design §3). `story` and an
+   * absent value both leave a one-chapter book presenting as a single;
+   * `chapter` is the author stating "this is a book being built", which is what
+   * keeps a series book with one chapter so far from rendering as a story.
+   */
+  declaredType?: 'chapter' | 'story';
+  /**
+   * The `storylark.order` the chapter declared at ingestion, where it declared
+   * one (design §10.6). This is what lets a later arrival's order collide with
+   * an incumbent's — the manifest ARRAY stays the presentation order, exactly
+   * as before; this field only remembers the declaration.
+   */
+  order?: number;
   [key: string]: unknown;
 }
 
@@ -171,6 +186,16 @@ export interface BookEntry {
   /** Set when `origin` is `sync`: the external source of truth this book is a
    *  copy of, and therefore where its edit button actually lives. */
   syncSource?: SyncSource;
+  /**
+   * DERIVED presentation flag (design §3): true when this book presents as a
+   * single — cover straight into the text — false when it presents as a book
+   * with a chapter list. Recomputed by `refreshSingle()` on every write that
+   * changes the chapter set; never authored by a transport (`storylark.type`
+   * is the authored truth this is computed from). Absent on a manifest written
+   * before this field existed, which the reader treats as "follow the
+   * library-wide layout" — exactly the old behaviour.
+   */
+  single?: boolean;
   [key: string]: unknown;
 }
 

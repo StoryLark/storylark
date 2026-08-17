@@ -53,6 +53,7 @@ import {
   isPullManaged,
   managedExternallyMessage,
   readManifest,
+  refreshSingle,
   saveChapter,
   syncSourceOf,
   writeManifest,
@@ -411,6 +412,16 @@ export async function pushBooks(opts: PushOptions): Promise<PushOutcome> {
         markdown: c.markdown,
         file: `${book.id}/${c.id}`,
       })),
+      // §10.6 — the stored manifest joins the tie check: an order an incumbent
+      // chapter declared last month collides exactly as one declared in this
+      // request would. (A full replace supersedes every incumbent by
+      // definition, so only a partial push is judged against what stays.)
+      existingChapters: book.replaceChapters
+        ? []
+        : (existing?.chapters ?? []).map((ch) => ({
+            chapter: ch.id,
+            order: typeof ch.order === 'number' && Number.isInteger(ch.order) ? ch.order : undefined,
+          })),
     });
     if (!gate.ok) {
       const first = gate.errors[0];
@@ -618,6 +629,7 @@ async function pushOneBook(args: OneBookArgs): Promise<{
       removed = dropped;
     }
   }
+  refreshSingle(entry);
 
   libraryVersion = (after.libraryVersion ?? 0) + 1;
   after.libraryVersion = libraryVersion;

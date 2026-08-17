@@ -47,6 +47,9 @@ export interface StorylarkBlock {
 
 export function readStorylarkBlock(source: string, where?: { file?: string }): StorylarkBlock;
 
+/** The repo candidacy question: block present, or a broken fence that mentions one. */
+export function isRepoCandidate(source: string): boolean;
+
 /** What a transport hands the gate: identity as the transport knows it, plus the source. */
 export interface ChapterCandidate {
   /** Where it came from, for error locations. */
@@ -92,10 +95,19 @@ export type ChapterValidation =
 
 export function validateChapterCandidate(candidate: ChapterCandidate, opts?: ValidateOptions): ChapterValidation;
 
+/** An already-published chapter, as the stored manifest knows it — joins the tie check (§10.6). */
+export interface ExistingChapter {
+  chapter?: string;
+  /** The order the chapter DECLARED when it was ingested, where it declared one. */
+  order?: number;
+}
+
 export interface BookCandidate {
   bookId?: string;
   file?: string;
   chapters?: Omit<ChapterCandidate, 'bookId'>[];
+  /** The book's current chapters; a declared order colliding with an incumbent's is the same `order_tie`. */
+  existingChapters?: ExistingChapter[];
 }
 
 /** Per-chapter validation plus the between-chapters rule: an `order` tie is an error. */
@@ -103,3 +115,18 @@ export function validateBookCandidate(
   bookCandidate: BookCandidate,
   opts?: ValidateOptions
 ): { ok: boolean; records: (ContentRecord | null)[]; errors: ContentError[] };
+
+/** Who currently owns a book, as the manifest records it. */
+export interface ContentOwner {
+  origin?: unknown;
+  syncSource?: { kind?: string; url?: string; ref?: string; system?: string } | undefined;
+}
+
+/** §10.7 — a chapter naming a book neither held nor declared by this arrival. */
+export function unknownBookError(bookId: string, where?: { file?: string; line?: number }): ContentError;
+
+/** §10.5 — a later arrival from a different source claiming an owned book id. */
+export function bookOwnedElsewhereError(bookId: string, owner: ContentOwner, where?: { file?: string; line?: number }): ContentError;
+
+/** The owner of a book, in words a rejection can carry. */
+export function describeContentOwner(owner: ContentOwner): string;
