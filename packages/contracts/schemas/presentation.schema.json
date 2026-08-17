@@ -135,6 +135,23 @@
         "required": { "type": "boolean", "description": "true puts an account gate in front of the whole app; false is browse-and-read anonymously." }
       }
     },
+    "readerTheme": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Which of the bundled sample LOOKS a reader may read in. A look is the colours and font stacks of one of the gallery themes and nothing else — it never changes this deployment's identity, icons, PWA manifest or installed theme package, and one reader's choice is never visible to another. `settings.theme` still gates the whole Theme control: turning that off removes this too.",
+      "properties": {
+        "options": {
+          "type": "array",
+          "items": { "enum": ["storylark", "loveletter", "nebula", "weatherglass", "wireless"] },
+          "description": "Which looks the picker offers, in this order. An empty array removes the picker and leaves every reader on this library's own theme.css. An id this engine does not ship is ignored, so a file written for a newer engine still offers the looks it does have."
+        },
+        "forced": {
+          "type": ["string", "null"],
+          "enum": ["storylark", "loveletter", "nebula", "weatherglass", "wireless", null],
+          "description": "Fix one look for every reader. The picker becomes a read-only line, `options` is ignored, and a reader who had already chosen something else is moved onto this one — a forced look overrides a stored preference rather than merely hiding the control. null (the default) leaves readers to choose."
+        }
+      }
+    },
     "settings": {
       "type": "object",
       "additionalProperties": false,

@@ -1,6 +1,8 @@
 // Content types — mirror of the R2 chapter/timings/manifest schemas
 // produced by the publish pipeline (tools/).
 
+import type { ReaderThemeConfig } from './reader-themes';
+
 /**
  * Brand IDENTITY and look. Nothing else.
  *
@@ -155,6 +157,16 @@ export interface Presentation {
   };
   /** Sign-in posture. `true` puts an account gate in front of the whole app. */
   auth: { required: boolean };
+  /**
+   * Which of the bundled sample LOOKS a reader may read in, and whether the
+   * admin has fixed one for everybody (AB#7412).
+   *
+   * A look is colours and font stacks only — never the deployment's identity,
+   * icons or manifest. See ./reader-themes.ts for the whole boundary, and note
+   * that `settings.theme` below still gates the entire Theme control: a brand
+   * that has turned that off offers neither the light/dark override nor this.
+   */
+  readerTheme: ReaderThemeConfig;
   /** Which controls the Settings screen offers the reader. */
   settings: {
     typography: boolean;
@@ -357,6 +369,15 @@ export interface Settings {
   fontScale: number; // 0..4
   lineHeight: number; // 1.5 | 1.7 | 1.9
   theme: 'dark' | 'light' | 'auto';
+  /**
+   * Which bundled LOOK this reader reads in (AB#7412) — a `ReaderThemeId`, or
+   * '' for the deployment's own theme.css. Typed as a plain string on purpose:
+   * a value saved by a newer engine that ships a sixth look must survive a
+   * round trip through an older one's IndexedDB and its account preferences
+   * without being coerced, and resolveReaderTheme() is the single place that
+   * decides an id it does not recognise means "the brand's own look".
+   */
+  readerTheme: string;
   readAlong: 'word' | 'block' | 'off';
   /** Default consumption mode when opening an item without a per-item choice. */
   defaultMode: ConsumptionMode;

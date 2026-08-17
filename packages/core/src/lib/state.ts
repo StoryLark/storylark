@@ -1,7 +1,8 @@
 import { signal, computed } from '@preact/signals';
 import type { ConsumptionMode, LibraryManifest, Progress, Settings } from './types';
 import { BRAND, contentUrl } from '../brand';
-import { readerDefaultMode } from '../presentation';
+import { PRESENTATION, readerDefaultMode } from '../presentation';
+import { BRAND_LOOK, applyReaderTheme, resolveReaderTheme, resolveVariant } from './reader-themes';
 import { idb } from './db';
 import { api, type AuthUser } from './api';
 
@@ -24,6 +25,11 @@ export const settings = signal<Settings>({
   fontScale: 2,
   lineHeight: 1.7,
   theme: 'auto',
+  // '' — this library's own theme.css (AB#7412). The DEPLOYMENT can force a
+  // different one via presentation `readerTheme.forced`, which applyTheme()
+  // honours over whatever is saved here; it is not merged into this default,
+  // because a forced look must keep winning if the admin changes it later.
+  readerTheme: BRAND_LOOK,
   readAlong: 'word',
   // The DEPLOYMENT's default, from presentation `reader.defaultMode`
   // (AB#7416) — not an override. Anything saved in IndexedDB or synced from
@@ -76,6 +82,29 @@ export function progressKey(bookId: string, chapterId: string): string {
   return `${bookId}/${chapterId}`;
 }
 
+/**
+ * Apply an ADMIN-FORCED look before anything has been read from storage
+ * (AB#7412).
+ *
+ * bootstrap() is async — it opens IndexedDB before it can call applyTheme() —
+ * so without this a deployment that forces Wireless would paint its own palette
+ * first and repaint a beat later. A forced look is the one case that needs no
+ * stored state to resolve, so it can be applied during module evaluation, from
+ * the presentation the document was served with.
+ *
+ * The variant is the look's own default here rather than the reader's, which is
+ * not yet known; applyTheme() corrects it moments later. That leaves at worst
+ * the light/dark flash the app already has, instead of adding a palette flash
+ * on top of it. A no-op when nothing is forced — an unforced look depends on a
+ * saved preference and genuinely cannot be known this early.
+ */
+export function preapplyForcedReaderTheme(): void {
+  const resolved = resolveReaderTheme(PRESENTATION.readerTheme, undefined);
+  if (!resolved.forced || !resolved.active) return;
+  document.documentElement.dataset.theme = resolved.active.defaultVariant;
+  applyReaderTheme(document.documentElement, resolved.active, resolved.active.defaultVariant);
+}
+
 export async function bootstrap(): Promise<void> {
   window.addEventListener('online', () => (online.value = true));
   window.addEventListener('offline', () => (online.value = false));
@@ -96,7 +125,21 @@ export async function bootstrap(): Promise<void> {
   await Promise.all([loadManifest(), loadUser()]);
 }
 
-const SYNCED_PREF_KEYS = ['defaultMode', 'readAlong', 'theme', 'fontScale', 'lineHeight', 'narratorVoice', 'keepAwake', 'autoPlayNextStory'] as const;
+const SYNCED_PREF_KEYS = [
+  'defaultMode',
+  'readAlong',
+  'theme',
+  // The chosen LOOK syncs for the same reason light/dark does: it is how this
+  // reader wants to read, and a second device that showed them a different
+  // palette would be a bug. It is still only ever a preference — the resolver
+  // ignores it wherever the deployment has forced a look.
+  'readerTheme',
+  'fontScale',
+  'lineHeight',
+  'narratorVoice',
+  'keepAwake',
+  'autoPlayNextStory',
+] as const;
 
 export async function saveSettings(patch: Partial<Settings>): Promise<void> {
   settings.value = { ...settings.value, ...patch };
@@ -117,6 +160,7 @@ export async function pushPreferences(): Promise<void> {
         defaultMode: settings.value.defaultMode,
         readAlong: settings.value.readAlong,
         theme: settings.value.theme,
+        readerTheme: settings.value.readerTheme,
         fontScale: settings.value.fontScale,
         lineHeight: settings.value.lineHeight,
         keepAwake: settings.value.keepAwake,
@@ -148,9 +192,26 @@ export async function pullPreferences(): Promise<void> {
   }
 }
 
+/**
+ * Put the reader's display preferences onto `<html>` — the LOOK, then light or
+ * dark within it, then the reading measurements.
+ *
+ * Order matters between the first two only in the sense that both are read from
+ * the same resolution: `data-theme` and the inline token block have to agree, or
+ * the stylesheet's `:root[data-theme="dark"]` rules and the look's inline values
+ * would describe two different themes at once. Resolving once and applying both
+ * from that one answer is what keeps them honest.
+ *
+ * The single call site for every change (bootstrap, saveSettings,
+ * pullPreferences) is deliberate: a forced look has to be applied to a reader
+ * whose saved preference says otherwise, and the moments that reader's settings
+ * arrive are exactly these three.
+ */
 function applyTheme(): void {
-  const t = settings.value.theme === 'auto' ? BRAND.defaultTheme : settings.value.theme;
-  document.documentElement.dataset.theme = t;
+  const resolved = resolveReaderTheme(PRESENTATION.readerTheme, settings.value.readerTheme);
+  const variant = resolveVariant(settings.value.theme, resolved.active, BRAND.defaultTheme);
+  document.documentElement.dataset.theme = variant;
+  applyReaderTheme(document.documentElement, resolved.active, variant);
   document.documentElement.style.setProperty('--reader-font-scale', String([0.85, 0.95, 1, 1.15, 1.3][settings.value.fontScale] ?? 1));
   document.documentElement.style.setProperty('--reader-line-height', String(settings.value.lineHeight));
 }

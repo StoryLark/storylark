@@ -24,6 +24,10 @@
 import { useCallback, useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { call, ApiError } from '../../lib/api';
+import { BRAND, brandIdentity } from '../../brand';
+import { STATED_PRESENTATION } from '../../presentation';
+import { DEFAULT_READER_THEME, READER_THEMES, type ReaderThemeConfig, type ReaderThemeId } from '../../lib/reader-themes';
+import type { PresentationInput } from '../../lib/types';
 
 function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return call<T>(`/admin${path}`, init);
@@ -75,6 +79,8 @@ interface ThemesResponse {
     hasPresentation: boolean;
     icons: string[];
     brand: BrandIdentity;
+    /** The stored arrangement, when one is installed (AB#7412). */
+    presentation: PresentationInput | null;
   } | null;
   builtIn: { id: string; appName: string };
   versions: ThemeVersion[];
@@ -242,6 +248,20 @@ export function ThemeSection(): JSX.Element {
         )}
       </div>
 
+      <ReaderThemes
+        state={state}
+        busy={busy}
+        onSaved={async (note) => {
+          reset();
+          setMessage(note);
+          await refresh();
+        }}
+        onError={(errors) => {
+          reset();
+          setProblems(errors);
+        }}
+      />
+
       {tweaking && (
         <BrandForm
           brand={state?.active?.brand}
@@ -379,6 +399,157 @@ function VersionHistory({
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * Reader themes (AB#7412) — the third door onto "what does this site look
+ * like", and the only one that is about the READER rather than the deployment.
+ *
+ * The two doors above install a brand: one theme.css, one identity, one set of
+ * icons, for everybody. This one decides whether a reader may choose a different
+ * PALETTE for their own copy of the app out of the looks the engine ships, and
+ * whether the operator would rather they all read in the same one.
+ *
+ * It lives inside this card rather than in a card of its own because an operator
+ * asking "can my readers change the theme?" is standing in front of Brand &
+ * themes when they ask it. It is kept visually and textually separate inside the
+ * card because the answer must not read as a way to change what the site IS.
+ *
+ * ── What it writes, and the one side effect worth stating out loud ──────────
+ * It PUTs the whole live presentation with `readerTheme` replaced, which becomes
+ * an installed version like any other — same history, same rollback, same
+ * download. On a deployment that had nothing installed, that also pins the
+ * current identity and arrangement as version 1, so from then on the site wears
+ * what is stored here rather than what its build ships. That is reversible with
+ * "Revert to the built-in brand" directly above, and the note below says so,
+ * because an operator discovering it later would rightly call it a surprise.
+ */
+function ReaderThemes({
+  state,
+  busy,
+  onSaved,
+  onError,
+}: {
+  state: ThemesResponse | null;
+  busy: string;
+  onSaved: (note: string) => Promise<void>;
+  onError: (errors: string[]) => void;
+}): JSX.Element {
+  // What the SERVER holds wins over what was injected into this page: after a
+  // save the injected copy is a reload behind. Before any save there is nothing
+  // stored, and the injected presentation is the live one by definition.
+  const live = (state?.active?.presentation ?? STATED_PRESENTATION) as PresentationInput;
+  const stored = (live.readerTheme ?? {}) as Partial<ReaderThemeConfig>;
+  const initial: ReaderThemeConfig = {
+    options: Array.isArray(stored.options) ? stored.options : DEFAULT_READER_THEME.options,
+    forced: stored.forced ?? null,
+  };
+
+  const [draft, setDraft] = useState<ReaderThemeConfig>(initial);
+  const [saving, setSaving] = useState(false);
+  const key = JSON.stringify(initial);
+  useEffect(() => {
+    setDraft(initial);
+    // Re-seed only when the server's answer actually changes, not on every
+    // render — otherwise typing into the form would fight the reset.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  function toggle(id: ReaderThemeId, on: boolean): void {
+    setDraft((d) => ({
+      ...d,
+      // Rebuilt from READER_THEMES rather than pushed onto, so the saved order
+      // is always the picker's order however the boxes were ticked.
+      options: READER_THEMES.map((t) => t.id).filter((x) => (x === id ? on : d.options.includes(x))),
+    }));
+  }
+
+  async function save(): Promise<void> {
+    setSaving(true);
+    try {
+      const presentation: PresentationInput & { contractVersion?: number } = {
+        ...(live as PresentationInput & { contractVersion?: number }),
+        readerTheme: draft,
+      };
+      presentation.contractVersion ??= 1;
+      await adminFetch('/themes/presentation', {
+        method: 'PUT',
+        // The identity too, so a save on a deployment with nothing installed
+        // cannot blank the live brand — see the route's own comment.
+        body: JSON.stringify({ presentation, brand: state?.active?.brand ?? brandIdentity(BRAND) }),
+      });
+      await onSaved(
+        draft.forced
+          ? `Saved. Every reader now sees "${READER_THEMES.find((t) => t.id === draft.forced)?.label}", including anyone who had picked another one. Reload any open reader tab to see it.`
+          : draft.options.length === 0
+            ? 'Saved. The theme picker is gone from Settings; every reader sees this site’s own look.'
+            : `Saved. Readers can choose from ${draft.options.length} theme${draft.options.length === 1 ? '' : 's'} in Settings.`
+      );
+    } catch (err) {
+      onError([err instanceof ApiError && err.detail ? err.detail : 'Could not save that theme setting.']);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const disabled = saving || !!busy || !state?.storeAvailable;
+  return (
+    <div class="admin-reader-themes">
+      <h3>Reader themes</h3>
+      <p class="settings-note">
+        The sample themes from the gallery, offered to readers in Settings as a look they can read in. A reader&rsquo;s choice
+        changes colours and lettering for that reader only — never this site&rsquo;s name, icons, install prompt, or the theme
+        installed above.
+      </p>
+      <ul class="admin-status-list">
+        {READER_THEMES.map((t) => (
+          <li key={t.id}>
+            <label>
+              <input
+                type="checkbox"
+                checked={draft.options.includes(t.id)}
+                disabled={disabled || draft.forced !== null}
+                onChange={(e) => toggle(t.id, (e.target as HTMLInputElement).checked)}
+              />{' '}
+              <strong>{t.label}</strong> <span class="settings-note">— {t.blurb}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <label class="settings-row">
+        <span>Force one theme on everyone</span>
+        <select
+          value={draft.forced ?? ''}
+          disabled={disabled}
+          onChange={(e) => {
+            const value = (e.target as HTMLSelectElement).value;
+            setDraft((d) => ({ ...d, forced: value === '' ? null : (value as ReaderThemeId) }));
+          }}
+        >
+          <option value="">Let readers choose</option>
+          {READER_THEMES.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p class="settings-note">
+        {draft.forced
+          ? 'Forced: Settings shows the theme as fixed, the list above is ignored, and a reader who had already chosen a different one is moved onto this. Light and dark are still theirs to pick.'
+          : draft.options.length === 0
+            ? 'With nothing ticked, Settings offers no theme picker at all and every reader sees this site’s own look.'
+            : 'Readers pick from the ticked themes, or stay on this site’s own look, which is always the first option.'}
+      </p>
+      <p class="settings-note">
+        Saving records a version in the history below, exactly like a package or a brand edit — including, on a site with nothing
+        installed yet, the identity and arrangement it is wearing now. &ldquo;Revert to the built-in brand&rdquo; undoes all of it.
+      </p>
+      <button class="btn-primary" disabled={disabled} onClick={() => void save()}>
+        {saving ? 'Saving…' : 'Save reader themes'}
+      </button>
     </div>
   );
 }

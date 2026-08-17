@@ -360,6 +360,96 @@ export async function saveBrandForm(args: {
 }
 
 /**
+ * Save a presentation edited in the portal (AB#7412).
+ *
+ * The mirror image of saveBrandForm above, and for the same reason: the portal
+ * needed a way to change ONE presentation key — which reader themes are offered,
+ * and whether one is forced — on a deployment whose static assets nobody can
+ * reach. It writes a normal version, so it lands in the same history, rolls back
+ * with the same button, and exports as the same package.
+ *
+ * ── Why the caller sends the WHOLE presentation ─────────────────────────────
+ * `themes/active.json`'s presentation, when it is set, REPLACES the deployment's
+ * own dist/presentation.json on the serving path — a theme package states a
+ * whole arrangement, not a patch (see livePresentation in ../index.ts). So
+ * storing `{readerTheme: …}` alone would silently delete this library's nouns,
+ * its tab order and its empty-state copy the moment an operator flipped a
+ * theme switch. The obvious fix — read the asset here and merge — is not
+ * available: `env.ASSETS` exists only on Cloudflare, and the Node/Azure entry
+ * serves those files off its own disk with no binding this module can reach.
+ *
+ * The portal, on the other hand, has the live presentation already: it is
+ * injected into admin.html and it is exactly what the reader app resolves
+ * against. So the client sends the whole stated document with its one key
+ * changed, and this function stores it whole. One source, no merge, and no
+ * platform-specific read.
+ *
+ * Brand, stylesheet and icons are inherited from the live version by copy, for
+ * the reason saveBrandForm spells out: a version has to be self-contained or a
+ * rollback to it after its neighbour aged out would restore half a theme.
+ */
+export async function savePresentationForm(args: {
+  store: ContentStore;
+  env: Env;
+  presentation: Record<string, unknown>;
+  savedBy: string;
+  /** The brand to record when nothing is installed yet — the build's own. */
+  fallbackBrand?: Record<string, unknown>;
+}): Promise<{ version: ThemeVersion; active: ActiveTheme }> {
+  const { store, env, presentation, savedBy } = args;
+  const current = await readActiveTheme(store);
+  const index = await readThemeIndex(store);
+  const id = nextVersionId(index.versions);
+
+  const brand = current?.brand ?? args.fallbackBrand ?? {};
+  const inheritedCss = current ? await getText(store, themeKey.css(current.versionId)) : null;
+  const inheritedIcons: [string, Uint8Array][] = [];
+  if (current) {
+    for (const name of current.icons) {
+      const obj = await store.get(themeKey.icon(current.versionId, name));
+      if (obj) inheritedIcons.push([name, new Uint8Array(obj.body)]);
+    }
+  }
+
+  const manifest: ThemeManifest = {
+    formatVersion: 1,
+    id: String(brand.id ?? current?.themeId ?? 'brand'),
+    name: String(brand.appName ?? brand.name ?? current?.name ?? 'Brand'),
+    version: bumpForm(current?.version),
+    contractVersion: typeof brand.contractVersion === 'number' ? brand.contractVersion : 1,
+    hasPresentation: true,
+  };
+
+  await putJson(store, themeKey.manifest(id), manifest, true);
+  await putJson(store, themeKey.brand(id), brand, true);
+  await putJson(store, themeKey.presentation(id), presentation, true);
+  if (inheritedCss !== null) {
+    await store.put(themeKey.css(id), inheritedCss, { contentType: 'text/css; charset=utf-8', cacheControl: IMMUTABLE });
+  }
+  for (const [name, data] of inheritedIcons) {
+    await store.put(themeKey.icon(id, name), data, { contentType: iconContentType(name), cacheControl: IMMUTABLE });
+  }
+
+  const version: ThemeVersion = {
+    id,
+    themeId: manifest.id,
+    name: manifest.name,
+    version: manifest.version,
+    importedAt: Date.now(),
+    importedBy: savedBy,
+    source: 'form',
+    live: true,
+    bytes: 0,
+    hasPresentation: true,
+    icons: inheritedIcons.map(([n]) => n).sort(),
+  };
+
+  await writeIndexWithLive(store, env, index, version);
+  const active = await activate(store, version, brand, presentation);
+  return { version, active };
+}
+
+/**
  * Rebuild a stored version as a downloadable package.
  *
  * Rebuilt rather than kept: `buildThemePackage` is deterministic, so the bytes

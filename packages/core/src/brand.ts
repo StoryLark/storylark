@@ -58,7 +58,27 @@ const IDENTITY_KEYS = [
   'fonts',
 ] as const;
 
-type BrandIdentity = Partial<Pick<Brand, (typeof IDENTITY_KEYS)[number]>>;
+export type BrandIdentity = Partial<Pick<Brand, (typeof IDENTITY_KEYS)[number]>>;
+
+/**
+ * Just the identity keys of a brand — what a brand.json states, with the
+ * build-only fields left off.
+ *
+ * The one extractor, used by restampBrand below and by the admin portal
+ * (AB#7412), which has to hand the CURRENT identity back to the server when it
+ * saves a presentation on a deployment that has nothing installed yet. Doing
+ * that by hand at the call site would be a second list of which keys are
+ * identity, and the first time the two disagreed a save would quietly drop a
+ * tagline.
+ */
+export function brandIdentity(brand: Brand): BrandIdentity {
+  const identity: BrandIdentity = {};
+  for (const key of IDENTITY_KEYS) {
+    const value = brand[key];
+    if (value !== undefined) (identity as Record<string, unknown>)[key] = value;
+  }
+  return identity;
+}
 
 function injected(): BrandIdentity | undefined {
   const value = (globalThis as unknown as Record<string, unknown>)[BRAND_GLOBAL];
@@ -112,12 +132,7 @@ export function contentUrl(path: string): string {
 export function restampBrand(html: string, brand: Brand): string {
   const re = new RegExp(`<script id="${BRAND_SCRIPT_ID}">[\\s\\S]*?</script>`);
   if (!re.test(html)) return html;
-  const identity: BrandIdentity = {};
-  for (const key of IDENTITY_KEYS) {
-    const value = brand[key];
-    if (value !== undefined) (identity as Record<string, unknown>)[key] = value;
-  }
-  const json = JSON.stringify(identity).replace(/</g, '\\u003c');
+  const json = JSON.stringify(brandIdentity(brand)).replace(/</g, '\\u003c');
   return html
     .replace(re, `<script id="${BRAND_SCRIPT_ID}">self.${BRAND_GLOBAL}=${json};</script>`)
     .replace(/<title data-storylark-title="(app|admin)">[\s\S]*?<\/title>/, (match, kind: string) => {

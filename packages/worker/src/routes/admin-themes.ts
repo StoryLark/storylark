@@ -34,10 +34,12 @@ import {
   listThemeVersions,
   readActiveTheme,
   saveBrandForm,
+  savePresentationForm,
   themeVersionLimit,
   type ThemeSource,
 } from '../lib/theme-store';
-import { BRAND_SCHEMA, validate } from 'storylark-contracts/validate';
+import { readPresentationAsset } from '../lib/presentation';
+import { BRAND_SCHEMA, PRESENTATION_SCHEMA, validate } from 'storylark-contracts/validate';
 import { THEME_PACKAGE_LIMITS, THEME_PACKAGE_EXT } from 'storylark-contracts/theme-package';
 
 export const adminThemes = new Hono<AppContext>();
@@ -106,6 +108,14 @@ adminThemes.get('/themes', async (c) => {
           hasPresentation: active.presentation !== null,
           icons: active.icons,
           brand: active.brand,
+          /**
+           * The stored arrangement, so the portal can render its presentation
+           * controls from what the SERVER holds rather than from the copy that
+           * was injected into this page when it loaded (AB#7412). Those agree
+           * until the operator saves, and after a save the injected one is a
+           * page-reload behind.
+           */
+          presentation: active.presentation,
         }
       : null,
     /** The brand the BUILD carries — what "revert to built-in" goes back to. */
@@ -260,6 +270,80 @@ adminThemes.put('/themes/brand', async (c) => {
   const user = c.get('user');
   const result = await saveBrandForm({ store, env: c.env, brand, savedBy: user?.email ?? user?.username ?? 'cli' });
   return c.json({ ok: true, version: result.version, active: { versionId: result.active.versionId, brand: result.active.brand } });
+});
+
+/**
+ * PUT /api/admin/themes/presentation — the portal's presentation form (AB#7412).
+ *
+ * Today its one caller is the Reader themes control: which of the bundled looks
+ * this library offers, and whether one is forced on everybody. The route is not
+ * scoped to that key, because the storage, the versioning and the validation are
+ * identical for every presentation key, and a per-key endpoint would have to be
+ * written again for the next one.
+ *
+ * The body is the WHOLE presentation, not a patch — see savePresentationForm for
+ * why that is the client's job here and not the server's. It is checked twice,
+ * exactly like a package's presentation.json is: against presentation.schema.json
+ * in strict mode, and then through readPresentationAsset, which is the one filter
+ * that decides what may reach a document. A second entry point into injection
+ * would be a second answer to "which keys are presentation".
+ *
+ * `brand` is optional and is used only when this deployment has nothing
+ * installed yet: writing an active theme with an empty brand would replace the
+ * live identity with nothing, because the serving path takes the installed
+ * brand INSTEAD of dist/brand.json rather than merging with it. The portal sends
+ * the identity it was served so the save is genuinely presentation-only.
+ */
+adminThemes.put('/themes/presentation', async (c) => {
+  const store = storeOf(c);
+  if (!store) return noStore(c);
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'bad_request', message: 'Expected a JSON body with a `presentation` object.' }, 400);
+  }
+  const doc = (body ?? {}) as { presentation?: unknown; brand?: unknown };
+  if (doc.presentation === null || typeof doc.presentation !== 'object' || Array.isArray(doc.presentation)) {
+    return c.json({ error: 'bad_request', message: 'Expected a JSON body with a `presentation` object.' }, 400);
+  }
+  const presentation = doc.presentation as Record<string, unknown>;
+  if (presentation.contractVersion === undefined) presentation.contractVersion = 1;
+
+  const { errors, warnings } = validate(presentation, PRESENTATION_SCHEMA, { strict: true, label: 'presentation.json' });
+  if (errors.length) return c.json({ error: 'invalid_presentation', message: errors[0], errors, warnings }, 400);
+
+  const injectable = readPresentationAsset(JSON.stringify(presentation));
+  if (!injectable) {
+    return c.json(
+      {
+        error: 'invalid_presentation',
+        message: 'That presentation has nothing in it this engine recognises, so saving it would blank the arrangement.',
+      },
+      400
+    );
+  }
+
+  const fallbackBrand =
+    doc.brand !== null && typeof doc.brand === 'object' && !Array.isArray(doc.brand)
+      ? (doc.brand as Record<string, unknown>)
+      : undefined;
+
+  const user = c.get('user');
+  const result = await savePresentationForm({
+    store,
+    env: c.env,
+    presentation: injectable,
+    savedBy: user?.email ?? user?.username ?? 'cli',
+    fallbackBrand,
+  });
+  return c.json({
+    ok: true,
+    version: result.version,
+    warnings,
+    active: { versionId: result.active.versionId, presentation: result.active.presentation },
+  });
 });
 
 // ── shared ──────────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import { downloadStates, removeDownload, getDownloadRecords } from '../lib/downl
 import { reconcileProgress, resetProgressPushMarker } from '../lib/progress-sync';
 import { syncNow, setAutoDownloadBaseline, downloadsNewUnitsOnly } from '../lib/autosync';
 import { passkeysSupported, addPasskey, PasskeyCanceledError } from '../lib/webauthn';
+import { BRAND_LOOK, resolveReaderTheme } from '../lib/reader-themes';
 import { syncWakeLock } from '../lib/player';
 
 /**
@@ -191,17 +192,80 @@ function TypographySection(): JSX.Element {
           </label>
         </>
       )}
-      {PRESENTATION.settings.theme && (
-        <label class="settings-row">
-          <span>Theme</span>
-          <select value={s.theme} onChange={(e) => void saveSettings({ theme: (e.target as HTMLSelectElement).value as 'dark' | 'light' | 'auto' })}>
-            <option value="auto">Brand default</option>
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
-          </select>
-        </label>
-      )}
+      {PRESENTATION.settings.theme && <ThemeControls />}
     </section>
+  );
+}
+
+/**
+ * The Theme control: which LOOK, and light or dark within it (AB#7412).
+ *
+ * Two rows rather than one, because they answer two different questions and
+ * always did — the old single row only looked like one question because there
+ * was exactly one look. "Brand default" moved off the light/dark row and onto
+ * the look row, where it now means what it says: this library's own theme.css.
+ * The light/dark row's first entry is "Theme default", which is the same
+ * behaviour under a name that stays true once a look other than the brand's is
+ * active.
+ *
+ * Both rows are gated by `settings.theme` together. Splitting them would let a
+ * brand offer a palette swap while refusing a light/dark override, which is not
+ * a coherent position: the looks carry both.
+ */
+function ThemeControls(): JSX.Element {
+  const s = settings.value;
+  const resolved = resolveReaderTheme(PRESENTATION.readerTheme, s.readerTheme);
+  return (
+    <>
+      {resolved.forced && resolved.active ? (
+        // Fixed, not disabled-and-preselected: a greyed-out select invites the
+        // reader to keep trying it. This says who decided, which is the only
+        // useful thing to say.
+        <>
+          <div class="settings-row">
+            <span>Theme</span>
+            <span>{resolved.active.label}</span>
+          </div>
+          <p class="settings-note">
+            {resolved.active.blurb} This {NOUNS.collection ?? 'library'} sets the theme for everyone; you can still choose light or
+            dark below.
+          </p>
+        </>
+      ) : (
+        resolved.options.length > 0 && (
+          <>
+            <label class="settings-row">
+              <span>Theme</span>
+              <select
+                value={s.readerTheme}
+                onChange={(e) => void saveSettings({ readerTheme: (e.target as HTMLSelectElement).value })}
+              >
+                <option value={BRAND_LOOK}>Brand default</option>
+                {resolved.options.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p class="settings-note">
+              {resolved.active
+                ? resolved.active.blurb
+                : `The colours and lettering this ${NOUNS.collection ?? 'library'} was designed in.`}{' '}
+              This only changes how the app looks to you, on your account — nothing else about it moves.
+            </p>
+          </>
+        )
+      )}
+      <label class="settings-row">
+        <span>Light or dark</span>
+        <select value={s.theme} onChange={(e) => void saveSettings({ theme: (e.target as HTMLSelectElement).value as 'dark' | 'light' | 'auto' })}>
+          <option value="auto">Theme default</option>
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </label>
+    </>
   );
 }
 

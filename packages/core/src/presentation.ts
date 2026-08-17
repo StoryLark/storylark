@@ -56,6 +56,7 @@
 // "surprising and undocumented"; this is where it stops being implicit.
 
 import fallback from 'virtual:storylark-presentation';
+import { DEFAULT_READER_THEME } from './lib/reader-themes';
 import type {
   ContentNouns,
   FeatureConfig,
@@ -158,6 +159,13 @@ export const DEFAULT_PRESENTATION: Presentation = {
   // the library.
   auth: { required: false },
 
+  // The bundled sample looks a reader may pick between (AB#7412). The one
+  // default in this object that does NOT reproduce pre-phase behaviour, because
+  // what it turns on is an OFFER rather than a change — see the comment on
+  // DEFAULT_READER_THEME in lib/reader-themes.ts, which is where the reasoning
+  // and the escape hatch are written down.
+  readerTheme: DEFAULT_READER_THEME,
+
   // Every settings control the screen has ever offered.
   settings: {
     typography: true,
@@ -219,6 +227,7 @@ const GROUPS = [
   'cover',
   'detail',
   'auth',
+  'readerTheme',
   'settings',
   'download',
   'emptyState',

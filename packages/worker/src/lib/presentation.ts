@@ -115,6 +115,7 @@ const KNOWN_KEYS: Record<string, 'object' | 'scalar' | 'open'> = {
   cover: 'object',
   detail: 'object',
   auth: 'object',
+  readerTheme: 'object',
   settings: 'object',
   download: 'object',
   emptyState: 'object',
