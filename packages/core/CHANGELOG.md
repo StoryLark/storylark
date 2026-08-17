@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.17.1
+
+### Patch Changes
+
+- Sync the in-app roadmap (shown on the About screen) with the real
+  shipped state — it had drifted badly behind storylark.org's own copy,
+  still describing the removed GitHub-Actions self-update flow and
+  missing everything shipped since roughly 0.9.0.
+
 ## 0.17.0
 
 ### Minor Changes
