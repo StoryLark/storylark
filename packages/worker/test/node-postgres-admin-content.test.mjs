@@ -20,36 +20,33 @@
 // that isn't genuinely reached by an authenticated request will 401 here.
 //
 // ── Running it ──────────────────────────────────────────────────────────────
-// Point it at any Postgres. It creates its own throwaway database and drops it.
+// This used to require an external `STORYLARK_TEST_POSTGRES` connection string.
+// It no longer does: it starts its own throwaway PostgreSQL via
+// ./postgres-server.mjs — the real native server when one is installed, and the
+// real (WASM) PostgreSQL engine `@electric-sql/pglite` behind a real TCP socket
+// otherwise, which is already a committed devDependency. Either way the `pg`
+// client, the real Postgres driver and the real shipped migration runner are
+// none the wiser, so this runs with zero external setup, the same way
+// node-http-readonly.test.mjs already does.
 //
-//   docker run -d --name slk-pg -e POSTGRES_PASSWORD=storylark \
-//     -e POSTGRES_DB=storylark -p 55432:5432 postgres:16-alpine
-//   STORYLARK_TEST_POSTGRES="postgres://postgres:storylark@127.0.0.1:55432/postgres" \
-//     node --import tsx/esm --test packages/worker/test/node-postgres-admin-content.test.mjs
+//   node --import tsx/esm --test packages/worker/test/node-postgres-admin-content.test.mjs
 //
-// Without that variable the whole file skips, loudly, rather than passing on a
-// mock and claiming the Node path is covered when it isn't.
+// If neither PostgreSQL engine is available, the whole file skips, loudly,
+// rather than passing on a mock and claiming the Node path is covered when it
+// isn't — see postgres-server.mjs for the exact reason it prints.
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import pg from 'pg';
 
-const run = promisify(execFile);
-const HERE = dirname(fileURLToPath(import.meta.url));
-const WORKER = join(HERE, '..');
+import { startPostgres, migrate } from './postgres-server.mjs';
 
-const ADMIN_URL = process.env.STORYLARK_TEST_POSTGRES ?? '';
-const skip = ADMIN_URL
-  ? false
-  : 'set STORYLARK_TEST_POSTGRES to a Postgres connection string (see the header) to run the Node/Azure end-to-end path';
+const { server: postgres, reason } = await startPostgres();
+const skip = postgres ? false : reason;
 
-const DB_NAME = `storylark_test_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
 const ADMIN_KEY = 'test-admin-key-not-a-secret';
 
 let ctx = null;
@@ -57,26 +54,17 @@ let ctx = null;
 before(async () => {
   if (skip) return;
 
-  // A throwaway database per run, so a failed run can never leave state that
-  // makes the next one pass (or fail) for the wrong reason.
-  const admin = new pg.Client({ connectionString: ADMIN_URL });
-  await admin.connect();
-  await admin.query(`CREATE DATABASE ${DB_NAME}`);
-  await admin.end();
-
-  const url = ADMIN_URL.replace(/\/[^/?]*(\?|$)/, `/${DB_NAME}$1`);
-
   // The real migration runner, the real migration set — the same command the
   // Azure installer runs. If a migration is broken on Postgres, this is where
   // it shows up, which is most of the point of testing against a real engine.
-  await run(process.execPath, [join(WORKER, 'migrate-postgres.mjs'), `--connection-string=${url}`]);
+  await migrate(postgres.connectionString);
 
   const { app } = await import('../src/index.ts');
   const { postgresDatabase } = await import('../src/db/postgres.ts');
   const { localContentStore } = await import('../../../platforms/azure/content-store.mjs');
 
   const contentDir = await mkdtemp(join(tmpdir(), 'storylark-pg-content-'));
-  const db = postgresDatabase(url);
+  const db = postgresDatabase(postgres.connectionString);
 
   // Bound exactly as platforms/azure/server.mjs binds it.
   const env = {
@@ -113,17 +101,14 @@ before(async () => {
     return { status: res.status, json, text };
   }
 
-  ctx = { url, db, env, call, contentDir, cookieOf: () => cookie, clearCookie: () => (cookie = '') };
+  ctx = { url: postgres.connectionString, db, env, call, contentDir, cookieOf: () => cookie, clearCookie: () => (cookie = '') };
 });
 
 after(async () => {
   if (skip || !ctx) return;
   await ctx.db.close?.();
   await rm(ctx.contentDir, { recursive: true, force: true });
-  const admin = new pg.Client({ connectionString: ADMIN_URL });
-  await admin.connect();
-  await admin.query(`DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)`);
-  await admin.end();
+  await postgres.stop();
 });
 
 test('the admin content routes are shut to an anonymous caller on the Node path', { skip }, async () => {
