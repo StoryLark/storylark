@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.17.0
+
+### Minor Changes
+
+- [`267dd3a`](https://github.com/StoryLark/storylark/commit/267dd3a8e07a4c42d81820bd6708ad07a76695c5) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - Readers can choose one of the gallery's sample themes, and an admin can force
+  one (AB#7412).
+
+  The Settings screen's Theme control offered light, dark, and "brand default" —
+  three views of one stylesheet. It now offers the five looks this engine already
+  ships (Daybreak, Loveletter, Nebula, Weatherglass, Wireless) alongside the
+  library's own, with light and dark still working inside whichever one is
+  active.
+
+  This is deliberately NOT the existing "one imported brand per deployment"
+  system, and the two do not touch. A look is the CSS custom-property values —
+  the colours and the font stacks — of one of the sample brands, applied as
+  inline properties on `<html>` for that one reader. It never reaches the app
+  name, the icons, the PWA manifest, `themes/active.json`, or any other reader.
+  Switching back to the library's own look removes every property it set, so the
+  deployment's `theme.css` is unopposed again. The values are flattened from the
+  real `brands/*/theme.css` and a test re-parses those stylesheets and fails if a
+  single token has drifted, so a designer retuning a sample brand cannot leave
+  the bundle quietly disagreeing with the theme it is named after.
+
+  The offer is a new presentation key, `readerTheme`, with `options` (which looks
+  are offered — `[]` removes the picker) and `forced` (fix one for everyone).
+  Forcing genuinely overrides a reader's saved preference rather than hiding the
+  control while a stale value carries on applying, and it is applied before the
+  first paint rather than after storage has been read, so a forced deployment
+  does not flash its own palette first.
+
+  `readerTheme` is the one presentation key whose default is not "what the app
+  did before it existed": all five looks are offered out of the box, because what
+  it turns on is an offer — the picker's first entry is the library's own look,
+  selected — and nothing about an existing deployment changes until a reader
+  changes it. `{"readerTheme": {"options": []}}` opts out, and
+  `{"settings": {"theme": false}}` removes the whole control as before.
+
+  Operators set both from the admin portal's Brand & themes card, through a new
+  `PUT /api/admin/themes/presentation` that writes a normal theme version — same
+  history, same one-click rollback, same downloadable package. `GET
+/api/admin/themes` now also returns the installed `presentation`, so the portal
+  renders from what the server holds rather than from the copy injected into the
+  page when it loaded.
+
+### Patch Changes
+
+- [`c375711`](https://github.com/StoryLark/storylark/commit/c37571156dbe0179a9585952c533c09bab579b93) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - Polish the admin portal's Narration card (AB#7412 follow-up).
+
+  Two real gaps, not cosmetic ones: when every job was `pending`/`running` count
+  was zero but one or more had actually `failed`, the card said "Nothing is
+  waiting. Every chapter's audio matches its text." directly above a list of
+  failed jobs waiting to be retried — true and false in the same breath. It now
+  says a failed chapter is waiting on a retry instead. And each job's row showed
+  only the finished audio's own duration; the time the synthesis actually took
+  (`elapsedMs`, already returned by `GET /api/admin/narration` but never read by
+  the card) was invisible, so there was no way to tell a normal narration from a
+  slow one. Done jobs now show both — "took Xs to narrate · Ym of audio" — and a
+  `running` job shows how long it has been running, computed from `startedAt`,
+  so a job stuck near the 30-minute stale-claim window is visible before it gets
+  reclaimed rather than after.
+
+  Also brings this card in line with every other admin screen's pattern
+  (`ContentSection.tsx`, `ThemeSection.tsx`): success and failure messages are
+  now separate pieces of state, so a failed action (a queue request, a cancel)
+  renders in the same `admin-error` red the rest of the portal uses instead of
+  sharing a plain paragraph with ordinary status text.
+
+- Updated dependencies [[`267dd3a`](https://github.com/StoryLark/storylark/commit/267dd3a8e07a4c42d81820bd6708ad07a76695c5)]:
+  - storylark-contracts@0.4.0
+
 ## 0.16.0
 
 ### Minor Changes
