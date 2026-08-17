@@ -86,6 +86,21 @@ try {
   );
 }
 
+// Installed engine packages (AB#7418 — the platform-agnostic "Update now")
+// arrived in storylark-worker 0.18.0. Same dynamic-import reasoning as the
+// blocks above: an older worker package must keep serving the build's own
+// assets rather than refuse to start. With this absent, the portal's update
+// falls back to the platform self-deploy below (which still works), and the
+// build's dist/ is what gets served.
+let engineLib = null;
+try {
+  engineLib = await import('storylark-worker/lib/engine-store');
+} catch {
+  console.warn(
+    'storylark: this storylark-worker has no lib/engine-store (needs >= 0.18.0). Engine releases install via the platform deploy path only.'
+  );
+}
+
 // One-click updates (AB#7418 — plan §4 layer 3 / §0d Phase 5). Node-only by
 // nature: it reads this process's own site directory, zips it and posts it to
 // its own Kudu endpoint, none of which exists in a Worker. That is exactly why
@@ -149,6 +164,9 @@ const env = {
   // Theme packages (AB#7417). Same storage as content editing — an imported
   // theme is data the deployment holds, not part of its build.
   THEME_VERSIONS: process.env.THEME_VERSIONS ?? '',
+  // Installed engine packages (AB#7418). Same storage as content editing and
+  // themes — an installed engine is data the deployment holds, not its build.
+  ENGINE_VERSIONS: process.env.ENGINE_VERSIONS ?? '',
   // One-click updates (AB#7418). Null unless this app has a managed identity
   // that Kudu accepts; the route reports the reason it is null rather than
   // pretending the feature does not exist.
@@ -267,17 +285,51 @@ async function livePresentation() {
 }
 
 /**
- * The curated font registry, read once. Engine data emitted by the site build
- * (dist/fonts.json), so it can only change when the site is rebuilt — and a new
- * site build on App Service means a new process.
+ * The engine this deployment has installed (AB#7418), read from its own
+ * writable storage — the Cloudflare Worker resolves this identically
+ * (packages/worker/src/index.ts) against the same ContentStore seam, which is
+ * what makes the portal's "Update now" one code path on both platforms.
+ *
+ * Resolved once per request and served consistently from that one version —
+ * the atomic-flip rule. What IS cached, briefly, is the NEGATIVE — and the
+ * cache is engine-store's own (readActiveEngineCached), shared with the
+ * /update-install route running in this same process, so an install resets it
+ * in the same breath and the operator sees the flip immediately. Hashed-asset
+ * requests additionally get a fresh re-check in the SPA fallback below — the
+ * same policy, and the same reasoning, as the Cloudflare worker's serveAsset.
  */
-let fontRegistry;
-async function fonts() {
-  if (fontRegistry === undefined && brandLib) {
-    const text = await readFile(`${staticRoot}/fonts.json`, 'utf8').catch(() => null);
-    fontRegistry = text === null ? null : (brandLib.readFontRegistry(text) ?? null);
+async function activeEngine({ fresh = false } = {}) {
+  if (!engineLib || !contentStore) return undefined;
+  try {
+    return (await engineLib.readActiveEngineCached(contentStore, { fresh })) ?? undefined;
+  } catch (err) {
+    console.warn(`storylark: could not read the installed engine (${err.message}) — serving the build's own assets.`);
+    return undefined;
   }
-  return fontRegistry ?? undefined;
+}
+
+/** One installed-engine file as text, or null. */
+async function engineText(active, name) {
+  if (!active?.files?.includes(name)) return null;
+  const file = await engineLib.readEngineFile(contentStore, active.versionId, name);
+  return file ? new TextDecoder().decode(file.body) : null;
+}
+
+/**
+ * The curated font registry. Engine data emitted by the site build
+ * (dist/fonts.json) — but since AB#7418 an INSTALLED engine can replace it
+ * without a new process, so the memo is keyed by which engine is active rather
+ * than being read once.
+ */
+let fontRegistryCache = null;
+async function fonts() {
+  if (!brandLib) return undefined;
+  const active = await activeEngine();
+  const key = active?.versionId ?? 'build';
+  if (fontRegistryCache?.key === key) return fontRegistryCache.registry ?? undefined;
+  const text = (await engineText(active, 'fonts.json')) ?? (await readFile(`${staticRoot}/fonts.json`, 'utf8').catch(() => null));
+  fontRegistryCache = { key, registry: text === null ? null : (brandLib.readFontRegistry(text) ?? null) };
+  return fontRegistryCache.registry ?? undefined;
 }
 
 /** An HTML document, with the deployment config, the live brand and the live presentation stamped in. */
@@ -300,12 +352,33 @@ async function html(name) {
   }
   return htmlCache.get(name);
 }
+/**
+ * A document, preferring the INSTALLED engine's copy over the build's
+ * (AB#7418). Cached per engine version + name, because an install or a
+ * rollback must take effect on the next request, and the build cache above has
+ * no version to key on.
+ */
+const engineHtmlCache = new Map();
+async function shell(name) {
+  const active = await activeEngine();
+  if (active?.files?.includes(name)) {
+    const key = `${active.versionId}:${name}`;
+    if (!engineHtmlCache.has(key)) {
+      engineHtmlCache.set(key, await engineText(active, name));
+      // Bounded: two documents per version, five versions kept. Clear on growth.
+      if (engineHtmlCache.size > 16) engineHtmlCache.clear();
+    }
+    const body = engineHtmlCache.get(key);
+    if (body !== null) return body;
+  }
+  return html(name);
+}
 app.get('/admin', async (c) => {
   // Falls back to the app shell — what /admin did before the portal became
   // its own page — if a build from an older storylark-core has no admin.html.
   // This process serves assets it didn't build, so the two can legitimately
   // be a version apart mid-update; a 500 there would be the wrong answer.
-  return document(c, (await html('admin.html')) ?? (await html('index.html')));
+  return document(c, (await shell('admin.html')) ?? (await shell('index.html')));
 });
 app.get('/admin/', (c) => c.redirect('/admin', 307));
 app.get('/admin.html', (c) => c.redirect('/admin', 307));
@@ -315,7 +388,7 @@ app.get('/admin.html', (c) => c.redirect('/admin', 307));
 // single most-requested URL on the site. `/index.html` redirects to `/` for the
 // same reason plus parity — Cloudflare's default html_handling already does it,
 // so there is one canonical URL for the shell on both platforms.
-app.get('/', async (c) => document(c, await html('index.html')));
+app.get('/', async (c) => document(c, await shell('index.html')));
 app.get('/index.html', (c) => c.redirect('/', 307));
 
 // The service worker gets the same deployment config as the documents, as a
@@ -324,7 +397,10 @@ app.get('/index.html', (c) => c.redirect('/', 307));
 // script itself is the only place to put it. Registered ahead of serveStatic,
 // which would otherwise serve the built file untouched.
 app.get('/sw.js', async (c) => {
-  const js = await readFile(`${staticRoot}/sw.js`, 'utf8').catch(() => null);
+  // The installed engine's service worker wins over the build's (AB#7418) —
+  // it references the engine's own hashed assets, so the pair must move as one.
+  const js =
+    (await engineText(await activeEngine(), 'sw.js')) ?? (await readFile(`${staticRoot}/sw.js`, 'utf8').catch(() => null));
   if (js === null) return c.notFound();
   c.header('Content-Type', 'text/javascript; charset=utf-8');
   c.header('Cache-Control', 'no-store');
@@ -400,13 +476,55 @@ app.get('/manifest.webmanifest', async (c) => {
   });
 });
 
+// Hashed assets from the installed engine (AB#7418), claimed before
+// serveStatic for the reason `/`, `/theme.css` and `/icons/*` are: an
+// installed engine's bundle lives in storage, not on this disk. Serves the
+// ACTIVE version's file when it has one; a miss falls back to the version
+// HISTORY (a client that loaded the previous version's HTML mid-update still
+// needs that version's assets), and only then to the build on disk via next().
+app.get('/assets/:name{.+}', async (c, next) => {
+  const active = await activeEngine();
+  if (!active) return next();
+  const rel = `assets/${c.req.param('name')}`;
+  const file = active.files.includes(rel)
+    ? await engineLib.readEngineFile(contentStore, active.versionId, rel)
+    : await engineLib.findEngineAsset(contentStore, rel);
+  if (!file) return next();
+  c.header('Content-Type', file.contentType);
+  c.header('Cache-Control', 'public, max-age=31536000, immutable');
+  return c.body(file.body);
+});
+
 app.use('/*', serveStatic({ root: staticRoot }));
 // SPA fallback for the reader app: Cloudflare's Workers+Assets binding does
 // this natively (not_found_handling: "single-page-application" in
 // wrangler.jsonc) — the Node server needs it spelled out. Without this, any
 // client-side route (e.g. /library/<id>, /read/<book>/<chapter>) 404s instead
 // of serving the app shell and letting the router take over.
-app.get('*', async (c) => document(c, await html('index.html')));
+app.get('*', async (c) => {
+  // A hashed-asset request that fell all the way through means neither the
+  // engine store (as this process last saw it) nor the disk has the file.
+  // Re-check the store FRESH before answering with the shell — an engine may
+  // have been installed seconds ago, inside this process or outside it, and
+  // this client's new HTML is asking for the new bundle. Same net as the
+  // Cloudflare worker's serveAsset.
+  const path = new URL(c.req.url).pathname;
+  if (path.startsWith('/assets/') && engineLib && contentStore) {
+    const fresh = await activeEngine({ fresh: true });
+    if (fresh) {
+      const rel = path.replace(/^\/+/, '');
+      const file = fresh.files.includes(rel)
+        ? await engineLib.readEngineFile(contentStore, fresh.versionId, rel)
+        : await engineLib.findEngineAsset(contentStore, rel);
+      if (file) {
+        c.header('Content-Type', file.contentType);
+        c.header('Cache-Control', 'public, max-age=31536000, immutable');
+        return c.body(file.body);
+      }
+    }
+  }
+  return document(c, await shell('index.html'));
+});
 
 const port = Number(process.env.PORT ?? 8787);
 serve({ fetch: app.fetch, port }, (info) => {

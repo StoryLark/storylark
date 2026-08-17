@@ -57,10 +57,8 @@ interface UpdateStatusResponse {
   updateCommand?: string;
   updateDocsUrl?: string;
   /**
-   * Layer 3 (AB#7418). Optional for the same reason as the three above — a
-   * newer portal can be talking to an older worker — and `available: false`
-   * with a reason is the NORMAL answer, not an error. The card below renders
-   * the command in every case and adds a button only when this says it can.
+   * Pre-engine-store shape (AB#7418, first cut). Kept for a portal talking to
+   * an older worker; the fields below supersede it when present.
    */
   oneClick?: {
     available: boolean;
@@ -71,12 +69,59 @@ interface UpdateStatusResponse {
     reason?: string;
     detail?: string;
   };
+  /** What the latest release is, in both packages' terms (engine-store worker). */
+  release?: {
+    coreLatest: string;
+    coreCurrent: string | null;
+    workerLatest: string;
+    workerCurrent: string;
+    serverChanged: boolean;
+  };
+  /**
+   * The one answer the button needs (AB#7418, engine store): can "Update now"
+   * apply the latest release here, yes or no. Which mechanism does the work is
+   * the worker's business, not this card's — `available: false` happens only
+   * in the one degraded state left (the release changes the API server and
+   * this deployment has no permission to redeploy itself), and then `reason`
+   * says so in the operator's terms.
+   */
+  updateNow?: {
+    available: boolean;
+    mechanism?: 'engine-store' | 'platform-deploy';
+    reason?: string;
+  };
+  /** The installed-engine state, for the version line and the rollback list. */
+  engine?: {
+    storeAvailable: boolean;
+    active: {
+      versionId: string;
+      coreVersion: string;
+      workerVersion: string;
+      installedAt: number;
+      installedBy: string;
+      sha256: string;
+    } | null;
+    versions: EngineVersionRow[];
+    versionLimit: number;
+  };
+}
+
+interface EngineVersionRow {
+  id: string;
+  coreVersion: string;
+  workerVersion: string;
+  installedAt: number;
+  installedBy: string;
+  source: string;
+  live: boolean;
+  bytes: number;
 }
 
 /** What POST /update-install answers with. */
 interface UpdateInstallResponse {
   ok?: boolean;
   installed?: string;
+  mechanism?: 'engine-store' | 'platform-deploy';
   message?: string;
   error?: string;
   log?: string[];
@@ -498,22 +543,22 @@ function StatusSection({ status }: { status: StatusResponse | null }): JSX.Eleme
 }
 
 /**
- * Platform update (AB#7403, extended AB#7418). This card always tells you where
- * you stand and always hands you the command that does the work. What it adds
- * ON TOP, and only where the operator has deliberately enabled it, is the
- * button: layer 3, an in-portal update that downloads a prebuilt engine and
- * hands it to the platform this site already runs on.
+ * Platform update (AB#7403, reworked AB#7418). Three things, identical on every
+ * platform: a notice when a release is available, "Check for updates", and
+ * "Update now" — which works with zero setup, because the common case installs
+ * through the deployment's own storage (the engine store) and the rest rides a
+ * self-deploy permission the installer provisions as part of a normal install.
+ * Which mechanism a given release takes is the worker's business; this card
+ * never asks the operator to care.
  *
- * The command never goes away when the button appears, and that is deliberate.
- * The button depends on a permission that can be revoked, a release artifact
- * that might not exist for a given version, and a platform API that can be
- * having a bad day; the command depends on none of those. It is the floor, and
- * a card that hid it as soon as something fancier was configured would be
- * hiding the thing that always works.
- *
- * With one-click NOT configured — which is the default and the recommended
- * posture — this renders exactly what it rendered before AB#7418, plus one line
- * saying the feature exists and how to turn it on.
+ * The command never goes away, and that is deliberate. The button depends on a
+ * release artifact existing, storage answering, and (for server releases) a
+ * platform API having a good day; the command depends on none of those. It is
+ * the floor, and a card that hid it as soon as something fancier existed would
+ * be hiding the thing that always works. But it is documentation and an escape
+ * hatch — never the only option offered, except in the ONE degraded state left:
+ * a release that changes the API server on a deployment whose self-update was
+ * disabled or predates automatic setup. Then the card says so plainly.
  */
 const UPDATE_DOCS_URL = 'https://storylark.org/docs/updating.html';
 
@@ -528,8 +573,25 @@ function UpdateSection({
   const [installing, setInstalling] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [busyVersion, setBusyVersion] = useState('');
+  const [engineMessage, setEngineMessage] = useState('');
   const [result, setResult] = useState<UpdateInstallResponse | null>(null);
   const oneClick = updateStatus?.oneClick;
+  // A worker with the engine store answers `updateNow`; an older one only has
+  // `oneClick`. One derived answer, so the rest of the card has one question.
+  const canUpdateNow = updateStatus?.updateNow ? updateStatus.updateNow.available : (oneClick?.available ?? false);
+  const degradedReason = updateStatus?.updateNow
+    ? updateStatus.updateNow.available
+      ? undefined
+      : (updateStatus.updateNow.reason ?? 'Self-update is off for this deployment.')
+    : oneClick && !oneClick.available
+      ? oneClick.reason
+      : undefined;
+  // The release identity an operator sees: the engine (core) version when the
+  // worker states it, else the worker version older workers reported.
+  const latestShown = updateStatus?.release?.coreLatest ?? updateStatus?.latest ?? '';
+  const currentShown = updateStatus?.release?.coreCurrent ?? updateStatus?.current ?? '';
+  const engine = updateStatus?.engine;
 
   async function check() {
     setChecking(true);
@@ -547,12 +609,45 @@ function UpdateSection({
     try {
       const res = await adminFetch<UpdateInstallResponse>('/update-install', { method: 'POST', body: JSON.stringify({}) });
       setResult(res);
+      await onCheck();
     } catch (err) {
       setResult({ error: 'failed', message: errorText(err, 'The update could not be installed.') });
     } finally {
       setInstalling(false);
     }
   }
+
+  async function rollback(versionId: string) {
+    setBusyVersion(versionId);
+    setEngineMessage('');
+    try {
+      const res = await adminFetch<{ ok: boolean; active: { coreVersion: string } }>(
+        `/engine/versions/${encodeURIComponent(versionId)}/activate`,
+        { method: 'POST', body: JSON.stringify({}) }
+      );
+      setEngineMessage(`Now serving engine ${res.active.coreVersion}.`);
+      await onCheck();
+    } catch (err) {
+      setEngineMessage(errorText(err, 'Roll back failed.'));
+    } finally {
+      setBusyVersion('');
+    }
+  }
+
+  async function wearTheBuild() {
+    setBusyVersion('build');
+    setEngineMessage('');
+    try {
+      await adminFetch('/engine/active', { method: 'DELETE' });
+      setEngineMessage('Back to the engine this deployment was built with. The version history is untouched.');
+      await onCheck();
+    } catch (err) {
+      setEngineMessage(errorText(err, 'Could not clear the installed engine.'));
+    } finally {
+      setBusyVersion('');
+    }
+  }
+
   // Falls back to the generic form when talking to a worker that predates
   // AB#7403's response fields — still a correct instruction, just without the
   // platform already filled in.
@@ -581,11 +676,11 @@ function UpdateSection({
       ) : (
         <>
           <p class="settings-note">
-            Running <strong>{updateStatus.current}</strong>
+            Running <strong>{currentShown || updateStatus.current}</strong>
             {updateStatus.hasUpdate ? (
               <>
                 {' '}
-                — <strong>{updateStatus.latest}</strong> is available.{' '}
+                — <strong>{latestShown}</strong> is available.{' '}
                 <a href={updateStatus.releaseNotesUrl} target="_blank" rel="noreferrer">
                   Release notes
                 </a>
@@ -594,35 +689,38 @@ function UpdateSection({
               ' — up to date.'
             )}
           </p>
-          {/* Layer 3, when and only when the operator turned it on. */}
-          {oneClick?.available && updateStatus.hasUpdate && !result && (
+          {/* The button. Always offered when it can complete the update; the
+              one state where it can't is explained below instead. */}
+          {canUpdateNow && updateStatus.hasUpdate && !result && (
             <div class="admin-oneclick">
               {!confirming ? (
                 <button class="btn" disabled={installing} onClick={() => setConfirming(true)}>
-                  Install update
+                  Update now
                 </button>
               ) : (
                 <>
                   <p class="settings-note">
-                    This downloads the prebuilt <strong>{updateStatus.latest}</strong> engine, checks it against its published
-                    checksum, applies any database migrations, and redeploys this site through {oneClick.credential}. Your brand,
-                    your theme and your content are not touched.
+                    This downloads the <strong>{latestShown}</strong> release, checks it against its published checksum, applies
+                    any database migrations, and switches this site over. Your brand, your theme and your content are not
+                    touched, and you can roll back from this card afterwards.
                   </p>
                   <button class="btn" disabled={installing} onClick={install}>
-                    {installing ? 'Installing…' : `Yes — install ${updateStatus.latest}`}
+                    {installing ? 'Updating…' : `Yes — update to ${latestShown}`}
                   </button>{' '}
                   <button class="btn-ghost" disabled={installing} onClick={() => setConfirming(false)}>
                     Cancel
                   </button>
                 </>
               )}
-              {!confirming && <p class="settings-note">Deployed by {oneClick.credential}.</p>}
             </div>
+          )}
+          {updateStatus.hasUpdate && !canUpdateNow && degradedReason && (
+            <p class="settings-note admin-error">{degradedReason}</p>
           )}
           {result && (
             <div class="admin-oneclick">
               <p class={`settings-note${result.ok ? '' : ' admin-error'}`}>
-                {result.ok ? `Installed ${result.installed}. ${result.message ?? ''}` : (result.message ?? 'The update failed.')}
+                {result.ok ? `Updated to ${result.installed}. ${result.message ?? ''}` : (result.message ?? 'The update failed.')}
               </p>
               {/* The log is the receipt. Shown on success as well as failure —
                   "what did that button just do to my site" deserves an answer
@@ -631,9 +729,43 @@ function UpdateSection({
             </div>
           )}
 
+          {/* The installed-engine state: what is serving, and the way back. */}
+          {engine?.active && (
+            <p class="settings-note">
+              Serving installed engine <strong>{engine.active.coreVersion}</strong> — installed{' '}
+              {new Date(engine.active.installedAt).toLocaleString()} by {engine.active.installedBy}.{' '}
+              <button class="btn-ghost" disabled={!!busyVersion} onClick={() => void wearTheBuild()}>
+                Serve the built-in engine instead
+              </button>
+            </p>
+          )}
+          {engine && engine.versions.length > 0 && (
+            <div class="admin-revisions">
+              <h3>Engine versions</h3>
+              <p class="settings-note">
+                The last {engine.versionLimit} installed engines are kept, and whichever one is live is never aged out. Rolling
+                back restores exactly the bytes that were installed — no download, no redeploy.
+              </p>
+              <ul class="admin-status-list">
+                {engine.versions.map((v) => (
+                  <li key={v.id}>
+                    {v.live ? '● ' : '○ '}
+                    <strong>{v.coreVersion}</strong> — {new Date(v.installedAt).toLocaleString()} by {v.installedBy}{' '}
+                    {!v.live && (
+                      <button class="btn-ghost" disabled={!!busyVersion} onClick={() => void rollback(v.id)}>
+                        {busyVersion === v.id ? 'Rolling back…' : 'Roll back to this'}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {engineMessage && <p class="settings-note">{engineMessage}</p>}
+
           <p class="settings-note">
             {updateStatus.hasUpdate
-              ? `${oneClick?.available ? 'You can also take it' : 'To take it'}, run this from your copy of the site, on the machine you deploy from:`
+              ? `${canUpdateNow ? 'You can also take it' : 'To take it'}, run this from your copy of the site, on the machine you deploy from:`
               : 'When there is one, you take it by running this from your copy of the site, on the machine you deploy from:'}
           </p>
           <pre class="admin-command">{command}</pre>
@@ -642,15 +774,11 @@ function UpdateSection({
           </button>
           <p class="settings-note">
             It pulls the new engine, migrates, rebuilds with your brand untouched, and redeploys — using the platform login
-            you already have.{' '}
-            {oneClick?.available
-              ? 'This works whether or not one-click updates are enabled, and needs nothing stored on the site.'
-              : 'This site stores no credential that could update itself.'}{' '}
+            you already have. It works whatever state the button is in, and stores nothing on the site.{' '}
             <a href={updateStatus.updateDocsUrl ?? UPDATE_DOCS_URL} target="_blank" rel="noreferrer">
               How updating works
             </a>
           </p>
-          {oneClick && !oneClick.available && oneClick.reason && <p class="settings-note">{oneClick.reason}</p>}
         </>
       )}
     </section>

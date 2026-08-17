@@ -99,14 +99,14 @@ export function azureSelfDeploy(env, opts = {}) {
     return {
       target: null,
       reason:
-        'One-click updates are an Azure App Service feature and this process is not running on App Service (no WEBSITE_SITE_NAME). Updates run from your own machine with the installer command.',
+        'Redeploying this app from the portal is an Azure App Service feature and this process is not running on App Service (no WEBSITE_SITE_NAME). Releases that change the API server run from your own machine with the installer command; engine releases update from the portal regardless.',
     };
   }
   if (!identityEndpoint || !identityHeader) {
     return {
       target: null,
       reason:
-        'One-click updates are off. They need a managed identity on this Web App with permission to deploy it — run `node platforms/azure/install.mjs --enable-one-click --yes` from your copy of the site. It grants the app that permission and stores no credential anywhere.',
+        'Self-update is off for releases that change the API server: it needs a managed identity on this Web App with permission to deploy it — run `node platforms/azure/install.mjs --enable-one-click --yes` from your copy of the site (a normal --deploy/--update sets this up automatically now). It grants the app that permission and stores no credential anywhere. Engine releases update from the portal regardless.',
     };
   }
 

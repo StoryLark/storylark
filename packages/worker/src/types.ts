@@ -30,6 +30,8 @@ export interface Env {
   CONTENT_MAX_UPLOAD_BYTES?: string;
   /** Theme versions kept for rollback (AB#7417 — plan §0c). Default 5; see lib/theme-store.ts. */
   THEME_VERSIONS?: string;
+  /** Engine versions kept for rollback (AB#7418). Default 5, floor 2; see lib/engine-store.ts. */
+  ENGINE_VERSIONS?: string;
   ASSETS: Fetcher;
   BRAND: string;
   APP_ORIGIN: string;

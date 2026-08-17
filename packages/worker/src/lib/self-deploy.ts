@@ -82,8 +82,11 @@ export function resolveSelfDeploy(env: Env): { target: SelfDeployTarget | null; 
     if (!env.CF_API_TOKEN || !env.CF_ACCOUNT_ID) {
       return {
         target: null,
+        // Since AB#7418's engine store, this only matters for releases that
+        // change the API server itself — engine/frontend updates install
+        // through the deployment's own storage with no credential at all.
         reason:
-          'One-click updates are off. To turn them on, run `node platforms/cloudflare/install.mjs --enable-one-click --yes` from your copy of the site — it asks you for a Cloudflare API token scoped to this Worker and stores it as a Worker secret. Until then, updates run from your machine with the command below.',
+          'Self-update is off for releases that change the API server (this deployment predates automatic setup, or it was disabled). Turn it on with `node platforms/cloudflare/install.mjs --enable-one-click --yes` from your copy of the site, or take those releases with the command below. Everything else updates from the portal with no setup.',
       };
     }
     return { target: cloudflareSelfDeploy(env), reason: '' };
@@ -95,7 +98,7 @@ export function resolveSelfDeploy(env: Env): { target: SelfDeployTarget | null; 
     // generic sentence is only for an entry that predates this feature.
     reason:
       env.SELF_DEPLOY_REASON ||
-      'One-click updates are off. On Azure App Service they need this app to have a managed identity with permission to deploy itself — run `node platforms/azure/install.mjs --enable-one-click --yes` to grant it. No credential is stored either way. Until then, updates run from your machine with the command below.',
+      'Self-update is off for releases that change the API server: on Azure App Service it needs this app to have a managed identity with permission to deploy itself — run `node platforms/azure/install.mjs --enable-one-click --yes` to grant it (no credential is stored). Everything else updates from the portal with no setup.',
   };
 }
 
@@ -323,7 +326,10 @@ export function cloudflareSelfDeploy(env: Env): SelfDeployTarget {
           compatibility_flags: settings.compatibility_flags ?? [],
           assets: {
             jwt: completion,
-            config: { not_found_handling: 'single-page-application', run_worker_first: ['/*', '!/assets/*'] },
+            // `/*` with no /assets/* exclusion since AB#7418: the installed-
+            // engine store answers hashed assets out of the deployment's own
+            // storage, so they have to reach the Worker. Matches wrangler.jsonc.
+            config: { not_found_handling: 'single-page-application', run_worker_first: ['/*'] },
           },
         })
       );
@@ -494,6 +500,52 @@ export async function applyD1Migrations(
       await db.prepare(statement).run();
     }
     await db.prepare('INSERT INTO d1_migrations (name) VALUES (?)').bind(name).run();
+    applied.push(name);
+  }
+  return applied;
+}
+
+// ── Postgres migrations, from inside the process (AB#7418) ──────────────────
+
+/**
+ * Apply the artifact's Postgres migration set through the deployment's own
+ * Database seam — the Node/Azure counterpart of applyD1Migrations above, for
+ * the engine-store update path that installs a release WITHOUT a platform
+ * redeploy and therefore has no moment where migrate-postgres.mjs could run.
+ *
+ * Same bookkeeping as migrate-postgres.mjs, on purpose: the `schema_migrations`
+ * table, the same column names, the same `name` values — so an in-portal update
+ * and a later CLI `--update` agree about what has run instead of re-running it.
+ *
+ * Each file executes as ONE statement string. Postgres's simple query protocol
+ * runs a multi-statement string inside an implicit transaction, which is the
+ * same all-or-nothing guarantee migrate-postgres.mjs gets from its explicit
+ * BEGIN/COMMIT — and an explicit transaction is not available here, because the
+ * seam's pooled driver may hand consecutive prepare() calls different
+ * connections. (One known limit, stated rather than discovered: the Postgres
+ * driver translates `?` to positional parameters, so a migration file
+ * containing a literal `?` would mis-parse. None does; the D1 set has the same
+ * property for the same reason.)
+ */
+export async function applyPostgresMigrations(
+  db: Env['DB'],
+  migrations: Map<string, Uint8Array>,
+  log: DeployLog
+): Promise<string[]> {
+  if (!migrations.size) return [];
+  await db
+    .prepare('CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())')
+    .run();
+  const { results } = await db.prepare('SELECT name FROM schema_migrations').all<{ name: string }>();
+  const done = new Set(results.map((r) => r.name));
+
+  const applied: string[] = [];
+  const decoder = new TextDecoder();
+  for (const name of [...migrations.keys()].sort()) {
+    if (done.has(name)) continue;
+    log(`Applying migration ${name}…`);
+    await db.prepare(decoder.decode(migrations.get(name)!)).run();
+    await db.prepare('INSERT INTO schema_migrations (name) VALUES (?)').bind(name).run();
     applied.push(name);
   }
   return applied;

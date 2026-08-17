@@ -6,15 +6,16 @@
   "assets": {
     "directory": "dist",
     "binding": "ASSETS",
-    // Documents run through the Worker so it can stamp this deployment's live
-    // origins / VAPID key (storylark-worker/lib/deployment), its live brand
-    // (storylark-worker/lib/brand) and its live presentation
-    // (storylark-worker/lib/presentation) into them. The manifest is generated
-    // from the live brand.json, and /icons/* can be replaced by an installed
-    // theme package (storylark-worker/lib/theme-store), so both go through the
-    // Worker too. Only /assets/* — the hashed JS, CSS and fonts, i.e. the bulk
-    // of the site — stays on the asset router with no Worker invocation.
-    "run_worker_first": ["/*", "!/assets/*"],
+    // Everything runs through the Worker. Documents get this deployment's live
+    // origins / VAPID key (storylark-worker/lib/deployment), brand and
+    // presentation stamped in; the manifest is generated from the live
+    // brand.json; /icons/* can come from an installed theme package
+    // (storylark-worker/lib/theme-store); and /assets/* can come from an
+    // installed ENGINE (storylark-worker/lib/engine-store) — which is what
+    // makes the portal's "Update now" work with no stored credential. With
+    // nothing installed the Worker falls straight through to the asset router,
+    // paying one in-memory check per asset request.
+    "run_worker_first": ["/*"],
     "not_found_handling": "single-page-application"
   },
   "observability": { "enabled": true },

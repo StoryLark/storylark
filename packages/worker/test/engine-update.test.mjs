@@ -300,7 +300,7 @@ test('a version with no published artifact says so, instead of half-installing s
 test('with nothing configured there is no deploy target, and the reason names the CLI', () => {
   const { target, reason } = resolveSelfDeploy({ BRAND: 'acme' });
   assert.equal(target, null);
-  assert.match(reason, /One-click updates are off/);
+  assert.match(reason, /Self-update is off/);
   assert.match(reason, /install\.mjs --enable-one-click/);
 });
 
@@ -563,7 +563,10 @@ test('a Cloudflare update uploads the engine AND carries the deployment\'s own b
       compatibility_flags: ['nodejs_compat'],
       assets: {
         jwt: 'COMPLETION-JWT',
-        config: { not_found_handling: 'single-page-application', run_worker_first: ['/*', '!/assets/*'] },
+        // `/*` with no /assets/* exclusion since the engine store: installed
+        // engines answer hashed assets out of storage, so they must reach the
+        // Worker. Must match wrangler.jsonc.
+        config: { not_found_handling: 'single-page-application', run_worker_first: ['/*'] },
       },
     });
 

@@ -5,8 +5,16 @@ import { INIT_SCHEMA } from '../lib/schema';
 import { requireAdmin } from '../lib/session';
 import { recordPublish } from '../lib/notify';
 import { readManifest } from '../lib/content';
-import { resolveSelfDeploy } from '../lib/self-deploy';
+import { resolveSelfDeploy, applyD1Migrations, applyPostgresMigrations, isWorkerd } from '../lib/self-deploy';
 import { downloadEngineArtifact, findEngineRelease, EngineReleaseError } from '../lib/engine-release';
+import {
+  readActiveEngine,
+  listEngineVersions,
+  installEngineVersion,
+  activateEngineVersion,
+  clearActiveEngine,
+  engineVersionLimit,
+} from '../lib/engine-store';
 import { readEnginePackage, EnginePackageError } from 'storylark-contracts/engine-package';
 import workerPkg from '../../package.json';
 
@@ -37,6 +45,12 @@ admin.use('/publish-story', requireAdmin());
  * run with their own credentials, on their own runner.
  */
 admin.use('/update-install', requireAdmin());
+/**
+ * Engine version history: rollback and clear (AB#7418). Session-gated for the
+ * same reason /update-install is — re-pointing what a live site serves is an
+ * operator's click, not a headless job's header.
+ */
+admin.use('/engine/*', requireAdmin());
 
 /**
  * The one deliberate exception to the session rule. POST /publish is called
@@ -94,30 +108,115 @@ const UPDATE_COMMANDS = {
  */
 admin.get('/update-status', async (c) => {
   try {
-    const res = await fetch('https://registry.npmjs.org/storylark-worker/latest');
-    if (!res.ok) throw new Error(`registry ${res.status}`);
-    const { version: latest } = (await res.json()) as { version: string };
+    // Two registry reads, because the two packages version independently under
+    // changesets: storylark-core names the RELEASE (its version tags the GitHub
+    // release the artifact hangs off), storylark-worker names the API server.
+    // Comparing only worker versions — what this route did before AB#7418's
+    // engine store — silently missed every core-only release, which is exactly
+    // the kind an installed engine can now take with no redeploy at all.
+    const [workerRes, coreRes] = await Promise.all([
+      fetch('https://registry.npmjs.org/storylark-worker/latest'),
+      fetch('https://registry.npmjs.org/storylark-core/latest'),
+    ]);
+    if (!workerRes.ok || !coreRes.ok) throw new Error(`registry ${workerRes.status}/${coreRes.status}`);
+    const { version: latestWorker } = (await workerRes.json()) as { version: string };
+    const { version: latestCore } = (await coreRes.json()) as { version: string };
     const platform = detectPlatform();
+
+    const store = c.env.CONTENT_STORE;
+    const active = store ? await readActiveEngine(store).catch(() => null) : null;
+    const versions = store ? await listEngineVersions(store).catch(() => []) : [];
+    // The engine actually being served: an installed one, else the build's own
+    // (dist/outputs.json states its coreVersion since AB#7418; older builds
+    // don't carry it, and for them the worker comparison below is the only
+    // signal — exactly what this route relied on before).
+    const currentCore = active?.coreVersion ?? (await buildCoreVersion(c.env)) ?? null;
+
+    const serverChanged = latestWorker !== workerPkg.version;
+    const engineChanged = currentCore !== null ? latestCore !== currentCore : serverChanged;
+    const hasUpdate = serverChanged || engineChanged;
+
+    const oneClick = await oneClickStatus(c.env);
+    // ONE user-facing answer: can "Update now" apply the latest release, yes or
+    // no. Which mechanism does the work is internal — the engine store when the
+    // release leaves the worker alone (every platform, no setup), the platform
+    // deployer when it doesn't. `available: false` happens only in the one
+    // degraded state left: the worker changed AND this deployment has no
+    // self-deploy permission (it predates automatic setup, or it was disabled).
+    const updateNow = serverChanged
+      ? oneClick.available
+        ? { available: true as const, mechanism: 'platform-deploy' as const }
+        : { available: false as const, reason: oneClick.reason ?? 'Self-update is off for this deployment.' }
+      : store
+        ? { available: true as const, mechanism: 'engine-store' as const }
+        : oneClick.available
+          ? { available: true as const, mechanism: 'platform-deploy' as const }
+          : {
+              available: false as const,
+              reason:
+                'This deployment has no writable storage bound, so an engine release cannot be installed from the portal. Bind an R2 bucket (Cloudflare) or set AZURE_STORAGE_CONNECTION_STRING / STORYLARK_LOCAL_CONTENT (Node), or take the update with the command below.',
+            };
+
     return c.json({
       current: workerPkg.version,
-      latest,
-      hasUpdate: latest !== workerPkg.version,
+      latest: latestWorker,
+      hasUpdate,
       releaseNotesUrl: 'https://storylark.org/docs/changelog.html',
       platform,
       updateCommand: UPDATE_COMMANDS[platform],
       updateDocsUrl: 'https://storylark.org/docs/updating.html',
-      // Layer 3 (AB#7418). ALWAYS present, and `available: false` with a reason
-      // is the normal answer — the portal renders the layer-2 command either
-      // way and adds a button only on top of it. Whether it is available is a
-      // live question, not a stored flag: the preflight below actually asks the
-      // platform, so a token that was revoked yesterday stops offering a button
-      // today rather than failing on the click.
-      oneClick: await oneClickStatus(c.env),
+      /** What the latest release IS, in both packages' terms. */
+      release: {
+        coreLatest: latestCore,
+        coreCurrent: currentCore,
+        workerLatest: latestWorker,
+        workerCurrent: workerPkg.version,
+        serverChanged,
+      },
+      /** The one answer the portal's button needs. */
+      updateNow,
+      /** The installed-engine state, for the version card and rollback list. */
+      engine: {
+        storeAvailable: !!store,
+        active: active
+          ? {
+              versionId: active.versionId,
+              coreVersion: active.coreVersion,
+              workerVersion: active.workerVersion,
+              installedAt: active.installedAt,
+              installedBy: active.installedBy,
+              sha256: active.sha256,
+            }
+          : null,
+        versions,
+        versionLimit: engineVersionLimit(c.env),
+      },
+      // Kept verbatim for portals older than the engine store — they render the
+      // command plus a button only when this says a platform deployer answers.
+      oneClick,
     });
   } catch {
     return c.json({ error: 'check_failed' }, 502);
   }
 });
+
+/**
+ * The core version the BUILD serves, from dist/outputs.json — written there by
+ * the site build since AB#7418. Only reachable where an ASSETS binding exists
+ * (Cloudflare); the Node entry serves dist off disk, where worker and dist
+ * deploy as one unit anyway, so the worker version is an honest proxy there.
+ */
+async function buildCoreVersion(env: { ASSETS?: { fetch: (r: Request) => Promise<Response> } }): Promise<string | null> {
+  if (!env.ASSETS) return null;
+  try {
+    const res = await env.ASSETS.fetch(new Request('https://assets.invalid/outputs.json', { headers: { accept: '*/*' } }));
+    if (!res.ok || (res.headers.get('content-type') ?? '').includes('text/html')) return null;
+    const doc = (await res.json()) as { coreVersion?: unknown };
+    return typeof doc.coreVersion === 'string' && doc.coreVersion ? doc.coreVersion : null;
+  } catch {
+    return null;
+  }
+}
 
 /** `available` means "there is a target AND it answers". Anything else carries a reason. */
 async function oneClickStatus(env: Parameters<typeof resolveSelfDeploy>[0]) {
@@ -150,35 +249,32 @@ async function oneClickStatus(env: Parameters<typeof resolveSelfDeploy>[0]) {
  * that was correct for more than one customer.
  *
  * ── The order, and why every step is where it is ────────────────────────────
- *   1. Is there a target?      501 if not. No target, no button, no surprise.
- *   2. Which version?          storylark-core's own npm registry entry — NOT
+ *   1. Which version?          storylark-core's own npm registry entry — NOT
  *                              storylark-worker's (see the note on the fetch
  *                              below; found live, 2026-08-16, the two are not
  *                              always the same number).
- *   3. Find + verify + read.   Checksum before unzip, manifest sha256 per file,
+ *   2. Find + verify + read.   Checksum before unzip, manifest sha256 per file,
  *                              and a package carrying a brand.json is rejected
  *                              outright. Nothing has touched the deployment yet.
- *   4. Migrate, then swap.     Inside the target, because the right mechanism
- *                              for each is platform knowledge.
+ *   3. Which mechanism?        Decided from the DOWNLOADED package's own
+ *                              workerVersion, not from a registry guess: if the
+ *                              worker is unchanged, the engine store applies it
+ *                              — every platform, no credential; if it changed,
+ *                              the platform deployer does, and only its absence
+ *                              makes this route answer with a command instead.
+ *   4. Migrate, then swap.     Migrations first, always: new schema under old
+ *                              code is a state the old code tolerates, and the
+ *                              reverse is not. On the engine-store path both
+ *                              halves run right here through the worker's own
+ *                              DB seam; on the platform path they live inside
+ *                              `install()`, because the right mechanism there
+ *                              is platform knowledge.
  *
- * Steps 1-3 cannot change anything, by construction: the first call that can is
- * inside `install()`. So every way this fails except a platform failure is a
- * pure no-op, which is the same guarantee the theme import gives and for the
- * same reason.
+ * Steps 1-3 cannot change anything, by construction. So every way this fails
+ * before the migrate/swap except a platform failure is a pure no-op, which is
+ * the same guarantee the theme import gives and for the same reason.
  */
 admin.post('/update-install', async (c) => {
-  const { target, reason } = resolveSelfDeploy(c.env);
-  if (!target) {
-    return c.json(
-      {
-        error: 'not_configured',
-        message: reason,
-        updateCommand: UPDATE_COMMANDS[detectPlatform()],
-      },
-      501
-    );
-  }
-
   const body = await c.req.json<{ version?: string }>().catch(() => ({}) as { version?: string });
   let version = body.version;
   if (!version) {
@@ -225,11 +321,86 @@ admin.post('/update-install', async (c) => {
     const pkg = await readEnginePackage(bytes);
     push(`Package reads clean: storylark-core ${pkg.manifest.coreVersion}, ${pkg.dist.size} engine files.`);
 
+    // ── Which mechanism does this release need? Internal, never a user-facing
+    // tier: the button is the same button either way. ─────────────────────────
+    //
+    // The engine store handles everything that ISN'T the worker's own script:
+    // frontend, migrations, one pointer flip in the deployment's own storage —
+    // identical code on every platform, zero credentials. What it genuinely
+    // cannot do is replace the running worker: on Cloudflare a Worker cannot
+    // swap its own script (no eval, no remote dynamic import — a platform
+    // boundary, not a design choice). So a release whose storylark-worker
+    // version differs from the one running here goes through the platform
+    // deployer instead, and only when THAT is missing does this route have to
+    // hand back a command.
+    const serverChanged = pkg.manifest.workerVersion !== workerPkg.version;
+    const store = c.env.CONTENT_STORE;
+
+    if (!serverChanged && store) {
+      push("This release leaves the API server unchanged — installing through the deployment's own storage, no redeploy.");
+      // Migrate first, in-process, through the seam the worker already has —
+      // same order and same reasoning as the platform path: new schema under
+      // old code is a state the old code tolerates; the reverse is not.
+      const applied = isWorkerd()
+        ? await applyD1Migrations(c.env.DB, pkg.migrations, push)
+        : await applyPostgresMigrations(c.env.DB, pkg.migrationsPostgres, push);
+      push(applied.length ? `Applied ${applied.length} migration(s): ${applied.join(', ')}` : 'Database already up to date.');
+
+      const user = c.get('user');
+      const result = await installEngineVersion({
+        store,
+        env: c.env,
+        pkg,
+        sha256,
+        bytes: bytes.byteLength,
+        installedBy: user?.email ?? user?.username ?? 'admin',
+        source: 'portal',
+      });
+      push(`Now serving storylark-core ${pkg.manifest.coreVersion} (installed engine version ${result.version.id}).`);
+      return c.json({
+        ok: true,
+        installed: pkg.manifest.coreVersion,
+        workerVersion: pkg.manifest.workerVersion,
+        mechanism: 'engine-store',
+        sha256,
+        releaseUrl: release.releaseUrl,
+        log,
+        engine: { active: { versionId: result.active.versionId, coreVersion: result.active.coreVersion } },
+        message:
+          'Installed. The new engine serves from the next request — no redeploy happened, and this card can roll it back.',
+      });
+    }
+
+    const { target, reason } = resolveSelfDeploy(c.env);
+    if (!target) {
+      return c.json(
+        {
+          error: 'self_update_off',
+          message: serverChanged
+            ? `This release changes the API server (storylark-worker ${workerPkg.version} → ${pkg.manifest.workerVersion}), which only a deploy can apply — and self-update is off for this deployment. ${reason}`
+            : `This deployment has no writable storage bound and no self-deploy permission, so the portal cannot apply an update here. ${reason}`,
+          updateCommand: UPDATE_COMMANDS[detectPlatform()],
+          applied: false,
+          log,
+        },
+        501
+      );
+    }
+
+    if (serverChanged) push(`This release changes the API server (storylark-worker ${workerPkg.version} → ${pkg.manifest.workerVersion}) — deploying through the platform.`);
     const result = await target.install(pkg, push);
+    if (store) {
+      // The freshly deployed build IS the newest engine now; an installed one
+      // left active would shadow it with older files. History survives, so the
+      // rollback list keeps working.
+      await clearActiveEngine(store);
+      push('Cleared the installed-engine override — the freshly deployed build is what serves now.');
+    }
     return c.json({
       ok: true,
       installed: pkg.manifest.coreVersion,
       workerVersion: pkg.manifest.workerVersion,
+      mechanism: 'platform-deploy',
       platform: target.platform,
       sha256,
       releaseUrl: release.releaseUrl,
@@ -257,6 +428,44 @@ admin.post('/update-install', async (c) => {
       502
     );
   }
+});
+
+/**
+ * POST /api/admin/engine/versions/:versionId/activate — one-click engine
+ * rollback (AB#7418), mirroring the theme store's. Re-points what the site
+ * serves at a version already in the history; refuses cleanly when the archive
+ * has aged out.
+ */
+admin.post('/engine/versions/:versionId/activate', async (c) => {
+  const store = c.env.CONTENT_STORE;
+  if (!store) return c.json({ error: 'no_content_store', message: 'This deployment has no writable storage bound.' }, 501);
+  const versionId = c.req.param('versionId');
+  const result = await activateEngineVersion(store, c.env, versionId);
+  if (!result) {
+    return c.json(
+      {
+        error: 'no_such_version',
+        message: `There is no stored engine version "${versionId}". It may have aged out — this deployment keeps the last ${engineVersionLimit(c.env)}.`,
+      },
+      404
+    );
+  }
+  return c.json({
+    ok: true,
+    version: result.version,
+    active: { versionId: result.active.versionId, coreVersion: result.active.coreVersion, workerVersion: result.active.workerVersion },
+  });
+});
+
+/**
+ * DELETE /api/admin/engine/active — stop overriding; serve what the BUILD
+ * ships. The history stays, so this is as reversible as everything else here.
+ */
+admin.delete('/engine/active', async (c) => {
+  const store = c.env.CONTENT_STORE;
+  if (!store) return c.json({ error: 'no_content_store', message: 'This deployment has no writable storage bound.' }, 501);
+  await clearActiveEngine(store);
+  return c.json({ ok: true, active: null });
 });
 
 /**

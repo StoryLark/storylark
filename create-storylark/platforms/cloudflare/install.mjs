@@ -12,10 +12,14 @@
 //                                                     rebuilds + redeploys an
 //                                                     EXISTING deployment
 //   node platforms/cloudflare/install.mjs --enable-one-click
-//                                                     opt in to the /admin
-//                                                     "Install update" button
+//                                                     manually supply the API
+//                                                     token that lets /admin's
+//                                                     "Update now" also cover
+//                                                     API-server releases
+//                                                     (--deploy/--update try to
+//                                                     set this up themselves)
 //   node platforms/cloudflare/install.mjs --disable-one-click
-//                                                     opt back out
+//                                                     turn that off, stickily
 //
 // --deploy creates real Cloudflare resources. It refuses to run without
 // --yes on top of a passing verify, matching the Azure installer.
@@ -318,6 +322,10 @@ async function update() {
 
   migrateBuildDeploy();
 
+  // Existing deployments gain self-update the same way new ones do: as part of
+  // a normal update, automatically, best-effort — never failing the update.
+  await ensureSelfUpdate();
+
   const after = pinnedEngineVersion();
   console.log('\n' + '='.repeat(72));
   console.log('UPDATE COMPLETE');
@@ -339,22 +347,181 @@ async function update() {
 }
 
 /**
- * --enable-one-click (AB#7418 — plan §4 layer 3): opt this deployment in to the
- * /admin "Install update" button.
+ * Self-update provisioning (AB#7418, revised): part of a NORMAL install.
  *
- * What it does is store ONE thing: a Cloudflare API token, as a Worker secret,
- * that the operator issued themselves. That is the honest shape of layer 3 on
- * Cloudflare — a Worker has no ambient identity, so the only way it can call
- * the Cloudflare API is with a token, and the only acceptable token is one the
- * operator minted, scoped, and can revoke without asking anyone.
+ * The /admin "Update now" button needs no credential at all for releases that
+ * only change the engine — those install through the deployment's own storage
+ * (storylark-worker/lib/engine-store) on every platform identically. The one
+ * thing that still needs a permission is a release that changes the Worker's
+ * own script, because a running Worker cannot replace its own code. Azure
+ * solves that with a managed identity provisioned at install; this is the
+ * Cloudflare counterpart, run automatically by --deploy and --update:
  *
- * Deliberately NOT generated here. `wrangler` could mint an account-wide token
- * on the operator's behalf, and doing so would be the single worst decision in
- * this file: the operator would end up with a broad standing credential inside
- * their reading app that they never consciously created and would not think to
- * revoke. So this prints exactly which scopes to grant and reads the token from
- * stdin, and the token never appears in argv, in shell history or in
- * install.env.
+ *   1. If CF_API_TOKEN/CF_ACCOUNT_ID secrets already exist → leave them alone.
+ *   2. If the installer authenticated with an API token (CLOUDFLARE_API_TOKEN)
+ *      → try to MINT a new token scoped to Account | Workers Scripts | Edit
+ *      and store that; if the operator's token lacks token-creation permission
+ *      (common), fall back to storing the token the installer is already
+ *      using — disclosed plainly, because it is broader than the minted one
+ *      would have been.
+ *   3. If the installer authenticated with `wrangler login` (OAuth) → there is
+ *      no raw token to mint with or store, so nothing is provisioned; the
+ *      printed output says exactly what still works (everything except
+ *      API-server releases) and how to finish the job (--enable-one-click).
+ *
+ * Every path prints what was provisioned and how to revoke it. What AB#7418's
+ * revision removed is the operator hand-creating a token as a prerequisite —
+ * not the disclosure.
+ *
+ * `--disable-one-click` still turns it off, and writes SELF_UPDATE=off into
+ * install.env so a later --update does not silently turn it back on.
+ */
+const SELF_UPDATE_OFF = (env.SELF_UPDATE ?? '').toLowerCase() === 'off';
+
+/** Are the self-update secrets already on this Worker? */
+function selfUpdateConfigured() {
+  try {
+    const out = run('wrangler', ['secret', 'list', '--env', env.BRAND_ID], { encoding: 'utf8', cwd: ROOT });
+    return out.includes('CF_API_TOKEN') && out.includes('CF_ACCOUNT_ID');
+  } catch {
+    return false;
+  }
+}
+
+/** The account id, from install.env or `wrangler whoami`. */
+function resolveAccountId() {
+  if (env.CF_ACCOUNT_ID) return env.CF_ACCOUNT_ID.trim();
+  try {
+    const out = run('wrangler', ['whoami'], { encoding: 'utf8', cwd: ROOT });
+    const m = /\b([0-9a-f]{32})\b/.exec(out);
+    return m ? m[1] : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Mint a token scoped to Workers Scripts | Edit on this one account, using the
+ * credential the installer is already authenticated with. Throws with the
+ * API's own words when the operator's token cannot create tokens — a common
+ * and perfectly reasonable restriction, handled by the caller's fallback.
+ */
+async function mintScopedToken(baseToken, accountId) {
+  const api = 'https://api.cloudflare.com/client/v4';
+  const headers = { authorization: `Bearer ${baseToken}`, 'content-type': 'application/json' };
+  const say = (body, status) => body?.errors?.map((e) => e.message).filter(Boolean).join('; ') || `HTTP ${status}`;
+
+  // Permission-group ids are not guessable constants — ask the API for the one
+  // that means "Workers Scripts Write".
+  const groupsRes = await fetch(`${api}/user/tokens/permission_groups`, { headers });
+  const groups = await groupsRes.json().catch(() => ({}));
+  if (!groupsRes.ok || groups.success === false) throw new Error(say(groups, groupsRes.status));
+  const group = (groups.result ?? []).find((g) => g.name === 'Workers Scripts Write');
+  if (!group) throw new Error('the API did not list a "Workers Scripts Write" permission group');
+
+  const res = await fetch(`${api}/user/tokens`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      name: `storylark-self-update-${env.BRAND_ID}`,
+      policies: [
+        {
+          effect: 'allow',
+          resources: { [`com.cloudflare.api.account.${accountId}`]: '*' },
+          permission_groups: [{ id: group.id }],
+        },
+      ],
+    }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.success === false || !body.result?.value) throw new Error(say(body, res.status));
+  return body.result.value;
+}
+
+/** Store the pair of secrets that turn the button on. Token piped, never argv. */
+function storeSelfUpdateSecrets(token, accountId) {
+  run('wrangler', ['secret', 'put', 'CF_API_TOKEN', '--env', env.BRAND_ID], {
+    input: token,
+    stdio: ['pipe', 'inherit', 'inherit'],
+    cwd: ROOT,
+  });
+  run('wrangler', ['secret', 'put', 'CF_ACCOUNT_ID', '--env', env.BRAND_ID], {
+    // A secret rather than a var: it is not sensitive on its own, but keeping
+    // it beside the token means one `--disable-one-click` removes the pair and
+    // there is no half-configured state where the portal thinks it is enabled.
+    input: accountId,
+    stdio: ['pipe', 'inherit', 'inherit'],
+    cwd: ROOT,
+  });
+}
+
+/** Best-effort, never fails the deploy/update that called it. */
+async function ensureSelfUpdate() {
+  console.log('\nSelf-update setup (the /admin "Update now" button)...');
+  console.log('Engine releases already update from /admin with NO setup on any platform');
+  console.log('— they install through the site\'s own storage. This step only covers the');
+  console.log('rarer releases that change the API server itself.');
+  if (SELF_UPDATE_OFF) {
+    console.log('… SELF_UPDATE=off in install.env — leaving self-update disabled, as you asked.');
+    return;
+  }
+  try {
+    if (selfUpdateConfigured()) {
+      console.log('✓ Already configured for this Worker — leaving it exactly as it is.');
+      return;
+    }
+    const accountId = resolveAccountId();
+    if (!accountId) {
+      console.log('… skipped: could not determine the Cloudflare account id.');
+      console.log('  Finish it later with: node platforms/cloudflare/install.mjs --enable-one-click --yes');
+      return;
+    }
+    const baseToken = (process.env.CLOUDFLARE_API_TOKEN || '').trim();
+    if (!baseToken) {
+      console.log('… this install authenticated with `wrangler login` (OAuth), which has no');
+      console.log('  raw API token this script could scope or store — that is a Cloudflare');
+      console.log('  boundary, not a choice. Everything except API-server releases still');
+      console.log('  updates from /admin with no setup. To cover those too, either re-run');
+      console.log('  with CLOUDFLARE_API_TOKEN set, or run:');
+      console.log('    node platforms/cloudflare/install.mjs --enable-one-click --yes');
+      return;
+    }
+    let token;
+    let provisioned;
+    try {
+      token = await mintScopedToken(baseToken, accountId);
+      provisioned = [
+        `✓ Minted a NEW API token "storylark-self-update-${env.BRAND_ID}", scoped to`,
+        '  Account | Workers Scripts | Edit on this account only, and stored it as a',
+        '  Worker secret. Your own token was not stored.',
+        '  Revoke it anytime at https://dash.cloudflare.com/profile/api-tokens —',
+        '  the button degrades gracefully on the next page load.',
+      ];
+    } catch (err) {
+      token = baseToken;
+      provisioned = [
+        `… Could not mint a scoped token (${err.message}), so the token this`,
+        '  installer authenticated with was stored as the Worker secret instead.',
+        '  NOTE: that token is whatever scope YOU gave it — likely broader than the',
+        '  Workers Scripts | Edit this feature needs. To narrow it: mint a token',
+        '  with just that permission and run --enable-one-click to replace it.',
+        '  Withdraw it anytime with --disable-one-click, or revoke the token at',
+        '  https://dash.cloudflare.com/profile/api-tokens.',
+      ];
+    }
+    storeSelfUpdateSecrets(token, accountId);
+    for (const line of provisioned) console.log(line);
+  } catch (err) {
+    console.log(`… self-update setup failed (${err.message}). Nothing else about the deploy`);
+    console.log('  is affected. Set it up later with --enable-one-click, or take API-server');
+    console.log('  releases with the --update command.');
+  }
+}
+
+/**
+ * --enable-one-click: the manual door, kept for the cases automatic setup
+ * cannot cover (OAuth-only login, an operator who wants to supply a token they
+ * scoped themselves, or replacing a broad fallback token with a narrow one).
  */
 async function enableOneClick() {
   if (!env.BRAND_ID) {
@@ -383,16 +550,16 @@ async function enableOneClick() {
  */
 async function doEnableOneClick() {
   console.log('\n' + '='.repeat(72));
-  console.log('ONE-CLICK UPDATES — what you are about to allow');
+  console.log('SELF-UPDATE FOR API-SERVER RELEASES — what you are about to allow');
   console.log('='.repeat(72));
-  console.log('\nAn admin signed into /admin will be able to press "Install update".');
-  console.log('That downloads the prebuilt engine for the version the portal shows,');
-  console.log('checks it against its published checksum, migrates the database, and');
-  console.log('redeploys THIS Worker — using a Cloudflare API token you create now.');
-  console.log('\nIt cannot touch your brand, your content, or any binding: the update');
-  console.log('uses Cloudflare\'s "put script content" endpoint, which leaves the');
-  console.log("Worker's configuration alone.");
-  console.log('\nYou do not have to do this. Without it, updates run from your own');
+  console.log('\nMost releases only change the engine (the app itself), and /admin\'s');
+  console.log('"Update now" already installs those with no setup and no credential —');
+  console.log('they go into the site\'s own storage. This step covers the rarer release');
+  console.log('that changes the API server (storylark-worker): a running Worker cannot');
+  console.log('replace its own script, so redeploying it needs a Cloudflare API token.');
+  console.log('\nIt cannot touch your brand or your content, and your bindings, vars and');
+  console.log('secrets are read back and carried forward unchanged.');
+  console.log('\nYou do not have to do this. Without it, those releases run from your own');
   console.log('machine with:  node platforms/cloudflare/install.mjs --update --yes');
   console.log('\n--- Create the token ---------------------------------------------------');
   console.log('\n  1. https://dash.cloudflare.com/profile/api-tokens -> Create Token');
@@ -418,23 +585,12 @@ async function doEnableOneClick() {
   // Piped, never on the command line: an argv value would land in this
   // machine's shell history and in any process listing. Same rule --deploy
   // already follows for ADMIN_KEY.
-  run('wrangler', ['secret', 'put', 'CF_API_TOKEN', '--env', env.BRAND_ID], {
-    input: token,
-    stdio: ['pipe', 'inherit', 'inherit'],
-    cwd: ROOT,
-  });
-  run('wrangler', ['secret', 'put', 'CF_ACCOUNT_ID', '--env', env.BRAND_ID], {
-    // A secret rather than a var: it is not sensitive on its own, but keeping
-    // it beside the token means one `--disable-one-click` removes the pair and
-    // there is no half-configured state where the portal thinks it is enabled.
-    input: accountId,
-    stdio: ['pipe', 'inherit', 'inherit'],
-    cwd: ROOT,
-  });
+  storeSelfUpdateSecrets(token, accountId);
+  setSelfUpdateFlag('on');
 
-  console.log('\n✓ One-click updates are on.');
-  console.log('  Open /admin — the Platform update card now offers a button when there is');
-  console.log('  something to install, and still shows the command either way.');
+  console.log('\n✓ Self-update now covers API-server releases too.');
+  console.log('  Open /admin — the Platform update card\'s "Update now" completes every');
+  console.log('  release, and still shows the command either way.');
   console.log('  Turn it off with: node platforms/cloudflare/install.mjs --disable-one-click --yes\n');
 }
 
@@ -451,8 +607,23 @@ function disableOneClick() {
       console.log(`  (${name} was not set — nothing to remove.)`);
     }
   }
-  console.log('\n✓ One-click updates are off. Revoke the token itself at');
-  console.log('  https://dash.cloudflare.com/profile/api-tokens if you have not already.\n');
+  // Sticky: --deploy/--update provision self-update automatically now, so an
+  // explicit opt-out has to be recorded somewhere they will read, or the next
+  // routine update would silently undo this. install.env is that somewhere.
+  setSelfUpdateFlag('off');
+  console.log('\n✓ Self-update is off for API-server releases, and SELF_UPDATE=off was');
+  console.log('  written to install.env so --update will not re-enable it. Engine releases');
+  console.log('  still update from /admin — that path stores no credential to remove.');
+  console.log('  Revoke the token itself at https://dash.cloudflare.com/profile/api-tokens');
+  console.log('  if you have not already.\n');
+}
+
+/** Record the operator's self-update choice in install.env. */
+function setSelfUpdateFlag(value) {
+  let text = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
+  if (/^SELF_UPDATE=/m.test(text)) text = text.replace(/^SELF_UPDATE=.*$/m, `SELF_UPDATE=${value}`);
+  else text += `${text.endsWith('\n') || text === '' ? '' : '\n'}SELF_UPDATE=${value}\n`;
+  writeFileSync(envPath, text);
 }
 
 /** One line from stdin. No echo suppression: a terminal that supports it is not guaranteed, and the value is pasted, not typed. */
@@ -536,18 +707,9 @@ async function deploy() {
   console.log('\nWaiting for the site to come up so we can mint your admin setup link...');
   await printAdminSetup(env.APP_ORIGIN, adminKey);
 
-  console.log('\n' + '='.repeat(72));
-  console.log('One more thing: the admin portal can show a real "Install update" button');
-  console.log('instead of a copy-paste command, if you want one now. Costs one Cloudflare');
-  console.log('API token you create in the next step (skip with N — nothing else changes,');
-  console.log('you can always run --enable-one-click later).');
-  console.log('='.repeat(72));
-  const wantsOneClick = (await prompt('\nSet up the update button now? [y/N] ')).trim().toLowerCase();
-  if (wantsOneClick === 'y' || wantsOneClick === 'yes') {
-    await doEnableOneClick();
-  } else {
-    console.log('\nSkipped. Turn it on anytime with: node platforms/cloudflare/install.mjs --enable-one-click --yes');
-  }
+  // Self-update is part of a normal install now (AB#7418, revised): provision
+  // it automatically, best-effort, and say exactly what was provisioned.
+  await ensureSelfUpdate();
 }
 
 if (args.has('--deploy')) await deploy();

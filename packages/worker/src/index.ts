@@ -15,6 +15,7 @@ import { adminThemes } from './routes/admin-themes';
 import { contentApi } from './routes/content-api';
 import { IMMUTABLE, SHORT, r2ContentStore } from './lib/content-store';
 import { readActiveTheme, readActiveCss, readActiveIcon, type ActiveTheme } from './lib/theme-store';
+import { readActiveEngineCached, readEngineFile, findEngineAsset, type ActiveEngine } from './lib/engine-store';
 import { checkForUpdateAndNotify } from './lib/update-check';
 import { cloudflareSelfDeploy } from './lib/self-deploy';
 import { deploymentConfigFromEnv, injectDeploymentIntoHtml, injectDeploymentIntoScript } from './lib/deployment';
@@ -169,10 +170,15 @@ app.notFound((c) => {
  * Serve a static asset with the deployment's current config injected
  * (AB#7414 — plan §0d Phase 1).
  *
- * `run_worker_first` in wrangler.jsonc is what routes documents here at all:
- * it lists `/*` minus the hashed-asset directories, so navigations, /admin and
- * /sw.js reach the Worker while /assets/*, /icons/* and manifest.webmanifest
- * keep being served straight off the asset router with no Worker invocation.
+ * `run_worker_first` in wrangler.jsonc is what routes requests here at all.
+ * Since AB#7418 it is `/*` with no exclusions: /assets/* lost its bypass the
+ * way /icons/* did in Phase 4 and for the same reason — an installed engine's
+ * hashed bundle lives in the deployment's storage, not in the immutable asset
+ * snapshot, so the Worker has to be the one answering. The cost is one Worker
+ * invocation per asset request; what keeps that cheap on the (default)
+ * deployments with nothing installed is the negative-result cache in
+ * installedEngine() below, which makes the per-asset overhead one in-memory
+ * check rather than a storage read.
  *
  * Conditional headers are stripped before handing the request on. Without that
  * the asset router would happily answer a revalidating browser with a bodyless
@@ -182,13 +188,70 @@ app.notFound((c) => {
  * door.
  */
 async function serveAsset(request: Request, env: Env): Promise<Response> {
-  const response = await rawAsset(request, env);
+  const path = new URL(request.url).pathname;
+
+  // ── The installed engine, if any (AB#7418) ────────────────────────────────
+  // Resolved ONCE per request, and every engine file this request serves comes
+  // from that one version — that single resolution is what makes an update an
+  // atomic flip rather than a window where index.html and the hashed bundle
+  // disagree. With nothing installed (the default state, negative-cached below)
+  // this whole block costs nothing and the build assets serve exactly as they
+  // always have.
+  const engine = await installedEngine(env);
+  if (engine) {
+    const key = engineFileKey(engine, path);
+    if (key) {
+      const file = await readEngineFile(env.CONTENT_STORE!, engine.versionId, key);
+      if (file) return engineResponse(request, env, key, file);
+      // The active version's archive lost a file it claims to have — a storage
+      // fault. Fall through to the build rather than 404 a live site.
+    } else if (path.startsWith('/assets/')) {
+      // Not in the active version. A client that loaded the PREVIOUS version's
+      // HTML just before the flip still requests its hashed assets — versioned
+      // prefixes exist precisely so those stay servable until history evicts
+      // them. Only after the history also misses does the build get a look.
+      const old = await findEngineAsset(env.CONTENT_STORE!, path.replace(/^\/+/, ''));
+      if (old) return engineResponse(request, env, path.replace(/^\/+/, ''), old);
+    }
+  }
+
+  let response = await rawAsset(request, env);
 
   // Content type, not path, decides which injection applies — a request for
   // /sw.js on a build that has no service worker comes back as the SPA shell,
   // and prepending a JS prelude to HTML would break the page.
-  const type = response.headers.get('content-type') ?? '';
-  const path = new URL(request.url).pathname;
+  let type = response.headers.get('content-type') ?? '';
+
+  // A hashed-asset request the asset router answered with the SPA shell means
+  // the build does not have that file. Before shrugging, re-check the store
+  // FRESH (bypassing the negative cache): another isolate may have installed an
+  // engine seconds ago, and this client's new HTML is asking for the new
+  // bundle. This is the net that makes the ~10s negative cache safe.
+  if (path.startsWith('/assets/') && /\btext\/html\b/i.test(type) && env.CONTENT_STORE) {
+    const fresh = engine ?? (await installedEngine(env, { fresh: true }));
+    if (fresh) {
+      const rel = path.replace(/^\/+/, '');
+      const found = fresh.files.includes(rel)
+        ? await readEngineFile(env.CONTENT_STORE, fresh.versionId, rel)
+        : await findEngineAsset(env.CONTENT_STORE, rel);
+      if (found) return engineResponse(request, env, rel, found);
+    }
+  }
+
+  // With an engine installed, EVERY document comes from it — including the SPA
+  // shell the asset router hands back for deep links (/library/…), which would
+  // otherwise be the build's old HTML referencing the build's old bundle while
+  // `/` serves the new one. Substituted here, before injection, so the engine
+  // shell flows through exactly the same stamping the build's shell does.
+  // (/admin is excluded: it only reaches this point when the engine carries no
+  // admin.html at all, and the build's own portal beats a shell with no portal.)
+  if (engine && /\btext\/html\b/i.test(type) && !path.startsWith('/icons/') && path !== '/admin') {
+    const shell = await readEngineFile(env.CONTENT_STORE!, engine.versionId, 'index.html');
+    if (shell) {
+      response = new Response(shell.body, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
+      type = 'text/html; charset=utf-8';
+    }
+  }
 
   // theme.css (AB#7415): the brand's own stylesheet, with the live font
   // selection appended. Served from the asset the deployment ships rather than
@@ -205,17 +268,7 @@ async function serveAsset(request: Request, env: Env): Promise<Response> {
   }
 
   if (path === '/sw.js' && /javascript|ecmascript/i.test(type)) {
-    const [js, brand, presentation] = await Promise.all([
-      response.text(),
-      liveBrand(request, env),
-      livePresentation(request, env),
-    ]);
-    // Presentation, then brand, then deployment — each prepends, so the
-    // deployment statement ends up on line 1 where Phase 1's own prelude regex
-    // expects to find it.
-    let out = presentation ? injectPresentationIntoScript(js, presentation) : js;
-    out = brand ? injectBrandIntoScript(out, brand) : out;
-    return rewritten(response, injectDeploymentIntoScript(out, deploymentConfigFromEnv(env)));
+    return rewritten(response, await stampedServiceWorker(request, env, await response.text()));
   }
 
   // Icons from the installed theme (AB#7417). `run_worker_first` gained
@@ -241,18 +294,35 @@ async function serveAsset(request: Request, env: Env): Promise<Response> {
   }
 
   if (type.includes('text/html')) {
-    const [html, brand, presentation] = await Promise.all([
-      response.text(),
-      liveBrand(request, env),
-      livePresentation(request, env),
-    ]);
-    let out = injectDeploymentIntoHtml(html, deploymentConfigFromEnv(env));
-    if (brand) out = injectBrandIntoHtml(out, brand);
-    if (presentation) out = injectPresentationIntoHtml(out, presentation);
-    return rewritten(response, out);
+    return rewritten(response, await stampedDocument(request, env, await response.text()));
   }
 
   return response;
+}
+
+/**
+ * A document with the deployment's live config, brand and presentation stamped
+ * in — the ONE injection path, shared by build documents and installed-engine
+ * documents so the engine's HTML cannot bypass what the build's goes through.
+ */
+async function stampedDocument(request: Request, env: Env, html: string): Promise<string> {
+  const [brand, presentation] = await Promise.all([liveBrand(request, env), livePresentation(request, env)]);
+  let out = injectDeploymentIntoHtml(html, deploymentConfigFromEnv(env));
+  if (brand) out = injectBrandIntoHtml(out, brand);
+  if (presentation) out = injectPresentationIntoHtml(out, presentation);
+  return out;
+}
+
+/**
+ * The service worker with the same three preludes. Presentation, then brand,
+ * then deployment — each prepends, so the deployment statement ends up on
+ * line 1 where Phase 1's own prelude regex expects to find it.
+ */
+async function stampedServiceWorker(request: Request, env: Env, js: string): Promise<string> {
+  const [brand, presentation] = await Promise.all([liveBrand(request, env), livePresentation(request, env)]);
+  let out = presentation ? injectPresentationIntoScript(js, presentation) : js;
+  out = brand ? injectBrandIntoScript(out, brand) : out;
+  return injectDeploymentIntoScript(out, deploymentConfigFromEnv(env));
 }
 
 /** The asset router's answer, with conditional headers stripped (see above). */
@@ -478,6 +548,96 @@ async function installedIcon(env: Env, name: string): Promise<{ body: ArrayBuffe
   return (await readActiveIcon(store, active, name)) ?? undefined;
 }
 
+// ── The installed engine (AB#7418) ──────────────────────────────────────────
+
+/**
+ * The engine this deployment has installed, or undefined for "serving the
+ * build". Read per request like the theme; what IS cached — briefly, and in
+ * lib/engine-store.ts beside the writers so an install here resets it in the
+ * same breath — is the NEGATIVE answer, because `run_worker_first` now routes
+ * /assets/* through the Worker and a deployment with nothing installed (the
+ * default) should not pay a storage read per font file for a feature it is not
+ * using. See readActiveEngineCached for the full accounting; the fresh
+ * re-check in serveAsset is what makes the TTL invisible to clients that hold
+ * a just-installed engine's HTML.
+ */
+async function installedEngine(env: Env, opts: { fresh?: boolean } = {}): Promise<ActiveEngine | undefined> {
+  const store = env.CONTENT_STORE;
+  if (!store) return undefined;
+  try {
+    return (await readActiveEngineCached(store, opts)) ?? undefined;
+  } catch (err) {
+    // A storage blip must not take the site down; the build's own assets are a
+    // perfectly good answer and are what every pre-engine-store site serves.
+    console.warn(`storylark: could not read the installed engine (${(err as Error).message}) — serving the build's own assets.`);
+    return undefined;
+  }
+}
+
+/**
+ * Which of the active engine's files answers this path, or undefined for "not
+ * an engine file — ask the asset router".
+ *
+ * Reproduces the two pieces of asset-router behaviour the engine store now
+ * fronts: `/` resolves to index.html, and an extensionless path resolves to its
+ * .html sibling (which is how /admin lands on admin.html). The literal
+ * /index.html and /admin.html are deliberately NOT mapped: the asset router
+ * 307s them to their canonical URLs, and it still can, because the build always
+ * carries both files.
+ */
+function engineFileKey(engine: ActiveEngine, path: string): string | undefined {
+  if (path === '/') return engine.files.includes('index.html') ? 'index.html' : undefined;
+  let p: string;
+  try {
+    p = decodeURIComponent(path).replace(/^\/+/, '');
+  } catch {
+    return undefined; // malformed percent-encoding — not an engine file
+  }
+  if (p === 'index.html' || p === 'admin.html') return undefined;
+  if (engine.files.includes(p)) return p;
+  if (!p.includes('.') && !p.includes('/') && engine.files.includes(`${p}.html`)) return `${p}.html`;
+  return undefined;
+}
+
+/**
+ * Serve one installed-engine file, through exactly the treatment its build-asset
+ * counterpart would get: documents and the service worker flow through the same
+ * stamping (stampedDocument / stampedServiceWorker), hashed assets are
+ * immutable, and everything else is short-lived like the other rewritten-in-
+ * place keys the store holds.
+ */
+async function engineResponse(
+  request: Request,
+  env: Env,
+  key: string,
+  file: { body: ArrayBuffer; contentType: string }
+): Promise<Response> {
+  if (key.endsWith('.html')) {
+    const out = await stampedDocument(request, env, new TextDecoder().decode(file.body));
+    return new Response(request.method === 'HEAD' ? null : out, {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }
+  if (key === 'sw.js') {
+    const out = await stampedServiceWorker(request, env, new TextDecoder().decode(file.body));
+    return new Response(request.method === 'HEAD' ? null : out, {
+      status: 200,
+      headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }
+  const headers = new Headers({
+    'Content-Type': file.contentType,
+    // Hashed filenames are immutable by construction; everything else in an
+    // engine (fonts.json, outputs.json) is a stable URL whose content moves
+    // when the active version does, so it gets the same short TTL as
+    // active.json itself.
+    'Cache-Control': key.startsWith('assets/') ? IMMUTABLE : SHORT,
+    'Content-Length': String(file.body.byteLength),
+  });
+  return new Response(request.method === 'HEAD' ? null : file.body, { status: 200, headers });
+}
+
 /**
  * The curated font registry, memoised for the life of the isolate.
  *
@@ -487,12 +647,25 @@ async function installedIcon(env: Env, name: string): Promise<{ body: ArrayBuffe
  * new isolates anyway. Caching it keeps the per-request cost of /theme.css at
  * one asset read rather than two.
  */
-let fontRegistryCache: FontRegistry | undefined | null = null;
+let fontRegistryCache: { key: string; registry: FontRegistry | undefined } | null = null;
 async function fontRegistry(request: Request, env: Env): Promise<FontRegistry | undefined> {
-  if (fontRegistryCache !== null) return fontRegistryCache;
-  const text = await assetText(request, env, FONTS_ASSET);
-  fontRegistryCache = text === undefined ? undefined : readFontRegistry(text);
-  return fontRegistryCache;
+  // An installed engine (AB#7418) breaks the "only a rebuild can change it"
+  // assumption above — its dist/fonts.json replaces the build's — so the memo
+  // is keyed by which engine is active rather than being unconditional. The
+  // active-engine read is already paid by the /theme.css request this
+  // accompanies; this only decides which fonts.json the memo holds.
+  const engine = await installedEngine(env);
+  const key = engine?.versionId ?? 'build';
+  if (fontRegistryCache?.key === key) return fontRegistryCache.registry;
+  let text: string | undefined;
+  if (engine && engine.files.includes(FONTS_ASSET.replace(/^\//, ''))) {
+    const file = await readEngineFile(env.CONTENT_STORE!, engine.versionId, FONTS_ASSET.replace(/^\//, ''));
+    text = file ? new TextDecoder().decode(file.body) : undefined;
+  } else {
+    text = await assetText(request, env, FONTS_ASSET);
+  }
+  fontRegistryCache = { key, registry: text === undefined ? undefined : readFontRegistry(text) };
+  return fontRegistryCache.registry;
 }
 
 /** The built manifest, for the icon list Phase 2 leaves as a build concern. */

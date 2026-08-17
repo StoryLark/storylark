@@ -953,8 +953,15 @@ function outputManifestPlugin() {
         }
       };
       walk(dist);
+      const corePkg = JSON.parse(readFileSync(resolve(CORE_DIR, 'package.json'), 'utf8'));
       const doc = {
         formatVersion: 1,
+        // Which storylark-core built these files (AB#7418). The worker's
+        // /update-status reads this to know what engine the BUILD serves, so a
+        // core-only release shows as an available update even on a deployment
+        // with nothing installed yet. Older builds simply lack the field and
+        // fall back to the worker-version comparison.
+        coreVersion: corePkg.version,
         note: 'Every file this build wrote, except this one. `brandOwned` marks the files that belong to the deployment rather than to the engine; an engine update replaces the others and leaves these alone.',
         files: Object.fromEntries(
           Object.entries(files).map(([path, meta]) => [path, isBrandOwnedOutput(path) ? { ...meta, brandOwned: true } : meta])

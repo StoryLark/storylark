@@ -30,7 +30,17 @@
     // to the asset router's own bytes — the cost is one invocation for the two
     // or three icon requests a cold page load makes, and the alternative is a
     // brand whose pictures can only be changed by rebuilding.
-    "run_worker_first": ["/*", "!/assets/*"],
+    //
+    // /assets/* lost its exclusion with the engine store (AB#7418), for the
+    // same reason at a larger scale: an INSTALLED ENGINE's hashed bundle lives
+    // in the deployment's storage, so the Worker has to be able to answer it.
+    // The tradeoff is real — every asset request now costs a Worker invocation
+    // — and it is mitigated where it matters: a deployment with no engine
+    // installed (the default) pays one in-memory check per request, not a
+    // storage read, via the negative-result cache in the worker's
+    // installedEngine(). The alternative is an update path that differs per
+    // platform, which is the thing AB#7418 exists to delete.
+    "run_worker_first": ["/*"],
     "not_found_handling": "single-page-application"
   },
   "observability": { "enabled": true },

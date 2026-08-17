@@ -23,7 +23,7 @@
 // app code. The only credential involved is your own `az login` session;
 // nothing new is ever stored in the deployment. Also needs --yes, because it
 // redeploys a live site.
-import { readFileSync, existsSync, mkdirSync, cpSync, rmSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, cpSync, rmSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -369,6 +369,10 @@ async function update() {
   const webAppName = `${env.BRAND_ID}-app`;
   installMigrateBuildDeploy({ outputs, webAppName, brandFolder });
 
+  // Existing deployments gain self-update the same way new ones do: as part of
+  // a normal update, automatically, best-effort — never failing the update.
+  ensureSelfUpdate(webAppName);
+
   const after = installedEngineVersion();
   const origin = outputs.appOrigin?.value ?? `https://${webAppName}.azurewebsites.net`;
   console.log('\n' + '='.repeat(72));
@@ -425,19 +429,31 @@ async function enableOneClick() {
 
   const webAppName = `${env.BRAND_ID}-app`;
   console.log('\n' + '='.repeat(72));
-  console.log('ONE-CLICK UPDATES — what you are about to allow');
+  console.log('SELF-UPDATE — what you are about to allow');
   console.log('='.repeat(72));
-  console.log(`\nAn admin signed into /admin on ${webAppName} will be able to press`);
-  console.log('"Install update". That downloads the prebuilt engine for the version the');
-  console.log('portal shows, checks it against its published checksum, migrates the');
-  console.log('database, and redeploys this app through its own Kudu endpoint.');
+  console.log(`\nAn admin signed into /admin on ${webAppName} can press "Update now".`);
+  console.log('Engine-only releases install through the app\'s own storage and need none');
+  console.log('of this; releases that change the API server redeploy the app through its');
+  console.log('own Kudu endpoint, which is what this permission allows.');
   console.log('\nNo credential is stored anywhere. The app authenticates with a managed');
   console.log('identity token it fetches at the moment of use, and the permission below');
   console.log('is scoped to this one site.');
-  console.log('\nYou do not have to do this. Without it, updates run from your own');
+  console.log('\nYou do not have to do this. Without it, those releases run from your own');
   console.log('machine with:  node platforms/azure/install.mjs --update --yes');
   console.log('='.repeat(72));
 
+  provisionSelfUpdate(webAppName);
+  setSelfUpdateFlag('on');
+
+  console.log('\n✓ Self-update now covers API-server releases too.');
+  console.log('  Role assignments can take a minute or two to take effect. Open /admin —');
+  console.log('  the Platform update card checks the permission for real before it offers');
+  console.log('  a button, so if it still says "off", give it a moment and reload.');
+  console.log('  Turn it off with: node platforms/azure/install.mjs --disable-one-click --yes\n');
+}
+
+/** The actual identity + role work, shared by --enable-one-click and the automatic path. */
+function provisionSelfUpdate(webAppName) {
   console.log('\nEnabling the system-assigned managed identity...');
   const identity = JSON.parse(
     run('az', ['webapp', 'identity', 'assign', '--resource-group', env.AZURE_RESOURCE_GROUP, '--name', webAppName], { encoding: 'utf8' })
@@ -471,16 +487,77 @@ async function enableOneClick() {
         '  (Contributor cannot grant roles). Either re-run as someone who has it, or ask them for:\n\n' +
         `    az role assignment create --assignee-object-id ${principalId} \\\n` +
         '      --assignee-principal-type ServicePrincipal --role "Website Contributor" \\\n' +
-        `      --scope ${scope}\n`
+        `    --scope ${scope}\n`
     );
     throw err;
   }
+}
 
-  console.log('\n✓ One-click updates are on.');
-  console.log('  Role assignments can take a minute or two to take effect. Open /admin —');
-  console.log('  the Platform update card checks the permission for real before it offers');
-  console.log('  a button, so if it still says "off", give it a moment and reload.');
-  console.log('  Turn it off with: node platforms/azure/install.mjs --disable-one-click --yes\n');
+/**
+ * Self-update as part of a normal install (AB#7418, revised): --deploy and
+ * --update call this automatically, best-effort — a failure explains itself
+ * and never fails the deploy that called it. `--disable-one-click` writes
+ * SELF_UPDATE=off to install.env, which this honours, so an explicit opt-out
+ * survives routine updates.
+ */
+function ensureSelfUpdate(webAppName) {
+  console.log('\nSelf-update setup (the /admin "Update now" button)...');
+  console.log('Engine releases already update from /admin with NO setup — they install');
+  console.log('through the site\'s own storage. This step covers the rarer releases that');
+  console.log('change the API server, by letting the app redeploy ITSELF via a managed');
+  console.log('identity. No credential is stored; revoke it by deleting one role');
+  console.log('assignment (or run --disable-one-click).');
+  if ((env.SELF_UPDATE ?? '').toLowerCase() === 'off') {
+    console.log('… SELF_UPDATE=off in install.env — leaving self-update disabled, as you asked.');
+    return;
+  }
+  try {
+    if (selfUpdateProvisioned(webAppName)) {
+      console.log('✓ Already provisioned for this Web App — leaving it exactly as it is.');
+      return;
+    }
+    provisionSelfUpdate(webAppName);
+    console.log('\n✓ Provisioned: system-assigned managed identity + "Website Contributor"');
+    console.log('  on this one Web App (nothing broader). Visible and deletable in the');
+    console.log('  Azure portal under the app\'s Identity and Access control (IAM) blades.');
+  } catch (err) {
+    console.log(`… self-update setup did not complete (${err.message ?? err}). Nothing else`);
+    console.log('  about the deploy is affected. Finish it later with:');
+    console.log('    node platforms/azure/install.mjs --enable-one-click --yes');
+  }
+}
+
+/** Is the identity + role pair already in place? Read-only, never throws. */
+function selfUpdateProvisioned(webAppName) {
+  try {
+    const principalId = run(
+      'az',
+      ['webapp', 'identity', 'show', '--resource-group', env.AZURE_RESOURCE_GROUP, '--name', webAppName, '--query', 'principalId', '-o', 'tsv'],
+      { encoding: 'utf8' }
+    ).trim();
+    if (!principalId) return false;
+    const scope = run(
+      'az',
+      ['webapp', 'show', '--resource-group', env.AZURE_RESOURCE_GROUP, '--name', webAppName, '--query', 'id', '-o', 'tsv'],
+      { encoding: 'utf8' }
+    ).trim();
+    const assignments = JSON.parse(
+      run('az', ['role', 'assignment', 'list', '--assignee', principalId, '--role', 'Website Contributor', '--scope', scope], {
+        encoding: 'utf8',
+      })
+    );
+    return Array.isArray(assignments) && assignments.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Record the operator's self-update choice in install.env. */
+function setSelfUpdateFlag(value) {
+  let text = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
+  if (/^SELF_UPDATE=/m.test(text)) text = text.replace(/^SELF_UPDATE=.*$/m, `SELF_UPDATE=${value}`);
+  else text += `${text.endsWith('\n') || text === '' ? '' : '\n'}SELF_UPDATE=${value}\n`;
+  writeFileSync(envPath, text);
 }
 
 /** The exact inverse: drop the role assignment, then the identity. */
@@ -513,7 +590,12 @@ function disableOneClick() {
   }
   console.log('Removing the managed identity...');
   run('az', ['webapp', 'identity', 'remove', '--resource-group', env.AZURE_RESOURCE_GROUP, '--name', webAppName], { stdio: 'inherit' });
-  console.log('\n✓ One-click updates are off. /admin now shows the installer command only.\n');
+  // Sticky: --deploy/--update provision self-update automatically now, so an
+  // explicit opt-out is recorded where they will read it.
+  setSelfUpdateFlag('off');
+  console.log('\n✓ Self-update is off for API-server releases, and SELF_UPDATE=off was');
+  console.log('  written to install.env so --update will not re-enable it. Engine releases');
+  console.log('  still update from /admin — that path needs no permission at all.\n');
 }
 
 async function deploy() {
@@ -579,6 +661,10 @@ async function deploy() {
 
   console.log('\nWaiting for the site to come up so we can mint your admin setup link...');
   await printAdminSetup(outputs.appOrigin?.value ?? `https://${webAppName}.azurewebsites.net`, adminKey);
+
+  // Self-update is part of a normal install now (AB#7418, revised): provision
+  // it automatically, best-effort, and say exactly what was provisioned.
+  ensureSelfUpdate(webAppName);
 }
 
 if (args.has('--deploy')) await deploy();

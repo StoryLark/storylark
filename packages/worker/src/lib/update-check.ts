@@ -1,4 +1,6 @@
 import { sendMail } from './resend';
+import { readActiveEngine } from './engine-store';
+import type { ContentStore } from './content-store';
 import workerPkg from '../../package.json';
 
 /**
@@ -14,26 +16,51 @@ export async function checkForUpdateAndNotify(env: {
   APP_NAME: string;
   RESEND_API_KEY?: string;
   ADMIN_EMAIL?: string;
+  CONTENT_STORE?: ContentStore;
 }): Promise<{ checked: boolean; hasUpdate: boolean; notified: boolean }> {
   let latest: string;
+  let coreLatest: string | undefined;
   try {
     const res = await fetch('https://registry.npmjs.org/storylark-worker/latest');
     if (!res.ok) return { checked: false, hasUpdate: false, notified: false };
     latest = ((await res.json()) as { version: string }).version;
+    // The core check is best-effort on top: a core-only release (worker
+    // unchanged) is exactly what the engine store can install with no redeploy,
+    // so it deserves the same nudge — but a registry hiccup on this second read
+    // must not silence the worker comparison that has always worked.
+    const coreRes = await fetch('https://registry.npmjs.org/storylark-core/latest').catch(() => null);
+    if (coreRes?.ok) coreLatest = ((await coreRes.json()) as { version: string }).version;
   } catch {
     return { checked: false, hasUpdate: false, notified: false };
   }
 
-  const hasUpdate = latest !== workerPkg.version;
+  // The engine actually being served, when an installed one states it. Without
+  // one the build's core version is unknowable from here, and the worker
+  // comparison (the pre-AB#7418 behaviour) is the honest fallback.
+  let coreUpdate = false;
+  let coreCurrent: string | undefined;
+  if (coreLatest && env.CONTENT_STORE) {
+    const active = await readActiveEngine(env.CONTENT_STORE).catch(() => null);
+    if (active) {
+      coreCurrent = active.coreVersion;
+      coreUpdate = coreLatest !== active.coreVersion;
+    }
+  }
+
+  const hasUpdate = latest !== workerPkg.version || coreUpdate;
   if (!hasUpdate) return { checked: true, hasUpdate: false, notified: false };
   if (!env.RESEND_API_KEY || !env.ADMIN_EMAIL) return { checked: true, hasUpdate: true, notified: false };
 
+  // Name the pair that actually moved: for a core-only release the worker
+  // versions are equal, and "0.17.0 → 0.17.0" would be a baffling email.
+  const [current, next] =
+    latest !== workerPkg.version ? [workerPkg.version, latest] : [coreCurrent ?? workerPkg.version, coreLatest ?? latest];
   const notified = await sendMail(
     env.RESEND_API_KEY,
     `${env.APP_NAME} <noreply@storylark-updates.local>`,
     env.ADMIN_EMAIL,
-    `${env.APP_NAME}: StoryLark ${latest} is available`,
-    updateEmail(env.APP_NAME, workerPkg.version, latest)
+    `${env.APP_NAME}: StoryLark ${next} is available`,
+    updateEmail(env.APP_NAME, current, next)
   ).catch(() => false);
 
   return { checked: true, hasUpdate: true, notified };
