@@ -101,6 +101,10 @@ flow and for exactly what the button can and cannot do.
 content manager. Browse what's published, open any chapter, edit it as plain
 markdown with a live preview, and save. Covered in full below.
 
+**Narration** — the bulk narration queue: which chapters are waiting for
+audio, which are being narrated, which failed and why, and a real time
+estimate once anything has finished. Covered below.
+
 **Brand & themes** — what your site looks like and what it calls itself.
 Install a theme package, edit your brand's own details, see every version
 you've installed, and roll back. Covered below.
@@ -151,6 +155,11 @@ node packages/pipeline/publish.mjs --brand <id> --source <path> --pull
 first, so publishing doesn't overwrite them. See
 [`content-pipeline.md`](content-pipeline.md).
 
+Every edit that leaves audio out of date is also added to the **Narration**
+queue automatically, so if a narration worker is already running on a
+schedule you may not need to run anything by hand — see the Narration section
+below.
+
 Book-level details — title, author, description and the cover image — are on
 the book itself, above its chapters.
 
@@ -169,6 +178,54 @@ and it's what keeps this deployment and your real catalogue from quietly becomin
 two different libraries. Everything you wrote here, and everything you published
 from your own markdown, stays fully editable as normal — the two can sit side by
 side. See [`content-sync.md`](content-sync.md).
+
+## Narration
+
+**Stories** covers the text. Getting audio for it is a separate step, and the
+**Narration** card is where you watch it happen.
+
+Saving a chapter, reverting one, a push over the [content API](content-api.md),
+or a bulk import all leave chapters whose audio doesn't match their words yet —
+after a fifty-story import, that's the whole library at once. Rather than a
+button that spins and lies, the card shows exactly what's owed: a queue of
+**jobs**, one per chapter, moving
+
+```
+waiting → being narrated → done
+                        ↘ failed → (retry)
+```
+
+Waiting/being narrated/done/failed counts sit at the top, followed by a running
+total of characters still to narrate and, once anything has finished on this
+deployment, a real time estimate measured from its own completed jobs — never a
+guess offered before the first one lands. Each job below shows which chapter it
+is, how long it's been running or actually took to narrate, and — for a failed
+job — the exact reason, with a **Retry** button next to it. A pending job can be
+**Cancelled**; a running one has to finish or fail first.
+
+**Neither platform this engine deploys to can generate the audio itself.** A
+Cloudflare Worker has no filesystem for the narration model's weights, no native
+ONNX runtime, and a CPU budget in seconds against a job measured in minutes. The
+Node/Azure entry (`platforms/azure/server.mjs`) could technically host a model
+but deliberately doesn't — its dependencies are the web framework, the Postgres
+driver and the blob client. Text-to-speech, forced alignment and audio stitching
+live in `packages/pipeline`, alongside `ffmpeg` and the storage credentials,
+which is where narration has always actually happened. So the deployment's job
+is to hold the queue; draining it means running, wherever your publishing
+already runs (a laptop, a scheduled GitHub Actions job, a box in the corner):
+
+```bash
+node packages/pipeline/narrate.mjs --brand <brand-id>
+```
+
+The card shows this exact command, in the deployment's own words, rather than a
+sentence hard-coded in the browser bundle — so it stays true the day an
+in-deployment narrator becomes possible without anyone having to remember to
+update it.
+
+See [`narration-queue.md`](narration-queue.md) for the full detail: every job
+state, the HTTP surface a worker uses to claim and report on jobs, how the time
+estimate is measured, and how an operator gets emailed when a batch finishes.
 
 ## Changing how your site looks
 
