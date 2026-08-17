@@ -81,6 +81,10 @@ jobs:
         id: changesets
         uses: changesets/action@v1
         with:
+          # The default theme package records the core version in its manifest.
+          # Regenerate it after Changesets bumps package versions so the version
+          # PR contains the byte-for-byte package that CI verifies and ships.
+          version: npm run version-packages
           publish: npx changeset publish
           title: 'chore(release): version packages'
           commit: 'chore(release): version packages'

@@ -17,6 +17,7 @@
     "typecheck": "tsc -p app/tsconfig.json --noEmit && tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/worker/tsconfig.json --noEmit",
     "test": "node --import tsx/esm --test packages/worker/test/*.test.mjs packages/contracts/test/*.test.mjs",
     "build-engine": "npm run build -w app -- --mode engine && wrangler deploy --env storylark --dry-run --outdir=.engine-worker",
+    "version-packages": "changeset version && npm run package-theme -- storylark",
     "package-engine": "node packages/core/bin/package-engine.mjs",
     "package-theme": "node packages/core/bin/package-theme.mjs",
     "import-theme": "node packages/core/bin/import-theme.mjs"
