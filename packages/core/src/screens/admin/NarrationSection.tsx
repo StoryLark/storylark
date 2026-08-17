@@ -56,6 +56,7 @@ interface NarrationJob {
   error: string | null;
   charLength: number;
   durationMs: number;
+  elapsedMs: number;
 }
 
 interface NarrationBatch {
@@ -95,6 +96,7 @@ export function NarrationSection(): JSX.Element {
   const [unavailable, setUnavailable] = useState('');
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
   const [showAll, setShowAll] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -135,12 +137,13 @@ export function NarrationSection(): JSX.Element {
   async function act(label: string, path: string, init?: RequestInit): Promise<void> {
     setBusy(label);
     setMessage('');
+    setError('');
     try {
       const res = await adminFetch<{ queued?: number; message?: string }>(path, { method: 'POST', ...init });
       setMessage(res.message ?? (typeof res.queued === 'number' ? `${res.queued} chapter(s) queued.` : 'Done.'));
       await refresh();
     } catch (err) {
-      setMessage(errorText(err, 'That did not work.'));
+      setError(errorText(err, 'That did not work.'));
     } finally {
       setBusy('');
     }
@@ -204,6 +207,11 @@ export function NarrationSection(): JSX.Element {
             ? 'No time estimate yet — nothing has finished on this deployment, so there is no measured speed to work from. The first completed chapter produces one.'
             : `Roughly ${formatDuration(view.estimateSeconds)} left, at the ${Math.round(view.charsPerSecond ?? 0)} characters/second this deployment has actually been managing.`}
         </p>
+      ) : counts.failed > 0 ? (
+        <p class="settings-note admin-notice">
+          Nothing is queued or running, but {counts.failed} chapter{counts.failed === 1 ? '' : 's'} failed to narrate and{' '}
+          {counts.failed === 1 ? "hasn't" : "haven't"} been retried — see below.
+        </p>
       ) : (
         <p class="settings-note">Nothing is waiting. Every chapter's audio matches its text.</p>
       )}
@@ -234,6 +242,7 @@ export function NarrationSection(): JSX.Element {
         </button>
       </div>
       {message && <p class="settings-note">{message}</p>}
+      {error && <p class="settings-note admin-error">{error}</p>}
 
       {view.batches.length > 0 && (
         <>
@@ -269,6 +278,10 @@ export function NarrationSection(): JSX.Element {
                     {job.status === 'running' && job.worker ? `on ${job.worker} · ` : ''}
                     {job.attempts > 1 ? `attempt ${job.attempts} · ` : ''}
                     {job.charLength.toLocaleString()} characters
+                    {job.status === 'running' && job.startedAt
+                      ? ` · running for ${formatDuration((Date.now() - job.startedAt) / 1000)}`
+                      : ''}
+                    {job.status === 'done' && job.elapsedMs > 0 ? ` · took ${formatDuration(job.elapsedMs / 1000)} to narrate` : ''}
                     {job.status === 'done' && job.durationMs > 0 ? ` · ${formatDuration(job.durationMs / 1000)} of audio` : ''}
                   </span>
                   {job.error && <span class="admin-content-row-meta admin-error">{job.error}</span>}
@@ -289,9 +302,10 @@ export function NarrationSection(): JSX.Element {
                     onClick={() => {
                       setBusy('Cancelling…');
                       setMessage('');
+                      setError('');
                       adminFetch(`/narration/jobs/${encodeURIComponent(job.id)}`, { method: 'DELETE' })
                         .then(() => refresh())
-                        .catch((err) => setMessage(errorText(err, 'Could not cancel that job.')))
+                        .catch((err) => setError(errorText(err, 'Could not cancel that job.')))
                         .finally(() => setBusy(''));
                     }}
                   >
