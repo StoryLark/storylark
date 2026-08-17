@@ -392,6 +392,52 @@ select:focus-visible {
   background: var(--bg);
 }
 
+/* A card can hold more than one job — the content editor has Chapters and
+   History, themes has the brand form and the version list. A subhead is the
+   start of a new block inside the card, so it gets a rule above it and real
+   space, rather than being a slightly larger line of text in the flow. */
+.admin-screen .admin-subhead {
+  margin: 1.5rem 0 0.5rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-headers);
+  letter-spacing: 0.04em;
+}
+
+/* The first thing in a card is never a continuation of something above it. */
+.admin-screen .settings-section > .admin-subhead:first-of-type {
+  margin-top: 0.25rem;
+}
+
+/* Update actions and their result/log. An action block, not prose — it gets
+   its own inset surface so the confirm step and the receipt afterwards read
+   as a distinct area of the update card. Shipped unstyled; this is the first
+   treatment it has had. */
+.admin-oneclick {
+  margin: 0.75rem 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+
+.admin-oneclick > .settings-note {
+  margin: 0;
+}
+
+/* The reader-theme picker (AB#7427 reader-choosable themes) — a row of look
+   choices. Also shipped unstyled. Wraps rather than overflowing on a phone. */
+.admin-reader-themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.6rem 0;
+}
+
 .admin-error {
   color: var(--accent-strong);
 }
