@@ -177,11 +177,39 @@ existed, so adding this file changes nothing until you change a value.
 | `cover.aspect` | `"portrait"` | `portrait` (3:4) or `square` cover art on the shelves |
 | `detail.*` | all `true` | which of cover / author / description / chapter list / length appear on a detail screen |
 | `auth.required` | `false` | `true` puts an account gate in front of the whole app |
+| `readerTheme.options` | all five | which bundled sample looks readers may pick in Settings: `storylark` · `loveletter` · `nebula` · `weatherglass` · `wireless`. `[]` removes the picker |
+| `readerTheme.forced` | `null` | fix one look for everyone. Overrides a reader's saved choice, not just the control |
 | `settings.*` | all `true` | which controls the Settings screen offers: `typography`, `theme`, `narrator`, `autoPlay`, `readAlong`, `keepAwake`, `downloads`, `notifications` |
 | `download.mode` | flat `"newUnits"` / series `"everything"` | what the auto-download toggle means |
 | `emptyState.*` | see below | first-run and empty-shelf copy |
 | `about.links` | `[]` | extra `{ label, href }` links on the About screen |
 | `features.<name>` | `{}` | where each new engine feature appears |
+
+### Reader themes
+
+`readerTheme` is the one key whose default is not "what the app did before it
+existed": out of the box the Settings screen offers all five gallery looks. What
+that turns on is an **offer**, not a change — the picker's first entry is your
+own `theme.css`, selected, so nothing about your library moves until a reader
+moves it, and a reader's choice is theirs alone. A look is colours and font
+stacks only; it never touches your app name, your icons, your PWA manifest or
+the theme package you have installed.
+
+```json
+"readerTheme": {
+  "options": ["nebula", "wireless"],
+  "forced": null
+}
+```
+
+`"options": []` removes the picker. `"forced": "nebula"` fixes one look for
+everyone — Settings shows it as a fixed line, and a reader who had already
+chosen something else is moved onto it rather than merely losing the control.
+Light and dark stay the reader's either way. `"settings": {"theme": false}`
+still removes the whole Theme control, both rows, as it always did.
+
+An operator can set both from the admin portal's **Brand & themes** card
+without editing this file.
 
 ### Empty-state copy
 
