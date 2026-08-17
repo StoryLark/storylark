@@ -704,6 +704,20 @@ test('a full API-server install works end to end on the OAuth credential', async
 
 const ADMIN_TSX = readFileSync(join(HERE, '..', '..', 'core', 'src', 'screens', 'Admin.tsx'), 'utf8');
 
+test('the update card always offers a manual check, even when the deployment is current', () => {
+  const updateSection = ADMIN_TSX.slice(ADMIN_TSX.indexOf('function UpdateSection'));
+  const checkButton = updateSection.indexOf("{checking ? 'Checking…' : 'Check for updates'}");
+  const statusBranch = updateSection.indexOf('{!updateStatus ?');
+
+  assert.ok(checkButton >= 0, 'the permanent Check for updates control exists');
+  assert.ok(statusBranch >= 0, 'the update-status rendering branch exists');
+  assert.ok(
+    checkButton < statusBranch,
+    'Check for updates is rendered outside the update-status branch, so current/loading/error states cannot hide it'
+  );
+  assert.match(updateSection, /async function check\(\)[\s\S]*?await onCheck\(\)/, 'the control performs a fresh registry check');
+});
+
 test('the update card presents the command only inside the folded reference block', () => {
   const commandBlocks = ADMIN_TSX.match(/class="admin-command">\{command\}/g) ?? [];
   assert.equal(commandBlocks.length, 1, 'exactly one rendering of the update command');
