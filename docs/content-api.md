@@ -284,18 +284,50 @@ handling cannot mistake a partial result for a clean one:
 {
   "contractVersion": 1, "ok": false, "policy": "best-effort",
   "summary": { "books": 50, "booksSucceeded": 49, "booksFailed": 1,
-               "chapters": 50, "chaptersSucceeded": 49, "chaptersFailed": 0 },
+               "chapters": 50, "chaptersSucceeded": 49, "chaptersFailed": 0, "chaptersWithheld": 0 },
   "results": [
     { "bookId": "story-16", "ok": true, "created": true,
       "chapters": [ { "chapterId": "full", "ok": true, "created": true, "contentHash": "…", "wordCount": 900 } ] },
     { "bookId": "story-17", "ok": false, "chapters": [],
-      "error": "invalid_markdown",
-      "message": "story-17/full: The front matter block starts with --- but never closes. Add a closing --- line." }
+      "error": "unclosed_frontmatter",
+      "message": "story-17/full: The front matter block starts with --- but never closes. Add a closing --- line.",
+      "errors": [ { "code": "unclosed_frontmatter", "message": "The front matter block starts with --- but never closes. Add a closing --- line.", "file": "story-17/full", "line": 1 } ] }
   ],
   "libraryVersion": 51,
   "narration": { "queued": 49, "batchId": "nb_…", "message": "…" }
 }
 ```
+
+### Content validation — one gate, one vocabulary
+
+Every chapter is judged by StoryLark's single content validator
+(`storylark-contracts/content`) — the same implementation the admin portal's
+editor and a repo sync call, so the same bad file produces the **same stable
+error code and the same message** whichever door it arrives through. Only the
+rendering differs: this API returns `422` with the error body (and the full
+structured list in `errors`, each entry carrying `code`, `message`, and a
+`file`/`line` where one can be named); the portal shows the same errors inline;
+a sync skips the file and lists it.
+
+Codes you can program against: `empty_chapter`, `too_large`,
+`unclosed_frontmatter`, `no_prose`, `missing_storylark_block`,
+`invalid_storylark_block`, `missing_field`, `unknown_type`, `type_mismatch`,
+`invalid_id`, `id_mismatch`, `invalid_order`, `order_tie`, `invalid_publish`,
+`invalid_title`, `invalid_cover`, `invalid_contract_version`,
+`unsupported_contract_version`.
+
+Markdown may carry the optional namespaced `storylark:` frontmatter block (see
+[`authoring-stories.md`](authoring-stories.md#the-storylark-block--declaring-content-explicitly)).
+It is not required here — the URL and payload already state the identity — but
+when present it is validated strictly and must agree with the address it
+arrived at (`id_mismatch` otherwise). Two consequences worth knowing:
+
+- **`storylark.publish: false` withholds the chapter**: it validates, nothing
+  is written, the per-chapter result carries `withheld: true` and the summary
+  counts it in `chaptersWithheld`. An already-published copy is left untouched.
+- **When every chapter in a push declares `storylark.order`**, that order —
+  not wire position — decides the book's chapter order. Ties are an
+  `order_tie` error and reject that book.
 
 **`all-or-nothing`** validates every book and chapter first and writes nothing at
 all if any of them fails — `422 batch_rejected`, and the library is untouched.

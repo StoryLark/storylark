@@ -43,6 +43,39 @@ function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return call<T>(`/admin${path}`, init);
 }
 
+/**
+ * The portal's book lifecycle (create / delete) goes through the PUBLIC
+ * content API — the same `/api/content/v1` routes a publisher's release
+ * pipeline calls with `X-Admin-Key` — authenticated here by the admin session
+ * instead (those routes accept either credential). One implementation, two
+ * callers: the same discipline theme import chose deliberately
+ * (docs/design/theme-packages.md), because a portal-private create/delete
+ * would drift from the API's the first time either was edited.
+ */
+function contentApi<T>(path: string, init?: RequestInit): Promise<T> {
+  return call<T>(`/content/v1${path}`, init);
+}
+
+function apiCreateBook(args: { id: string; title?: string; author?: string; description?: string }): Promise<{ ok: boolean }> {
+  return contentApi<{ ok: boolean }>(`/books/${args.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      contractVersion: 1,
+      title: args.title || undefined,
+      author: args.author || undefined,
+      description: args.description || undefined,
+      // False is the load-bearing part: a book created in the portal is
+      // portal-owned (`origin: portal`) and stays editable here. The API's
+      // default (true) is for external systems that own what they push.
+      managed: false,
+    }),
+  });
+}
+
+function apiDeleteBook(id: string): Promise<{ ok: boolean }> {
+  return contentApi<{ ok: boolean }>(`/books/${id}`, { method: 'DELETE' });
+}
+
 function errorText(err: unknown, fallback: string): string {
   if (err instanceof ApiError) {
     if (err.detail) return err.detail;
@@ -128,23 +161,34 @@ interface PreviewResponse {
   charLength: number;
   readingTime: string;
   problem: string | null;
+  /** The content gate's full structured list — same codes and messages the API returns. */
+  errors?: { code: string; message: string; line?: number; field?: string }[];
+  /** True when the draft's own front matter (`storylark.publish: false`) would withhold a save. */
+  withheld?: boolean;
 }
 
-interface SaveResponse {
-  ok: true;
-  created: boolean;
-  contentHash: string;
-  wordCount: number;
-  readingTime: string;
-  audioStale: boolean;
-  libraryVersion: number;
-  announceVersion: number;
-  correction: boolean;
-  revisionCount: number;
-  notified: { announced: boolean; subscriptions: number };
-}
+type SaveResponse =
+  /** `storylark.publish: false` withheld the save: valid content, nothing written. */
+  | { ok: true; withheld: true; message: string }
+  | {
+      ok: true;
+      withheld?: false;
+      created: boolean;
+      contentHash: string;
+      wordCount: number;
+      readingTime: string;
+      audioStale: boolean;
+      libraryVersion: number;
+      announceVersion: number;
+      correction: boolean;
+      revisionCount: number;
+      notified: { announced: boolean; subscriptions: number };
+    };
 
-type View = { name: 'library' } | { name: 'book'; bookId: string } | { name: 'chapter'; bookId: string; chapterId: string; isNew?: boolean };
+type View =
+  | { name: 'library' }
+  | { name: 'book'; bookId: string }
+  | { name: 'chapter'; bookId: string; chapterId: string; isNew?: boolean; starterTitle?: string };
 
 /**
  * "Managed externally — edit at source" (AB#7422 — plan §8).
@@ -202,6 +246,18 @@ export function ContentSection(): JSX.Element {
   }, []);
   useEffect(reload, [reload]);
 
+  /** Refresh the library FIRST, then open the book — a just-created book isn't
+   *  in the state the view renders from until the listing has been re-fetched. */
+  const openBookFresh = useCallback((bookId: string) => {
+    setError('');
+    adminFetch<LibraryResponse>('/content/books')
+      .then((lib) => {
+        setLibrary(lib);
+        setView({ name: 'book', bookId });
+      })
+      .catch((e) => setError(errorText(e, 'Could not load the library.')));
+  }, []);
+
   if (error) {
     return (
       <section class="settings-section">
@@ -238,6 +294,7 @@ export function ContentSection(): JSX.Element {
         bookId={view.bookId}
         chapterId={view.chapterId}
         isNew={view.isNew === true}
+        starterTitle={view.starterTitle}
         flat={flat}
         onBack={() => {
           reload();
@@ -278,7 +335,9 @@ export function ContentSection(): JSX.Element {
           setView({ name: 'book', bookId });
         }
       }}
-      onNew={(bookId, chapterId) => setView({ name: 'chapter', bookId, chapterId, isNew: true })}
+      onNew={(bookId, chapterId, starterTitle) => setView({ name: 'chapter', bookId, chapterId, isNew: true, starterTitle })}
+      onCreated={openBookFresh}
+      onChanged={reload}
     />
   );
 }
@@ -288,16 +347,63 @@ function LibraryView({
   flat,
   onOpen,
   onNew,
+  onCreated,
+  onChanged,
 }: {
   library: LibraryResponse;
   flat: boolean;
   onOpen: (bookId: string) => void;
-  onNew: (bookId: string, chapterId: string) => void;
+  onNew: (bookId: string, chapterId: string, starterTitle?: string) => void;
+  /** A book (series shape) was created — refresh and open it. */
+  onCreated: (bookId: string) => void;
+  onChanged: () => void;
 }): JSX.Element {
   const [creating, setCreating] = useState(false);
   const [newId, setNewId] = useState('');
+  const [idTouched, setIdTouched] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newAuthor, setNewAuthor] = useState('');
+  const [newDescription, setNewDescription] = useState('');
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState('');
+  /** The book id a typed-confirmation delete is open for, or null. */
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const noun = flat ? 'story' : 'book';
+
+  /**
+   * Create the book/story through the public content API (see apiCreateBook),
+   * upload the cover if one was chosen, then open it: a book opens its chapter
+   * list, a story opens straight into the editor for its one chapter.
+   */
+  async function create(e: Event): Promise<void> {
+    e.preventDefault();
+    const id = slug(newId);
+    if (!id || createBusy) return;
+    if (library.books.some((b) => b.id === id)) {
+      setCreateError(`A ${noun} with the id "${id}" already exists. Ids are permanent addresses — pick another.`);
+      return;
+    }
+    setCreateBusy(true);
+    setCreateError('');
+    try {
+      await apiCreateBook({ id, title: newTitle.trim(), author: newAuthor.trim(), description: newDescription.trim() });
+      if (coverFile) {
+        // The book exists by now, so a failed cover upload must not strand the
+        // creation — it is reported and re-uploadable from the book's page.
+        await uploadImage(coverFile, id, 'cover').catch(() => undefined);
+      }
+      if (flat) {
+        onNew(id, 'full', newTitle.trim() || undefined);
+      } else {
+        onCreated(id);
+      }
+    } catch (err) {
+      setCreateError(errorText(err, `Could not create that ${noun}.`));
+      setCreateBusy(false);
+    }
+  }
   return (
     <section class="settings-section">
       <h2>{flat ? 'Stories' : 'Books'}</h2>
@@ -330,34 +436,89 @@ function LibraryView({
                 <OriginBadge readOnly={b.readOnly} />
                 {stale && <span class="admin-badge admin-badge-warn">audio out of date</span>}
               </button>
+              {/* Deleting a synced book would only make it reappear on the next
+                  sync or push, so the control isn't offered rather than offered
+                  and refused — same rule the chapter rows already follow. */}
+              {!b.readOnly && (
+                <button
+                  class="btn-ghost admin-row-action"
+                  disabled={createBusy}
+                  onClick={() => setDeleting(deleting === b.id ? null : b.id)}
+                >
+                  Delete
+                </button>
+              )}
+              {deleting === b.id && (
+                <DeleteBookControl
+                  book={b}
+                  noun={noun}
+                  onCancel={() => setDeleting(null)}
+                  onDeleted={() => {
+                    setDeleting(null);
+                    onChanged();
+                  }}
+                />
+              )}
             </li>
           );
         })}
       </ul>
 
       {creating ? (
-        <form
-          class="signin-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const id = slug(newId);
-            if (id) onNew(id, flat ? 'full' : 'chapter-1');
-          }}
-        >
+        <form class="signin-form" onSubmit={(e) => void create(e)}>
+          <label class="settings-row">
+            <span>Title</span>
+            <input
+              placeholder={flat ? 'A Short Title' : 'The Voyage Home'}
+              value={newTitle}
+              onInput={(e) => {
+                const value = (e.target as HTMLInputElement).value;
+                setNewTitle(value);
+                // The id follows the title until it is edited by hand — then
+                // the hand wins.
+                if (!idTouched) setNewId(slug(value));
+              }}
+            />
+          </label>
           <label class="settings-row">
             <span>{flat ? 'Story id' : 'Book id'}</span>
-            <input placeholder="a-short-title" value={newId} onInput={(e) => setNewId((e.target as HTMLInputElement).value)} />
+            <input
+              placeholder="a-short-title"
+              value={newId}
+              onInput={(e) => {
+                setIdTouched(true);
+                setNewId((e.target as HTMLInputElement).value);
+              }}
+            />
           </label>
           <p class="settings-note">
             Lowercase letters, digits and hyphens. This becomes the {noun}'s address and its folder in storage, so it's worth
             getting right the first time — it isn't renameable from here.
           </p>
-          <button class="btn" type="submit" disabled={!slug(newId)}>
-            Start writing
+          <label class="settings-row">
+            <span>Author</span>
+            <input value={newAuthor} onInput={(e) => setNewAuthor((e.target as HTMLInputElement).value)} />
+          </label>
+          <label class="settings-row">
+            <span>Description</span>
+            <input value={newDescription} onInput={(e) => setNewDescription((e.target as HTMLInputElement).value)} />
+          </label>
+          <label class="settings-row">
+            <span>Cover (optional)</span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+              disabled={createBusy}
+              onChange={(e) => setCoverFile((e.target as HTMLInputElement).files?.[0] ?? null)}
+            />
+          </label>
+          <button class="btn" type="submit" disabled={!slug(newId) || createBusy}>
+            {createBusy ? 'Creating…' : flat ? 'Create and start writing' : 'Create book'}
           </button>
-          <button type="button" class="btn-ghost" onClick={() => setCreating(false)}>
+          <button type="button" class="btn-ghost" disabled={createBusy} onClick={() => setCreating(false)}>
             Cancel
           </button>
+          {createError && <p class="settings-note admin-error">{createError}</p>}
         </form>
       ) : (
         <button class="btn" onClick={() => setCreating(true)}>
@@ -365,6 +526,70 @@ function LibraryView({
         </button>
       )}
     </section>
+  );
+}
+
+/**
+ * Typed-confirmation delete (the public API's DELETE route, called with the
+ * admin session). Typing the id is the confirmation — a delete removes every
+ * chapter from the library for every reader, so a misclick must not be enough.
+ * The source markdown, revision history and content-hashed objects all stay in
+ * storage; only the library entry goes, which is exactly what the API's own
+ * delete does.
+ */
+function DeleteBookControl({
+  book,
+  noun,
+  onCancel,
+  onDeleted,
+}: {
+  book: BookSummary;
+  noun: string;
+  onCancel: () => void;
+  onDeleted: () => void;
+}): JSX.Element {
+  const [confirmText, setConfirmText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const armed = confirmText === book.id;
+
+  async function run(): Promise<void> {
+    if (!armed || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await apiDeleteBook(book.id);
+      onDeleted();
+    } catch (e) {
+      setError(errorText(e, `Could not delete that ${noun}.`));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div class="settings-note admin-notice">
+      <p>
+        <strong>Delete “{book.title ?? book.id}”?</strong> This removes the {noun}
+        {book.chapterCount > 1 ? ` and all ${book.chapterCount} of its chapters` : ''} from the library for every reader. The
+        source markdown and revision history stay in storage, so a mistake is recoverable by republishing — but the {noun} is
+        gone from readers the moment you confirm.
+      </p>
+      <label class="settings-row">
+        <span>
+          Type <code>{book.id}</code> to confirm
+        </span>
+        <input value={confirmText} placeholder={book.id} onInput={(e) => setConfirmText((e.target as HTMLInputElement).value)} />
+      </label>
+      <div class="admin-editor-actions">
+        <button class="btn" disabled={!armed || busy} onClick={() => void run()}>
+          {busy ? 'Deleting…' : `Delete this ${noun}`}
+        </button>
+        <button class="btn-ghost" disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+      {error && <p class="settings-note admin-error">{error}</p>}
+    </div>
   );
 }
 
@@ -383,6 +608,7 @@ function BookView({
 }): JSX.Element {
   const [newId, setNewId] = useState('');
   const [message, setMessage] = useState('');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   /**
    * A pending reorder (AB#7412 — plan §3's "add, reorder, delete"). Null means
    * "untouched, showing the library's order".
@@ -537,6 +763,15 @@ function BookView({
         </form>
       )}
       {message && <p class="settings-note">{message}</p>}
+
+      {!book.readOnly &&
+        (confirmingDelete ? (
+          <DeleteBookControl book={book} noun="book" onCancel={() => setConfirmingDelete(false)} onDeleted={onBack} />
+        ) : (
+          <button class="btn-ghost" onClick={() => setConfirmingDelete(true)}>
+            Delete this book…
+          </button>
+        ))}
     </section>
   );
 }
@@ -655,12 +890,15 @@ function ChapterEditor({
   bookId,
   chapterId,
   isNew,
+  starterTitle,
   flat,
   onBack,
 }: {
   bookId: string;
   chapterId: string;
   isNew: boolean;
+  /** For a just-created story: its title, so the starter front matter carries it. */
+  starterTitle?: string;
   flat: boolean;
   onBack: () => void;
 }): JSX.Element {
@@ -692,7 +930,7 @@ function ChapterEditor({
 
   const load = useCallback(() => {
     if (isNew) {
-      const starter = `---\ntitle: ${chapterId.replace(/-/g, ' ')}\nlabel: ${flat ? 'Read' : 'Chapter'}\n---\n\n`;
+      const starter = `---\ntitle: ${starterTitle ?? chapterId.replace(/-/g, ' ')}\nlabel: ${flat ? 'Read' : 'Chapter'}\n---\n\n`;
       setMarkdown(starter);
       setDetail(null);
       setRevisions([]);
@@ -706,7 +944,7 @@ function ChapterEditor({
         setDirty(false);
       })
       .catch((e) => setError(errorText(e, 'Could not open that chapter.')));
-  }, [bookId, chapterId, isNew, flat]);
+  }, [bookId, chapterId, isNew, flat, starterTitle]);
   useEffect(load, [load]);
 
   // Debounced live preview. Parsed by the server with the same code that
@@ -741,6 +979,13 @@ function ChapterEditor({
         }),
       });
       setConflict(null);
+      if (res.withheld) {
+        // `storylark.publish: false` in the draft's front matter: valid, and
+        // deliberately not published. Nothing was written, so the draft stays
+        // dirty — losing it because a flag withheld it would be worse.
+        setMessage(res.message);
+        return;
+      }
       setDirty(false);
       setMessage(
         [
@@ -969,7 +1214,28 @@ function ChapterEditor({
         )}
       </div>
 
-      {problem && !readOnly && <p class="settings-note admin-error">{problem}</p>}
+      {problem && !readOnly && (
+        <div class="settings-note admin-error">
+          {(preview?.errors?.length ?? 0) > 1 ? (
+            <ul>
+              {preview!.errors!.map((e) => (
+                <li key={`${e.code}-${e.line ?? 0}`}>
+                  {e.message}
+                  {e.line ? ` (line ${e.line})` : ''}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            problem
+          )}
+        </div>
+      )}
+      {preview?.withheld && !readOnly && (
+        <p class="settings-note admin-notice">
+          This draft sets <code>storylark: publish: false</code>, so saving will be accepted but withheld from readers until the
+          flag is removed or set to true.
+        </p>
+      )}
 
       {readOnly ? (
         <p class="settings-note">

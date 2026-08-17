@@ -89,6 +89,54 @@ chapter) — either shape works; use the folder form once a book actually has
 more than one chapter, or if you want `book.json` kept separate from the
 first chapter's text.
 
+## The `storylark:` block — declaring content explicitly
+
+Alongside the layout convention above, a file can carry a namespaced
+`storylark:` block in its frontmatter. It is **additive**: nothing else in the
+file changes, your own fields are untouched, and your own site's build ignores
+the extra key.
+
+```markdown
+---
+title: The Voyage Home, Going East     # your field, untouched
+storyNumber: 1                          # your field, untouched
+storylark:                              # ← the only thing you add
+  type: chapter
+  book: the-voyage-home
+  chapter: going-east
+  order: 1
+---
+```
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `type` | `book` \| `chapter` \| `story` | yes | What this file is. |
+| `book` | id | for `chapter` | The book this chapter belongs to. |
+| `chapter` | id | for `chapter` | This chapter's id. |
+| `order` | integer | for `chapter` | Position within the book. Gaps are fine; **ties are an error**, never silently resolved. Where a block declares `order`, filename prefixes are not consulted. |
+| `publish` | boolean | no (default `true`) | `false` withholds the chapter: it validates, and it is not published. |
+| `title` | string | no | Overrides the top-level `title`. |
+| `cover` | path | no | Relative to the file — never a URL; images are ingested, not hotlinked. |
+| `contractVersion` | integer | no (default `1`) | Pins the format. |
+
+- `type: story` is a book with exactly one chapter, in one file — `book`,
+  `chapter` and `order` are then optional.
+- `type: book` carries book metadata only (no prose).
+- Ids are lowercase `[a-z0-9-]`, and stable: changing an id creates a new
+  object.
+
+**For content synced from a repo the block is required**: a file without a
+`storylark:` block is not StoryLark content and is never ingested — drafts and
+non-content files are safe by default because ingestion is opt-in, never
+inferred. Content published through the portal or the
+[content API](content-api.md) doesn't need the block (the request itself states
+the identity), but when the block is present it is validated strictly and must
+agree with the address it arrived at.
+
+Validation is one gate with one error vocabulary: the same bad file produces
+the same error code and message whether it comes through the portal (inline),
+a repo sync (skipped and listed), or the API (`422`).
+
 ## Markdown block conventions
 
 The same conventions the pipeline has always used — see
