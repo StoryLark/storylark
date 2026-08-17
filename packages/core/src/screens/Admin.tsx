@@ -676,10 +676,13 @@ function PublishSection({ onPublished }: { onPublished: () => void }): JSX.Eleme
 
   return (
     <section class="settings-section">
-      <h2>Publish a story</h2>
+      <h2>Publish a story via GitHub</h2>
       <p class="settings-note">
-        Text publishes immediately. Narration depends on whether this deployment has TTS credentials configured — check the
-        message after publishing.
+        A second way in, separate from the <strong>{'Stories'}</strong> list above: this commits straight to your site's repo
+        and publishes through CI, which is the only place this deployment can generate narration. Use the list above to edit
+        instantly with no GitHub round trip — text publishes right away either way, but a story started there has no audio
+        until something narrates it. Text publishes immediately here too; narration depends on whether this deployment has TTS
+        credentials configured in CI — check the message after publishing.
       </p>
       <label class="settings-row">
         <span>Book id</span>
