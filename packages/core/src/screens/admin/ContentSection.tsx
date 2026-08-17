@@ -612,7 +612,10 @@ function CoverUpload({ book, contentOrigin, onChanged }: { book: BookSummary; co
 
   return (
     <div class="admin-cover">
-      {book.cover && contentOrigin && (
+      {/* contentOrigin '' is same-origin (AB#7395): the src below is then a
+          root-relative /books/… URL, which the browser resolves against the
+          app's own origin — so the check is "was it stated", not truthiness. */}
+      {book.cover && contentOrigin != null && (
         <img class="admin-cover-thumb" src={`${contentOrigin.replace(/\/+$/, '')}/${book.cover}`} alt={`Cover of ${book.title ?? book.id}`} />
       )}
       <input

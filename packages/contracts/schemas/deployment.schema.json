@@ -18,7 +18,7 @@
     },
     "contentOrigin": {
       "type": "string",
-      "description": "Where published content is served from (contentUrl() builds asset URLs from this)."
+      "description": "Where published content is served from (contentUrl() builds asset URLs from this). Optional: empty (the default for a new deployment) means SAME-ORIGIN — the app serves its own content at root-relative paths (/manifest.json, /books/*), with no separate content domain or DNS setup. Set an absolute origin (e.g. an R2 custom domain or CDN) only to serve content off the app's own domain, which lets content requests bypass the Worker."
     },
     "vapidPublicKey": {
       "type": "string",

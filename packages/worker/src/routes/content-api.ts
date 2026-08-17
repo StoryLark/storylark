@@ -125,7 +125,9 @@ contentApi.get('/v1', (c) => {
     contractVersion: CONTENT_API_VERSION,
     supported: { min: MIN_SUPPORTED_CONTENT_API_VERSION, max: CONTENT_API_VERSION },
     storeAvailable: !!storeOf(c),
-    contentOrigin: c.env.CONTENT_ORIGIN,
+    // '' = same-origin content (AB#7395): published objects are public on the
+    // deployment's own origin at root-relative paths (/manifest.json, /books/*).
+    contentOrigin: c.env.CONTENT_ORIGIN ?? '',
     limits: CONTENT_API_LIMITS,
     /** What arrives with content pushed here, unless `managed: false` is sent. */
     defaults: { managed: true, origin: 'sync', policy: 'best-effort', narrate: true },

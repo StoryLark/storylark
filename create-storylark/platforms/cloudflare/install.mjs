@@ -73,7 +73,16 @@ function loadEnvFile(path) {
 const envPath = join(__dirname, 'install.env');
 const env = { ...loadEnvFile(envPath), ...process.env };
 
-const REQUIRED = ['BRAND_ID', 'APP_ORIGIN', 'CONTENT_ORIGIN', 'MAIL_FROM', 'APP_NAME'];
+// CONTENT_ORIGIN is deliberately NOT here (AB#7395). Unset means same-origin:
+// the Worker serves the R2 bucket's content itself at /manifest.json and
+// /books/*, so a fresh deployment needs no R2 custom domain and no DNS work
+// before content loads. Set it only to serve content from its own domain.
+const REQUIRED = ['BRAND_ID', 'APP_ORIGIN', 'MAIL_FROM', 'APP_NAME'];
+
+// Same-origin default: '' is a real value ("serve content from the app's own
+// origin"), and everything downstream — the wrangler vars block, the build's
+// STORYLARK_CONTENT_ORIGIN override — needs a string, never undefined.
+env.CONTENT_ORIGIN = (env.CONTENT_ORIGIN ?? '').trim();
 
 /**
  * Admin bootstrap (AB#7404), shared with platforms/azure/install.mjs.
@@ -164,6 +173,12 @@ function verify(quiet = false) {
     ok = false;
   } else {
     console.log('✓ Required values present:', REQUIRED.join(', '));
+  }
+
+  if (env.CONTENT_ORIGIN) {
+    console.log(`✓ CONTENT_ORIGIN set — content will be served from ${env.CONTENT_ORIGIN} (attach an R2 custom domain there after deploy).`);
+  } else {
+    console.log('✓ CONTENT_ORIGIN not set — content will be served same-origin by the Worker (no R2 custom domain, no DNS setup needed).');
   }
 
   if (env.BRAND_ID && !/^[a-z0-9-]{3,24}$/.test(env.BRAND_ID)) {
@@ -490,6 +505,20 @@ async function deploy() {
   });
 
   console.log('\nDeployed. Publish content next: node packages/pipeline/publish.mjs --brand ' + env.BRAND_ID + ' --source <path>.');
+  if (env.CONTENT_ORIGIN) {
+    console.log(
+      `\nCONTENT_ORIGIN is ${env.CONTENT_ORIGIN}: attach an R2 custom domain to the\n` +
+        `"${env.BRAND_ID}-content" bucket so it serves there (Cloudflare dashboard -> R2 ->\n` +
+        'bucket -> Settings -> Custom Domains). Content will not load until that domain resolves.'
+    );
+  } else {
+    console.log(
+      '\nContent is served same-origin (no CONTENT_ORIGIN set): the Worker answers\n' +
+        '/manifest.json and /books/* from the R2 bucket directly. Nothing to configure.\n' +
+        'To move content onto its own domain later, set CONTENT_ORIGIN in install.env\n' +
+        'and wrangler.jsonc, attach an R2 custom domain, and redeploy.'
+    );
+  }
 
   console.log('\nWaiting for the site to come up so we can mint your admin setup link...');
   await printAdminSetup(env.APP_ORIGIN, adminKey);

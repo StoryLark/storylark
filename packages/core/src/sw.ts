@@ -14,12 +14,33 @@ import { DEPLOYMENT, DEPLOYMENT_INJECTED, restampDeployment } from './deployment
 // now, not what was baked at build. It has to be resolved synchronously: the
 // fetch handler below decides whether to call respondWith() before it may
 // await anything.
+//
+// '' is a meaningful value, not a missing one (AB#7395): same-origin content,
+// served by the deployment itself at root-relative paths. isContentRequest()
+// below is what turns either shape into "is this a content fetch".
 const CONTENT_ORIGIN = DEPLOYMENT.contentOrigin;
 const DOWNLOAD_CACHE = 'sr-downloads';
 const RUNTIME_CACHE = 'sr-runtime';
 
 /** Where this app is served from — always right, whatever `appOrigin` says. */
 const APP_ORIGIN = self.location.origin;
+
+/**
+ * Is this request for published content?
+ *
+ * With a configured content origin, the answer is the origin comparison it has
+ * always been. With `contentOrigin: ''` — same-origin content (AB#7395), the
+ * default for a fresh deployment — content arrives on the app's OWN origin, at
+ * exactly the two path shapes the publish pipeline writes: /manifest.json and
+ * /books/*. The path check is load-bearing: treating all of APP_ORIGIN as
+ * content would route /api/* and the app shell into content caching
+ * (cache-first, forever, for API responses), which is precisely where they
+ * must never go.
+ */
+function isContentRequest(url: URL): boolean {
+  if (CONTENT_ORIGIN) return url.origin === CONTENT_ORIGIN;
+  return url.origin === APP_ORIGIN && (url.pathname === '/manifest.json' || url.pathname.startsWith('/books/'));
+}
 
 /**
  * The brand's stylesheet, served by the platform from dist/theme.css with the
@@ -150,12 +171,12 @@ self.addEventListener('fetch', (event) => {
   // illustrations just because they came from next door. Narrow on purpose:
   // only image requests, and only ones already in the download cache, so this
   // costs nothing for everything else.
-  if (event.request.destination === 'image' && url.origin !== CONTENT_ORIGIN && url.origin !== APP_ORIGIN) {
+  if (event.request.destination === 'image' && !isContentRequest(url) && url.origin !== APP_ORIGIN) {
     event.respondWith(downloadedImageOrNetwork(event.request));
     return;
   }
 
-  if (url.origin !== CONTENT_ORIGIN) return;
+  if (!isContentRequest(url)) return;
 
   if (url.pathname.includes('/audio/')) {
     event.respondWith(serveAudio(event.request));

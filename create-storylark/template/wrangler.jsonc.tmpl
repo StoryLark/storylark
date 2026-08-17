@@ -36,7 +36,12 @@
       "vars": {
         "BRAND": "__BRAND_ID__",
         "APP_ORIGIN": "https://app.example.com",
-        "CONTENT_ORIGIN": "https://content.example.com",
+        // "" = same-origin (the default): the Worker serves content from the
+        // CONTENT bucket itself at /manifest.json and /books/* — no R2 custom
+        // domain, no DNS setup. Set a URL (e.g. "https://content.example.com")
+        // only to serve content from its own domain; that requires attaching
+        // an R2 custom domain to the bucket.
+        "CONTENT_ORIGIN": "",
         "MAIL_FROM": "__APP_NAME__ <noreply@example.com>",
         "APP_NAME": "__APP_NAME__"
       }

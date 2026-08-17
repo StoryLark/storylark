@@ -13,7 +13,7 @@ import { adminContent } from './routes/admin-content';
 import { adminNarration } from './routes/admin-narration';
 import { adminThemes } from './routes/admin-themes';
 import { contentApi } from './routes/content-api';
-import { r2ContentStore } from './lib/content-store';
+import { IMMUTABLE, SHORT, r2ContentStore } from './lib/content-store';
 import { readActiveTheme, readActiveCss, readActiveIcon, type ActiveTheme } from './lib/theme-store';
 import { checkForUpdateAndNotify } from './lib/update-check';
 import { cloudflareSelfDeploy } from './lib/self-deploy';
@@ -122,6 +122,37 @@ app.get('/manifest.webmanifest', async (c) => {
     'Content-Type': 'application/manifest+json',
     'Cache-Control': 'no-store',
   });
+});
+
+/**
+ * Same-origin content (AB#7395).
+ *
+ * Published content lives in the deployment's own storage — the CONTENT R2
+ * bucket on Cloudflare — but until now the only way to SERVE it was to give
+ * that storage a public domain of its own, which on Cloudflare means an R2
+ * custom domain, which means DNS work outside Cloudflare's dashboard before a
+ * brand-new deployment can load a single book. These routes close that gap:
+ * with `contentOrigin` unset ('' — the scaffold default), `contentUrl()` in
+ * the frontend produces root-relative URLs — /manifest.json, /books/… — and
+ * they land here, answered straight out of the same bucket the publish
+ * pipeline and the portal already write. No custom domain, no DNS, no step 3.
+ *
+ * Registered for exactly the two path shapes the pipeline writes public
+ * content under, and nothing else: the bucket also holds theme state
+ * (themes/*), and installed-theme history is not part of the public content
+ * contract just because an R2 custom domain would have exposed it.
+ *
+ * A deployment with a real CONTENT_ORIGIN is untouched — the app never asks
+ * this origin for content then — but the routes still answer, so a
+ * root-relative image URL pasted into markdown while same-origin keeps
+ * resolving after a later move to a custom content domain.
+ *
+ * Falls through to serveAsset() when the object — or the storage binding —
+ * is missing, which is what `publish.mjs --local app/dist` relies on:
+ * same-origin content served as plain static assets, no bucket involved.
+ */
+app.on(['GET', 'HEAD'], ['/manifest.json', '/books/*'], async (c) => {
+  return (await serveContent(c.req.raw, c.env)) ?? serveAsset(c.req.raw, c.env);
 });
 
 app.notFound((c) => {
@@ -244,6 +275,111 @@ function rewritten(response: Response, body: string): Response {
   headers.delete('last-modified');
   headers.set('cache-control', 'no-store');
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
+}
+
+/** MIME by extension, for stores that record none (a local content directory). */
+const CONTENT_MIME: Record<string, string> = {
+  json: 'application/json',
+  md: 'text/markdown; charset=utf-8',
+  mp3: 'audio/mpeg',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  avif: 'image/avif',
+};
+
+/**
+ * Serve one published object out of the deployment's own content storage, or
+ * undefined for "not here — let the asset router answer".
+ *
+ * Two drivers, same preference order the rest of the Worker uses:
+ *
+ *   • The raw CONTENT R2 binding, when Cloudflare bound one. Used directly
+ *     rather than through the ContentStore seam because serving is where the
+ *     seam's simplicity costs real behavior: `<audio>` seeks with Range
+ *     requests, browsers revalidate with If-None-Match, and R2 answers both
+ *     natively — buffering whole audio files to slice them here would be the
+ *     service worker's 206 synthesis done in the wrong place, per request.
+ *   • CONTENT_STORE, for platform entries that bind one without an R2 bucket
+ *     (the Azure Node entry, a local directory). Full-body responses only,
+ *     which is fine: those platforms serve content from their own public
+ *     origin in production, so this path is a dev/fallback door.
+ *
+ * Cache-control comes from the object's own stored metadata (the pipeline and
+ * the portal both write it), with the pipeline's exact policy as the fallback
+ * for objects that carry none: the manifest names the whole library so it
+ * stays SHORT; every other key is content-hashed and immutable.
+ */
+async function serveContent(request: Request, env: Env): Promise<Response | undefined> {
+  let key: string;
+  try {
+    key = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, '');
+  } catch {
+    return undefined; // malformed percent-encoding — not a stored key
+  }
+  if (!key) return undefined;
+  const fallbackCache = key === 'manifest.json' ? SHORT : IMMUTABLE;
+
+  const bucket = env.CONTENT;
+  if (bucket) {
+    // Engaged only when the request actually sent one: workerd fills in
+    // `object.range` for a plain get handed the headers too (confirmed against
+    // a real `wrangler dev` — every response came back 206), so the header is
+    // both the opt-in and the discriminator for the 206 below.
+    const rangeHeader = request.headers.get('range');
+    let object: R2Object | R2ObjectBody | null;
+    try {
+      object =
+        request.method === 'HEAD'
+          ? await bucket.head(key)
+          : await bucket.get(key, { range: rangeHeader ? request.headers : undefined, onlyIf: request.headers });
+    } catch {
+      // R2 throws on an unsatisfiable/malformed Range — answer it as HTTP does.
+      return new Response(null, { status: 416 });
+    }
+    if (!object) return undefined;
+
+    const headers = new Headers();
+    object.writeHttpMetadata(headers);
+    headers.set('etag', object.httpEtag);
+    headers.set('accept-ranges', 'bytes');
+    if (!headers.has('cache-control')) headers.set('cache-control', fallbackCache);
+
+    if (request.method === 'HEAD') {
+      headers.set('content-length', String(object.size));
+      return new Response(null, { status: 200, headers });
+    }
+    // A precondition (onlyIf) that failed comes back as a bodiless R2Object.
+    const withBody = 'body' in object ? (object as R2ObjectBody) : undefined;
+    if (!withBody?.body) return new Response(null, { status: 304, headers });
+
+    const range = object.range as { offset?: number; length?: number; suffix?: number } | undefined;
+    if (rangeHeader && range) {
+      const offset = range.suffix !== undefined ? object.size - range.suffix : (range.offset ?? 0);
+      const length = range.suffix !== undefined ? range.suffix : (range.length ?? object.size - offset);
+      headers.set('content-range', `bytes ${offset}-${offset + length - 1}/${object.size}`);
+      headers.set('content-length', String(length));
+      return new Response(withBody.body, { status: 206, headers });
+    }
+    headers.set('content-length', String(object.size));
+    return new Response(withBody.body, { status: 200, headers });
+  }
+
+  const store = env.CONTENT_STORE;
+  if (!store) return undefined;
+  const object = await store.get(key);
+  if (!object) return undefined;
+  const ext = key.slice(key.lastIndexOf('.') + 1).toLowerCase();
+  return new Response(request.method === 'HEAD' ? null : object.body, {
+    status: 200,
+    headers: {
+      'Content-Type': object.contentType ?? CONTENT_MIME[ext] ?? 'application/octet-stream',
+      'Cache-Control': fallbackCache,
+      'Content-Length': String(object.body.byteLength),
+    },
+  });
 }
 
 /**

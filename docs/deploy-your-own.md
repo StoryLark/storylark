@@ -26,7 +26,11 @@ is in [`build-your-own-theme.md`](build-your-own-theme.md). At minimum, set:
 - `id` — must match the folder name and the `--mode` you build with.
 - `appName`, `name`, `shortName`, `tagline`, `author`.
 - `appOrigin` — where the app is served (e.g. `https://app.example.com`).
-- `contentOrigin` — where R2 content is served (e.g. `https://content.example.com`).
+- `contentOrigin` — **optional.** Leave it `""` (same-origin, the default for a
+  new deployment) and the Worker serves content out of the R2 bucket itself at
+  `/manifest.json` and `/books/*` — no content domain, no DNS setup. Set a URL
+  (e.g. `https://content.example.com`) only to serve content from its own
+  domain — see step 3 for when that's worth it.
 - `themeColor` / `backgroundColor` — must match your theme's paper color.
 - `layout` and `nouns` — see [`build-your-own-presentation.md`](build-your-own-presentation.md).
 
@@ -74,7 +78,8 @@ and a `logo.svg` — supply your own equivalents if your HTML references them.)
     "vars": {
       "BRAND": "<your-id>",
       "APP_ORIGIN": "https://app.example.com",
-      "CONTENT_ORIGIN": "https://content.example.com",
+      // "" = same-origin (no content domain needed). Or e.g. "https://content.example.com".
+      "CONTENT_ORIGIN": "",
       "MAIL_FROM": "Your App <noreply@example.com>",
       "APP_NAME": "Your App"
     }
@@ -142,11 +147,27 @@ pipeline derives this name from the brand id):
 npx wrangler r2 bucket create <your-id>-content
 ```
 
-Attach an R2 **custom domain** so the bucket serves at your `contentOrigin`. The
-pipeline uploads objects at the bucket root, and an R2 custom domain serves the
-bucket root at the domain root — so `content.example.com/manifest.json` maps to
-the `manifest.json` object. (See [`architecture.md`](architecture.md) for why
-content bypasses the Worker.)
+**No custom domain is needed.** With `contentOrigin`/`CONTENT_ORIGIN` left
+empty (the default), the Worker serves the bucket's content itself, same-origin:
+`contentUrl()` builds root-relative URLs and `GET /manifest.json` and
+`GET /books/*` answer straight out of the `CONTENT` binding, with the same
+cache-control the pipeline wrote each object with. A fresh deployment loads
+content the moment `publish.mjs` finishes — nothing to configure.
+
+**Optionally**, serve content from its own domain instead: set
+`contentOrigin`/`CONTENT_ORIGIN` to e.g. `https://content.example.com` and
+attach an R2 **custom domain** to the bucket. The pipeline uploads objects at
+the bucket root, and an R2 custom domain serves the bucket root at the domain
+root — so `content.example.com/manifest.json` maps to the `manifest.json`
+object. Why bother: content requests then bypass the Worker entirely — zero
+Worker invocations for chapter JSON, audio and art, which matters for
+free-tier headroom on a high-traffic site, and it lets you put a different CDN
+or caching policy in front of content than in front of the app. (See
+[`architecture.md`](architecture.md).) The trade-off is real DNS work: R2
+custom domains require the domain to be in your Cloudflare zone. Same-origin
+costs one Worker invocation per content fetch — mostly absorbed in practice by
+the service worker's aggressive content caching and the year-long
+`Cache-Control` on hashed objects.
 
 ## 4. Set secrets
 

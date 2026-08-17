@@ -20,7 +20,15 @@ const PLATFORMS = {
     fields: [
       ['BRAND_ID', 'Brand id (lowercase, e.g. "my-story-app")'],
       ['APP_ORIGIN', 'App URL (e.g. https://app.example.com)'],
-      ['CONTENT_ORIGIN', 'Content URL (e.g. https://content.example.com)'],
+      // Optional since AB#7395: blank = same-origin — the Worker serves
+      // content from the R2 bucket at the app's own domain, so a first
+      // deploy needs no R2 custom domain and no DNS work at all. A separate
+      // content domain is an optimisation (content bypasses the Worker),
+      // not a requirement.
+      [
+        'CONTENT_ORIGIN',
+        'Content URL — optional. Leave blank to serve content from the app\'s own domain (recommended to start; no DNS setup). Set e.g. https://content.example.com only for a separate content domain/CDN',
+      ],
       ['MAIL_FROM', 'From address for emails (e.g. "My App <noreply@example.com>")'],
       ['APP_NAME', 'App display name'],
     ],

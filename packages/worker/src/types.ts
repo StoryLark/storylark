@@ -7,7 +7,14 @@ export interface Env {
   // to the D1 reference driver; other platform entries (Azure, AWS) bind it
   // to the Postgres driver. Route code only ever sees this interface.
   DB: Database & ConflictInsert;
-  CONTENT: R2Bucket;
+  /**
+   * The R2 content bucket, on Cloudflare. Optional because non-Cloudflare
+   * entries never bind one — they bind CONTENT_STORE below instead. When
+   * present it also serves same-origin content reads (AB#7395): GET
+   * /manifest.json and /books/* answer straight out of this bucket, which is
+   * what lets a deployment run with no CONTENT_ORIGIN configured at all.
+   */
+  CONTENT?: R2Bucket;
   /**
    * Writable content storage, platform-agnostic (AB#7420). The Cloudflare entry
    * binds it from the CONTENT R2 bucket; platforms/azure/server.mjs binds an
@@ -26,7 +33,14 @@ export interface Env {
   ASSETS: Fetcher;
   BRAND: string;
   APP_ORIGIN: string;
-  CONTENT_ORIGIN: string;
+  /**
+   * Where published content is served from — a dedicated domain (an R2 custom
+   * domain, Azure Blob, a CDN). OPTIONAL since AB#7395: unset or empty means
+   * same-origin — the app serves its own content at root-relative paths
+   * (/manifest.json, /books/*), so a fresh Cloudflare deployment needs no
+   * content DNS at all. Set it only to move content onto its own domain.
+   */
+  CONTENT_ORIGIN?: string;
   MAIL_FROM: string;
   APP_NAME: string;
   // Narration config (AB#7414). Optional, and read by nothing in the Worker —

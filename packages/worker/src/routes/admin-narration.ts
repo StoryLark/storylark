@@ -165,7 +165,10 @@ adminNarration.post('/narration/claim', async (c) => {
   const max = Number.isFinite(body.max) ? Number(body.max) : 1;
   try {
     const jobs = await claimJobs(c.env, worker, max);
-    const origin = (c.env.CONTENT_ORIGIN ?? '').replace(/\/+$/, '');
+    // Same-origin content (AB#7395): with no CONTENT_ORIGIN the chapter JSON
+    // is public on the app's own origin, served by this very Worker — so the
+    // claim hands out that URL rather than a null a runner cannot fetch.
+    const origin = (c.env.CONTENT_ORIGIN || c.env.APP_ORIGIN || '').replace(/\/+$/, '');
     return c.json({
       ok: true,
       worker,

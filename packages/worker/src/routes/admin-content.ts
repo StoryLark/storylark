@@ -213,7 +213,9 @@ adminContent.get('/content/books', async (c) => {
   }
   return c.json({
     storeAvailable: true,
-    contentOrigin: c.env.CONTENT_ORIGIN,
+    // '' means same-origin (AB#7395): the portal builds root-relative asset
+    // URLs from it, which the browser resolves against the app's own origin.
+    contentOrigin: c.env.CONTENT_ORIGIN ?? '',
     libraryVersion: manifest.libraryVersion,
     announceVersion: announceVersionOf(manifest),
     revisionLimit: revisionLimit(c.env),
@@ -659,7 +661,12 @@ adminContent.post('/upload', async (c) => {
     kind === 'cover' ? key.cover(bookId, hash, ext) : key.image(bookId, `${slugify(fileName, ext)}-${hash}.${ext}`);
   await store.put(storageKey, bytes, { contentType: fileType, cacheControl: IMMUTABLE });
 
-  const url = `${c.env.CONTENT_ORIGIN.replace(/\/+$/, '')}/${storageKey}`;
+  // With no CONTENT_ORIGIN (same-origin content, AB#7395) this is a
+  // root-relative URL — /books/… — which the browser resolves against the
+  // app's own origin, where the Worker serves the bucket. It stays valid even
+  // if the deployment later gains a custom content domain, because the
+  // same-origin routes keep answering regardless.
+  const url = `${(c.env.CONTENT_ORIGIN ?? '').replace(/\/+$/, '')}/${storageKey}`;
 
   if (kind === 'cover') {
     const manifest = await readManifest(store);

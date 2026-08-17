@@ -192,7 +192,7 @@ is how the platform installers configure a deployment they just provisioned.
 |---|---|---|---|
 | `contractVersion` | integer | Always `1` today. | — |
 | `appOrigin` | string (URL) | Where the app is served. Also the base for admin publish notify, and (with the `app.` label dropped) the marketing origin used to resolve root-relative image `src`s. | `STORYLARK_APP_ORIGIN` |
-| `contentOrigin` | string (URL) | Where published content is served (`contentUrl()` builds asset URLs from this). | `STORYLARK_CONTENT_ORIGIN` |
+| `contentOrigin` | string (URL) | Where published content is served (`contentUrl()` builds asset URLs from this). **Optional:** empty means same-origin — the app serves its own content at `/manifest.json` and `/books/*`, no separate content domain needed. | `STORYLARK_CONTENT_ORIGIN` |
 | `vapidPublicKey` | string | Web-push VAPID **public** key (base64url). Empty disables the push toggle. Generate with `packages/pipeline/gen-vapid.mjs`. | `STORYLARK_VAPID_PUBLIC_KEY` |
 | `tts` | object | `{ voice, rate, outputFormat, voices }` used at publish time. `voice` is a Kokoro or Azure Speech voice id; `outputFormat` an Azure output-format enum. | `STORYLARK_TTS_VOICE`, `STORYLARK_TTS_RATE`, `STORYLARK_TTS_OUTPUT_FORMAT`, `STORYLARK_TTS_VOICES` (comma-separated) |
 

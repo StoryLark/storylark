@@ -4,6 +4,7 @@ import type { AppContext } from '../types';
 import { INIT_SCHEMA } from '../lib/schema';
 import { requireAdmin } from '../lib/session';
 import { recordPublish } from '../lib/notify';
+import { readManifest } from '../lib/content';
 import { resolveSelfDeploy } from '../lib/self-deploy';
 import { downloadEngineArtifact, findEngineRelease, EngineReleaseError } from '../lib/engine-release';
 import { readEnginePackage, EnginePackageError } from 'storylark-contracts/engine-package';
@@ -314,9 +315,18 @@ admin.get('/status', async (c) => {
   let bookCount: number | null = null;
   let chapterCount: number | null = null;
   try {
-    const res = await fetch(`${c.env.CONTENT_ORIGIN}/manifest.json`);
-    if (res.ok) {
-      const manifest = (await res.json()) as { books?: { chapters?: unknown[] }[] };
+    // The bound content store first (AB#7395): it is the manifest's actual
+    // home, it works when CONTENT_ORIGIN is unset (same-origin content — a
+    // Worker cannot fetch() a root-relative URL), and it saves an HTTP hop on
+    // deployments that do have a content domain. The public-origin fetch
+    // survives as the fallback for a deployment serving content it cannot
+    // read as storage (no store bound, content published elsewhere).
+    const manifest: { books?: { chapters?: unknown[] }[] } | null = c.env.CONTENT_STORE
+      ? await readManifest(c.env.CONTENT_STORE)
+      : c.env.CONTENT_ORIGIN
+        ? await fetch(`${c.env.CONTENT_ORIGIN}/manifest.json`).then((res) => (res.ok ? res.json() : null))
+        : null;
+    if (manifest) {
       bookCount = manifest.books?.length ?? 0;
       chapterCount = manifest.books?.reduce((n, b) => n + (b.chapters?.length ?? 0), 0) ?? 0;
     }
