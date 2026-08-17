@@ -142,16 +142,27 @@ normal `--deploy` (and `--update`), telling you exactly what it did:
   on that one Web App**. No credential is stored anywhere; the app fetches
   a short-lived token at the moment of use. Revoke it by deleting the role
   assignment in the Azure portal, or run `--disable-one-click --yes`.
-- **Cloudflare**: an API token stored as a Worker secret. When the
-  installer authenticated with an API token of your own, it first tries to
-  **mint a new one scoped to `Workers Scripts | Edit`** and stores that; if
-  your token cannot create tokens (a common restriction), it stores the
-  token it authenticated with and says so plainly. When you authenticated
-  with `wrangler login` (OAuth), there is no raw token to store — that is a
-  Cloudflare boundary — so the installer prints how to finish the job:
-  `--enable-one-click --yes`, which asks you to paste a token you mint
-  yourself. Revoke any of these at
-  <https://dash.cloudflare.com/profile/api-tokens>.
+- **Cloudflare**: a credential stored as a Worker secret — provisioned
+  automatically whichever way you were logged in when the installer ran.
+  When the installer authenticated with an API token of your own, it first
+  tries to **mint a new one scoped to `Workers Scripts | Edit`** and stores
+  that; if your token cannot create tokens (a common restriction), it
+  stores the token it authenticated with and says so plainly. When you
+  authenticated with `wrangler login` (OAuth), the installer reads the
+  session wrangler stored on your machine and **hands that session to the
+  deployment**: it refreshes it once (taking over the session's refresh
+  chain — your local wrangler may ask you to log in again later, which is
+  expected and harmless) and stores the refresh token as a Worker secret;
+  the deployment exchanges it for a short-lived token only at the moment an
+  API-server release installs. It would rather mint a narrow API token from
+  the session, and tries that first, but Cloudflare does not let a wrangler
+  login manage API tokens. Revoke a minted or stored token at
+  <https://dash.cloudflare.com/profile/api-tokens>; withdraw a handed-over
+  session with `--disable-one-click --yes` (which also revokes it
+  best-effort) or by logging the session out from the Cloudflare dashboard.
+  If the installer can find nothing to provision from, it **fails loudly**
+  (non-zero exit, with the reason and the fix) rather than quietly leaving
+  a site unable to self-update.
 
 Turning it off:
 
@@ -162,8 +173,13 @@ node platforms/<cloudflare|azure>/install.mjs --disable-one-click --yes
 This also records `SELF_UPDATE=off` in `install.env`, so a later `--update`
 does not silently re-enable it. With it off, the portal still updates
 engine releases exactly as before; for a release that changes the API
-server it says plainly that self-update is off for this deployment, how to
-turn it back on, and shows the command that always works.
+server it says plainly that self-update is disabled for this deployment
+and how to turn it back on — a deliberate opt-out is the ONE state where
+the button can be unavailable, and the portal reports it as exactly that,
+never as a routine platform difference. (The installer command remains
+documented in the portal as reference — the floor that works with nothing
+but your own machine — but it is never presented as the path you have to
+take.)
 
 ## What the button deliberately cannot do
 

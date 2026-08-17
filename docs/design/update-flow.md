@@ -188,27 +188,47 @@ The Node/Azure entry (`platforms/azure/server.mjs`) serves the same store
 through the same `readActiveEngineCached`, so the mechanism — and the code
 that implements it — is one thing, not a per-platform pair.
 
-### The remaining boundary, honestly
+### The permission, absorbed at install time — no remaining boundary
 
 A running Cloudflare Worker cannot replace its own script: no eval, no
 remote dynamic import — a platform restriction, not a design choice. So a
 release that changes `storylark-worker` still needs a platform deploy, and
 that needs a permission. The requirement's answer is to absorb it at
-INSTALL time rather than surface it to the operator: Azure's installer
-provisions a managed identity + Website Contributor automatically during
-`--deploy`/`--update`; Cloudflare's tries to mint a `Workers Scripts |
-Edit`-scoped token with the credential the install already used (falling
-back to storing that credential, disclosed), and says plainly when an
-OAuth-only login makes neither possible. `--disable-one-click` turns it
-off and records `SELF_UPDATE=off` in install.env so a routine update does
-not undo the choice. The one state where the portal shows a command
-instead of completing the update itself is: worker changed AND no
-self-deploy permission exists.
+INSTALL time rather than surface it to the operator, and since the OAuth
+revision that absorption covers every way an operator can be
+authenticated: Azure's installer provisions a managed identity + Website
+Contributor automatically during `--deploy`/`--update`; Cloudflare's tries
+to mint a `Workers Scripts | Edit`-scoped token with the credential the
+install already used (falling back to storing that credential, disclosed);
+and an OAuth-only `wrangler login` — previously the one authentication
+state that ended with a printed instruction — now provisions too: the
+installer reads the session wrangler persisted on the operator's machine,
+refreshes it once to take ownership of its rotation chain, and stores the
+refresh token as a Worker secret (`CF_OAUTH_REFRESH_TOKEN`); the Worker
+exchanges it for a short-lived access token at the moment of use and
+persists any rotation in its own database (`self_update_oauth` — the
+secret is the chain's seed, the row its current state). See
+`platforms/cloudflare/wrangler-oauth.mjs` for the verified wrangler
+storage formats and why minting a token from the session is attempted but
+expected to be refused. An installer that finds nothing to provision from
+fails loudly with a non-zero exit rather than completing quietly.
+
+`--disable-one-click` turns it off and records `SELF_UPDATE=off` in
+install.env so a routine update does not undo the choice — that deliberate
+opt-out, or a deployment that predates automatic setup and has never taken
+an update since, are the only states with no self-deploy permission, and
+the portal reports them as the fault they are (with the repair: run a
+normal `--update`), never as a routine platform difference with a command
+as the answer. The command stays documented in the portal as reference —
+the floor with no moving parts — but is never the presented path.
 
 ### Per platform
 
-**Cloudflare** — an API token the operator issued, scoped to
-`Workers Scripts | Edit`, stored as a Worker secret. The update follows
+**Cloudflare** — an API token the operator issued (or the installer minted),
+scoped to `Workers Scripts | Edit`, stored as a Worker secret — or, for an
+install that only ever had `wrangler login`, the handed-over OAuth session
+described above, exchanged for a short-lived bearer per call. Either way,
+the update follows
 Cloudflare's documented direct-upload flow: register an asset manifest, get
 back only the hashes Cloudflare does not already hold (which on a normal
 release excludes the six font families), upload those, then
