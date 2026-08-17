@@ -30,6 +30,15 @@
  * instead: a textarea, a live preview of exactly what will publish, a download
  * of the current file, an insert-image action so nobody types a URL by hand,
  * and a revision history with one-click revert.
+ *
+ * ── Starting a book has two doors, one entry point (AB#7474 — plan item 11) ──
+ * "New book/story" offers a choice: upload markdown (this screen, unchanged),
+ * or connect a repo. The second option is the exact `RepoPanel` from
+ * `ConnectionsSection` rendered here rather than copied — a git-connected
+ * source is a library-wide setting, not a per-book one, so it goes through the
+ * same `/content-source` routes and the same dry-run/sync/webhook flow
+ * wherever it is opened from. Connections itself is unchanged and stays the
+ * place to manage a repo that's already connected.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
@@ -38,6 +47,7 @@ import { call, ApiError } from '../../lib/api';
 import type { Block, ContentOrigin, SyncSource } from '../../lib/types';
 import { BlockRenderer } from '../../reader/BlockRenderer';
 import { PRESENTATION } from '../../presentation';
+import { RepoPanel, type SourceState } from './ConnectionsSection';
 
 function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return call<T>(`/admin${path}`, init);
@@ -364,6 +374,10 @@ function LibraryView({
   onChanged: () => void;
 }): JSX.Element {
   const [creating, setCreating] = useState(false);
+  /** Which door the create panel is showing (plan item 11). `choose` is the
+   *  picker itself; `upload` is today's form, unchanged; `repo` is the reused
+   *  `RepoPanel`. */
+  const [createMode, setCreateMode] = useState<'choose' | 'upload' | 'repo'>('choose');
   const [newId, setNewId] = useState('');
   const [idTouched, setIdTouched] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -476,7 +490,30 @@ function LibraryView({
         })}
       </ul>
 
-      {creating ? (
+      {creating && createMode === 'choose' && (
+        <div class="admin-editor-actions" role="radiogroup" aria-label={`Start this ${noun} from`}>
+          <button class="btn" onClick={() => setCreateMode('upload')}>
+            Upload markdown
+          </button>
+          <button class="btn-ghost" onClick={() => setCreateMode('repo')}>
+            Connect a repo
+          </button>
+          <button type="button" class="btn-ghost" onClick={() => setCreating(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
+      {creating && createMode === 'repo' && (
+        <CreateFromRepo
+          onBack={() => setCreateMode('choose')}
+          onDone={() => {
+            setCreating(false);
+            setCreateMode('choose');
+            onChanged();
+          }}
+        />
+      )}
+      {creating && createMode === 'upload' ? (
         <form class="signin-form" onSubmit={(e) => void create(e)}>
           <label class="settings-row">
             <span>Title</span>
@@ -532,12 +569,61 @@ function LibraryView({
           </button>
           {createError && <p class="settings-note admin-error">{createError}</p>}
         </form>
-      ) : (
-        <button class="btn" onClick={() => setCreating(true)}>
+      ) : null}
+      {!creating && (
+        <button
+          class="btn"
+          onClick={() => {
+            setCreating(true);
+            setCreateMode('choose');
+          }}
+        >
           New {noun}
         </button>
       )}
     </section>
+  );
+}
+
+/**
+ * "Connect a repo" as the second door into content creation (AB#7474 — plan
+ * item 11). Fetches the deployment's `/content-source` state the same way
+ * `ConnectionsSection` does and hands it straight to the reused `RepoPanel` —
+ * no parallel form, no parallel validation, no parallel transport. Connecting
+ * (and syncing) here is the same library-wide action as connecting from
+ * Connections; this is only a second place to reach it from.
+ */
+function CreateFromRepo({ onBack, onDone }: { onBack: () => void; onDone: () => void }): JSX.Element {
+  const [state, setState] = useState<SourceState | null>(null);
+  const [error, setError] = useState('');
+
+  const reload = useCallback(() => {
+    adminFetch<SourceState>('/content-source')
+      .then(setState)
+      .catch((e) => setError(errorText(e, 'Could not load the content-source settings.')));
+  }, []);
+  useEffect(reload, [reload]);
+
+  return (
+    <div class="admin-create-repo">
+      {error ? (
+        <p class="settings-note admin-error">{error}</p>
+      ) : !state ? (
+        <p class="settings-note">Loading…</p>
+      ) : !state.available ? (
+        <p class="settings-note">{state.message}</p>
+      ) : (
+        <RepoPanel state={state} onChanged={reload} />
+      )}
+      <div class="admin-editor-actions">
+        <button type="button" class="btn-ghost" onClick={onBack}>
+          ← Choose a different way
+        </button>
+        <button type="button" class="btn" onClick={onDone}>
+          Done — back to the library
+        </button>
+      </div>
+    </div>
   );
 }
 

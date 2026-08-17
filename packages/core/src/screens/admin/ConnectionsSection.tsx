@@ -71,7 +71,7 @@ interface SyncReport {
   failure?: string;
 }
 
-interface SourceState {
+export interface SourceState {
   available: boolean;
   message?: string;
   mode?: Mode;
@@ -215,7 +215,15 @@ function ModePicker({ state, onChanged }: { state: SourceState; onChanged: () =>
   );
 }
 
-function RepoPanel({ state, onChanged }: { state: SourceState; onChanged: () => void }): JSX.Element {
+/**
+ * The repository-connection form, dry-run gate, sync report and webhook setup
+ * — exported so the content creation flow (AB#7474 — plan item 11) can offer
+ * "Connect a repo" as a second way to start a book without duplicating any of
+ * this. Connecting is a library-wide decision (it can pull in many books, not
+ * just the one being started), so wherever this is opened from it behaves
+ * identically and goes through the same `/content-source` routes.
+ */
+export function RepoPanel({ state, onChanged }: { state: SourceState; onChanged: () => void }): JSX.Element {
   const repo = state.repo ?? null;
   const [provider, setProvider] = useState(repo?.provider ?? 'github');
   const [url, setUrl] = useState(repo?.url ?? '');
