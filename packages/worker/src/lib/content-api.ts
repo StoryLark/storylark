@@ -55,9 +55,15 @@ import {
   readManifest,
   saveChapter,
   syncSourceOf,
-  validateSource,
   writeManifest,
 } from './content';
+import {
+  MAX_CHAPTER_SOURCE_BYTES,
+  PUBLISH_WITHHELD_MESSAGE,
+  validateBookCandidate,
+  type ContentError,
+  type ContentRecord,
+} from 'storylark-contracts/content';
 
 /** Highest content-API major this deployment understands. */
 export const CONTENT_API_VERSION = 1;
@@ -77,8 +83,8 @@ export const MIN_SUPPORTED_CONTENT_API_VERSION = 1;
 export const CONTENT_API_LIMITS = {
   maxBooksPerRequest: 200,
   maxChaptersPerRequest: 2000,
-  /** Same ceiling `validateSource()` enforces per chapter. */
-  maxChapterBytes: 2_000_000,
+  /** The same ceiling the content contract enforces per chapter — literally its constant. */
+  maxChapterBytes: MAX_CHAPTER_SOURCE_BYTES,
   /** A zip import: the archive itself, and what it may expand to. */
   maxImportBytes: 64 * 1024 * 1024,
   maxImportEntries: 4096,
@@ -87,11 +93,14 @@ export const CONTENT_API_LIMITS = {
 export class ContentApiError extends Error {
   readonly code: string;
   readonly status: 400 | 409 | 413 | 422;
-  constructor(code: string, message: string, status: 400 | 409 | 413 | 422 = 400) {
+  /** The full structured error list from the content gate, when the gate produced one. */
+  readonly errors?: ContentError[];
+  constructor(code: string, message: string, status: 400 | 409 | 413 | 422 = 400, errors?: ContentError[]) {
     super(message);
     this.name = 'ContentApiError';
     this.code = code;
     this.status = status;
+    if (errors && errors.length > 0) this.errors = errors;
   }
 }
 
@@ -146,6 +155,8 @@ export interface ChapterResult {
   contentHash?: string;
   wordCount?: number;
   audioStale?: boolean;
+  /** True when `storylark.publish: false` withheld this chapter: accepted, valid, deliberately not published. */
+  withheld?: boolean;
   error?: string;
   message?: string;
 }
@@ -158,6 +169,8 @@ export interface BookResult {
   removed?: string[];
   error?: string;
   message?: string;
+  /** The gate's full structured error list, when validation is what failed. */
+  errors?: ContentError[];
 }
 
 export interface PushOutcome {
@@ -173,6 +186,8 @@ export interface PushOutcome {
     chapters: number;
     chaptersSucceeded: number;
     chaptersFailed: number;
+    /** Chapters accepted but deliberately not published (`storylark.publish: false`). */
+    chaptersWithheld: number;
   };
 }
 
@@ -367,8 +382,16 @@ export async function pushBooks(opts: PushOptions): Promise<PushOutcome> {
   // Runs for BOTH policies. Under all-or-nothing it is the gate; under
   // best-effort it is what lets a book be reported as failed without its first
   // three chapters having already landed.
+  //
+  // The judging itself is NOT here: it is `storylark-contracts/content` — the
+  // one validator the portal's save and the repo sync call too, so the same
+  // bad file produces the same stable code and the same message whichever door
+  // it came through. This transport's job is only the candidate records (id
+  // from the wire, order from array position — an explicit statement, not a
+  // guess) and the rendering of the result.
   const manifest = await readManifest(store);
-  const problems = new Map<string, { error: string; message: string }>();
+  const problems = new Map<string, { error: string; message: string; errors?: ContentError[] }>();
+  const gated = new Map<string, Map<string, ContentRecord>>();
   for (const book of books) {
     const existing = manifest ? findBook(manifest, book.id) : undefined;
     if (isPullManaged(existing)) {
@@ -379,24 +402,44 @@ export async function pushBooks(opts: PushOptions): Promise<PushOutcome> {
       });
       continue;
     }
-    for (const chapter of book.chapters ?? []) {
-      const problem = validateSource(chapter.markdown);
-      if (problem) {
-        problems.set(book.id, {
-          error: 'invalid_markdown',
-          message: `${book.id}/${chapter.id}: ${problem}`,
-        });
-        break;
-      }
+    const chapters = book.chapters ?? [];
+    const gate = validateBookCandidate({
+      bookId: book.id,
+      chapters: chapters.map((c, i) => ({
+        chapterId: c.id,
+        order: i + 1,
+        markdown: c.markdown,
+        file: `${book.id}/${c.id}`,
+      })),
+    });
+    if (!gate.ok) {
+      const first = gate.errors[0];
+      problems.set(book.id, {
+        error: first.code,
+        message: `${first.file ?? book.id}: ${first.message}`,
+        errors: gate.errors,
+      });
+      continue;
     }
+    const records = new Map<string, ContentRecord>();
+    gate.records.forEach((record, i) => {
+      if (record) records.set(chapters[i].id, record);
+    });
+    gated.set(book.id, records);
   }
 
   if (policy === 'all-or-nothing' && problems.size > 0) {
     const first = [...problems.entries()][0];
+    // One book gets its own specific code and error list — that is the shape a
+    // single-chapter PUT surfaces. A multi-book batch keeps the batch envelope.
+    if (books.length === 1) {
+      throw new ContentApiError(first[1].error, first[1].message, 422, first[1].errors);
+    }
     throw new ContentApiError(
       'batch_rejected',
       `Nothing was written. ${problems.size} of ${books.length} book(s) failed validation and the policy is all-or-nothing — first problem: ${first[1].message}`,
-      422
+      422,
+      [...problems.values()].flatMap((p) => p.errors ?? [])
     );
   }
 
@@ -413,7 +456,7 @@ export async function pushBooks(opts: PushOptions): Promise<PushOutcome> {
       continue;
     }
     try {
-      const result = await pushOneBook({ store, env, book, actor, correction: opts.correction });
+      const result = await pushOneBook({ store, env, book, actor, correction: opts.correction, records: gated.get(book.id) });
       results.push(result.book);
       written.push(...result.written);
       libraryVersion = result.libraryVersion;
@@ -432,8 +475,13 @@ export async function pushBooks(opts: PushOptions): Promise<PushOutcome> {
     }
   }
 
-  const chaptersSucceeded = results.reduce((n, r) => n + r.chapters.filter((c) => c.ok).length, 0);
+  // A withheld chapter (storylark.publish: false) is neither a success nor a
+  // failure: nothing was written and nothing went wrong. Counting it as a
+  // success would let a wholly-withheld push announce new content that does
+  // not exist.
+  const chaptersSucceeded = results.reduce((n, r) => n + r.chapters.filter((c) => c.ok && !c.withheld).length, 0);
   const chaptersFailed = results.reduce((n, r) => n + r.chapters.filter((c) => !c.ok).length, 0);
+  const chaptersWithheld = results.reduce((n, r) => n + r.chapters.filter((c) => c.withheld === true).length, 0);
   return {
     results,
     libraryVersion,
@@ -446,6 +494,7 @@ export async function pushBooks(opts: PushOptions): Promise<PushOutcome> {
       chapters: chapterCount,
       chaptersSucceeded,
       chaptersFailed,
+      chaptersWithheld,
     },
   };
 }
@@ -456,6 +505,8 @@ interface OneBookArgs {
   book: BookPush;
   actor: string;
   correction?: boolean;
+  /** The gate's normalised records, keyed by chapter id — publish flags and declared order live here. */
+  records?: Map<string, ContentRecord>;
 }
 
 async function pushOneBook(args: OneBookArgs): Promise<{
@@ -475,7 +526,29 @@ async function pushOneBook(args: OneBookArgs): Promise<{
   let libraryVersion = before?.libraryVersion ?? 0;
   let announceVersion = before ? announceVersionOf(before) : 0;
 
-  for (const chapter of book.chapters ?? []) {
+  // The contract's `order` field, made real: when EVERY chapter in this push
+  // declares its own `storylark.order`, that order decides the save sequence —
+  // and therefore the book's chapter order, since the manifest array IS the
+  // order. A mixed push (some declared, some not) is left in wire order:
+  // sorting half a book would be the kind of guess the gate exists to refuse.
+  // Ties were already rejected in pass 1, so this sort is total.
+  let chapters = book.chapters ?? [];
+  const declared = chapters.map((c) => args.records?.get(c.id)?.declaredOrder);
+  if (chapters.length > 1 && declared.every((o) => o !== undefined)) {
+    chapters = [...chapters].sort(
+      (a, b) => (args.records!.get(a.id)!.declaredOrder as number) - (args.records!.get(b.id)!.declaredOrder as number)
+    );
+  }
+
+  for (const chapter of chapters) {
+    const record = args.records?.get(chapter.id);
+    if (record && record.publish === false) {
+      // Valid, accepted, deliberately not published — the file's own
+      // frontmatter withholds it. Nothing is written, and an already-published
+      // copy is left exactly as it is: withdrawing it would be an inference.
+      chapterResults.push({ chapterId: chapter.id, ok: true, withheld: true, message: PUBLISH_WITHHELD_MESSAGE });
+      continue;
+    }
     const existed = before ? !!findChapter(findBook(before, book.id), chapter.id) : false;
     const correction = chapter.correction ?? args.correction ?? existed;
     const saved = await saveChapter({

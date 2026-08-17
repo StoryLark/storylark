@@ -107,7 +107,17 @@ function actor(c: Context<AppContext>): string {
 
 function apiError(c: Context<AppContext>, err: unknown) {
   if (err instanceof ContentApiError) {
-    return c.json({ contractVersion: CONTENT_API_VERSION, error: err.code, message: err.message }, err.status);
+    return c.json(
+      {
+        contractVersion: CONTENT_API_VERSION,
+        error: err.code,
+        message: err.message,
+        // The content gate's full structured list — same codes, same messages,
+        // same lines the portal shows inline and a sync report would print.
+        ...(err.errors ? { errors: err.errors } : {}),
+      },
+      err.status
+    );
   }
   throw err;
 }

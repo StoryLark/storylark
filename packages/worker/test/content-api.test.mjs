@@ -192,8 +192,13 @@ test('a best-effort batch: one bad book in fifty does not cost the other forty-n
 
   const failure = res.json.results.find((r) => !r.ok);
   assert.equal(failure.bookId, 'story-17');
-  assert.equal(failure.error, 'invalid_markdown');
+  // The stable code from the ONE content gate (storylark-contracts/content) —
+  // the same code the portal's save and a sync report would carry for the same
+  // file. It replaced the old umbrella `invalid_markdown` when the gate became
+  // shared across transports.
+  assert.equal(failure.error, 'unclosed_frontmatter');
   assert.match(failure.message, /front matter/i, 'the report says WHAT was wrong, per item');
+  assert.equal(failure.errors[0].code, 'unclosed_frontmatter', 'the structured error list rides along');
 
   const manifest = await dep.manifest();
   assert.equal(manifest.books.length, 49);

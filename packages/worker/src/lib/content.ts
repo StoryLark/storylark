@@ -56,11 +56,14 @@ import type {
 import { DEFAULT_ORIGIN } from '../content-types';
 import { getJson, getText, putJson, putText, type ContentStore } from './content-store';
 import { chapterMeta, contentHash, parseBlocks, readFrontmatter, stabilizeBlockIds } from './md';
+import { CONTENT_ID_RE, readStorylarkBlock, validateChapterCandidate } from 'storylark-contracts/content';
 
 export const MANIFEST_KEY = 'manifest.json';
 
-/** Ids are storage keys and URL segments; keep them boring. Same rule as /publish-story. */
-export const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** Ids are storage keys and URL segments; keep them boring. Same rule as /publish-story —
+ *  and literally the same RegExp object the content contract validates with, so the
+ *  routes' early id checks can never drift from the gate's. */
+export const ID_RE = CONTENT_ID_RE;
 
 /**
  * How many text revisions to keep per chapter (plan §3: five, "as a config
@@ -386,17 +389,17 @@ export interface SaveOptions {
  * Validation that runs BEFORE anything is written (plan §3: "malformed markdown
  * or broken front matter is reported before publishing, not discovered after").
  * Returns a human-readable problem, or null when the source is publishable.
+ *
+ * Since the content-management rework this is a thin veneer over the ONE
+ * validator (`storylark-contracts/content`) — the same gate the content API and
+ * the repo sync use, so a file the portal's preview calls fine can never be a
+ * file the API refuses. Callers that want the structured error list (stable
+ * code + line) call `validateChapterCandidate` directly; this keeps the
+ * one-string shape the preview endpoint already speaks.
  */
 export function validateSource(markdown: string): string | null {
-  if (markdown.length === 0) return 'The chapter is empty.';
-  if (markdown.length > 2_000_000) return 'That chapter is larger than 2MB, which is past what this editor handles.';
-  const opensFrontmatter = /^﻿?---\r?\n/.test(markdown);
-  if (opensFrontmatter && !/^﻿?---\r?\n[\s\S]*?\r?\n---\r?\n?/.test(markdown)) {
-    return 'The front matter block starts with --- but never closes. Add a closing --- line.';
-  }
-  const { body } = readFrontmatter(markdown);
-  if (parseBlocks(body).length === 0) return 'There is no text in this chapter — only front matter.';
-  return null;
+  const result = validateChapterCandidate({ markdown });
+  return result.ok ? null : result.errors[0].message;
 }
 
 /**
@@ -436,7 +439,15 @@ export async function saveChapter(opts: SaveOptions): Promise<SaveResult> {
   const { data, body } = readFrontmatter(markdown);
   const blocks: Block[] = await stabilizeBlockIds(parseBlocks(body), previous);
   const meta = chapterMeta(blocks);
-  const title = typeof data.title === 'string' ? data.title : (existing?.title ?? chapterId);
+  // Title precedence per the content contract: `storylark.title` overrides the
+  // top-level `title`. Content without a `storylark:` block (all pre-contract
+  // content) behaves exactly as before.
+  const declared = readStorylarkBlock(markdown);
+  const declaredTitle =
+    declared.present && typeof declared.fields.title === 'string' && declared.fields.title.trim() !== ''
+      ? declared.fields.title
+      : undefined;
+  const title = declaredTitle ?? (typeof data.title === 'string' ? data.title : (existing?.title ?? chapterId));
   const label = typeof data.label === 'string' ? data.label : (existing?.label ?? 'Chapter');
   const hash = await contentHash({ blocks, title });
 

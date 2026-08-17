@@ -56,10 +56,10 @@ import {
   saveChapter,
   storeOf,
   syncSourceOf,
-  validateSource,
   writeManifest,
 } from '../lib/content';
 import { chapterMeta, parseBlocks, readFrontmatter } from '../lib/md';
+import { PUBLISH_WITHHELD_MESSAGE, validateChapterCandidate } from 'storylark-contracts/content';
 import { sha256Bytes } from '../lib/crypto';
 import { recordPublish } from '../lib/notify';
 import { enqueue } from '../lib/narration';
@@ -317,12 +317,19 @@ adminContent.post('/content/preview', async (c) => {
   const { data, body: prose } = readFrontmatter(body.markdown);
   const blocks = parseBlocks(prose);
   const meta = chapterMeta(blocks);
+  // The same gate the save will run, so a problem is visible while typing
+  // rather than on save. `problem` keeps the one-string shape older bundles
+  // read; `errors` carries the full structured list (stable code, message,
+  // line) for inline rendering.
+  const verdict = validateChapterCandidate({ markdown: body.markdown });
   return c.json({
     title: typeof data.title === 'string' ? data.title : undefined,
     label: typeof data.label === 'string' ? data.label : undefined,
     blocks,
     ...meta,
-    problem: validateSource(body.markdown),
+    problem: verdict.ok ? null : verdict.errors[0].message,
+    errors: verdict.ok ? [] : verdict.errors,
+    withheld: verdict.ok && verdict.record.publish === false,
   });
 });
 
@@ -356,12 +363,25 @@ adminContent.put('/content/books/:bookId/chapters/:chapterId', async (c) => {
   if (!body || typeof body.markdown !== 'string') {
     return c.json({ error: 'bad_request', message: 'A `markdown` string is required.' }, 400);
   }
-  const problem = validateSource(body.markdown);
-  if (problem) return c.json({ error: 'invalid_markdown', message: problem }, 400);
+  // The ONE content gate — the same `storylark-contracts/content` call the
+  // public API and the repo sync make, with this transport's identity (the URL
+  // segments) as the candidate's. Same input, same codes, same messages; the
+  // portal's only privilege is rendering them inline.
+  const verdict = validateChapterCandidate({ bookId, chapterId, markdown: body.markdown });
+  if (!verdict.ok) {
+    return c.json({ error: verdict.errors[0].code, message: verdict.errors[0].message, errors: verdict.errors }, 422);
+  }
 
   const gate = await requireWritable(c, store, bookId, chapterId);
   if (gate instanceof Response) return gate;
   const isNew = !gate.chapter;
+
+  if (verdict.record.publish === false) {
+    // Valid content whose own frontmatter says "not yet". Not an error, and
+    // nothing is saved — publishing it anyway would override the file, and
+    // half-saving a withheld chapter would be worse than either.
+    return c.json({ ok: true, withheld: true, message: PUBLISH_WITHHELD_MESSAGE });
+  }
 
   if (body.force !== true) {
     const conflict = detectSaveConflict(gate.chapter, typeof body.baseContentHash === 'string' ? body.baseContentHash : undefined);
