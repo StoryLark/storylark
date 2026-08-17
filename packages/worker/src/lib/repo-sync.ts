@@ -443,10 +443,15 @@ export async function runRepoSync(
         }
       }
 
-      // Book-level metadata + the ownership stamp, once per book.
+      // Book-level metadata + the ownership stamp, once per book. Written only
+      // when something actually moved: a daily sync of an unchanged repo must
+      // not bump `libraryVersion` and make every reader re-fetch a manifest
+      // that says nothing new.
       const after = await readManifest(store);
       const entry = after ? findBook(after, bookId) : undefined;
       if (after && entry) {
+        const priorSyncedAt = entry.syncSource?.syncedAt;
+        const snapshot = JSON.stringify({ ...entry, syncSource: { ...(entry.syncSource ?? {}), syncedAt: '' } });
         applyBookMetadata(entry, declaredBooks.get(bookId), group);
         const declared = declaredBooks.get(bookId);
         if (declared?.record.cover) {
@@ -467,11 +472,18 @@ export async function runRepoSync(
           entry.chapters = [...entry.chapters].sort((a, b) => (a.order as number) - (b.order as number));
         }
         refreshSingle(entry);
-        libraryVersion = (after.libraryVersion ?? 0) + 1;
-        after.libraryVersion = libraryVersion;
-        (after as { announceVersion?: number }).announceVersion = announceVersionOf(after);
-        after.generatedAt = new Date().toISOString();
-        await writeManifest(store, after);
+        const changed =
+          written.some((w) => w.bookId === bookId) ||
+          snapshot !== JSON.stringify({ ...entry, syncSource: { ...(entry.syncSource ?? {}), syncedAt: '' } });
+        if (changed) {
+          libraryVersion = (after.libraryVersion ?? 0) + 1;
+          after.libraryVersion = libraryVersion;
+          (after as { announceVersion?: number }).announceVersion = announceVersionOf(after);
+          after.generatedAt = new Date().toISOString();
+          await writeManifest(store, after);
+        } else if (priorSyncedAt !== undefined) {
+          entry.syncSource.syncedAt = priorSyncedAt; // nothing moved — say so honestly
+        }
       }
     }
 

@@ -266,10 +266,13 @@ test('connect dry-runs and refuses an invalid repo; a valid one connects and syn
   assert.equal(edit.status, 409);
   assert.equal(edit.json.error, 'managed_externally');
 
-  // Re-syncing the unchanged repo writes nothing and bumps nothing.
+  // Re-syncing the unchanged repo writes nothing and bumps nothing — a daily
+  // no-op sync must not make every reader re-fetch the manifest.
   const again = await session('POST', '/api/admin/content-source/sync');
   assert.equal(again.json.report.chaptersWritten, 0);
   assert.equal(again.json.report.chaptersUnchanged, 3);
+  const after = await box.dep.manifest();
+  assert.equal(after.libraryVersion, manifest.libraryVersion, 'nothing changed, nothing bumped');
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -469,11 +472,27 @@ test('the webhook accepts a correctly-signed push and rejects a forged one', asy
   const accepted = await deliver(push, sign(push));
   assert.equal(accepted.status, 202, JSON.stringify(accepted.json));
   assert.equal(accepted.json.queued, true);
-  // The waitUntil polyfill runs the sync as a background promise; give it a tick.
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  // The waitUntil polyfill runs the sync as a background promise. Wait for the
+  // run to record itself DONE (claim released, report stored) rather than
+  // sleeping a guess — a sync still writing while the test tears its temp
+  // directory down is a Windows ENOTEMPTY flake.
+  const finished = await pollUntil(async () => {
+    const row = box.dep.db.prepare('SELECT running_since, last_sync_at FROM content_sync WHERE id = 1').get();
+    return row && row.running_since === null && row.last_sync_at !== null;
+  });
+  assert.ok(finished, 'the queued sync completed');
   const manifest = await box.dep.manifest();
   assert.ok(manifest.books.find((b) => b.id === 'the-keepers'), 'the signed push synced the repo');
 });
+
+/** Poll a condition until true, up to ~10s. */
+async function pollUntil(check) {
+  for (let i = 0; i < 100; i++) {
+    if (await check()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Step 10 — scoped content-API tokens
