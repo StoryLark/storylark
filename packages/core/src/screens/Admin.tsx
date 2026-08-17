@@ -433,14 +433,15 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
 
   const refresh = () => {
     setError('');
-    adminFetch<StatusResponse>('/status')
+    const statusP = adminFetch<StatusResponse>('/status')
       .then(setStatus)
       .catch((e) => setError(errorText(e, 'Could not load status.')));
-    adminFetch<UpdateStatusResponse>('/update-status')
+    const updateP = adminFetch<UpdateStatusResponse>('/update-status')
       .then(setUpdateStatus)
       .catch((e) => setError(errorText(e, 'Could not check for updates.')));
+    return Promise.all([statusP, updateP]).then(() => undefined);
   };
-  useEffect(refresh, []);
+  useEffect(() => void refresh(), []);
 
   return (
     <div class="screen admin-screen">
@@ -471,7 +472,7 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
           past the brand settings to find out. */}
       <NarrationSection />
       <ThemeSection />
-      <UpdateSection updateStatus={updateStatus} />
+      <UpdateSection updateStatus={updateStatus} onCheck={refresh} />
       <PublishSection onPublished={refresh} />
     </div>
   );
@@ -516,12 +517,28 @@ function StatusSection({ status }: { status: StatusResponse | null }): JSX.Eleme
  */
 const UPDATE_DOCS_URL = 'https://storylark.org/docs/updating.html';
 
-function UpdateSection({ updateStatus }: { updateStatus: UpdateStatusResponse | null }): JSX.Element {
+function UpdateSection({
+  updateStatus,
+  onCheck,
+}: {
+  updateStatus: UpdateStatusResponse | null;
+  onCheck: () => Promise<void>;
+}): JSX.Element {
   const [copied, setCopied] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<UpdateInstallResponse | null>(null);
   const oneClick = updateStatus?.oneClick;
+
+  async function check() {
+    setChecking(true);
+    try {
+      await onCheck();
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function install() {
     setInstalling(true);
@@ -556,6 +573,9 @@ function UpdateSection({ updateStatus }: { updateStatus: UpdateStatusResponse | 
   return (
     <section class="settings-section">
       <h2>Platform update</h2>
+      <button class="btn-ghost" disabled={checking} onClick={check}>
+        {checking ? 'Checking…' : 'Check for updates'}
+      </button>
       {!updateStatus ? (
         <p class="settings-note">Loading…</p>
       ) : (
