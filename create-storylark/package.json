@@ -1,6 +1,6 @@
 {
   "name": "create-storylark",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Scaffold a new branded StoryLark site — npm create storylark",
   "license": "Apache-2.0",
   "repository": {

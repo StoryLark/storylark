@@ -1,5 +1,135 @@
 # storylark-worker
 
+## 0.16.0
+
+### Minor Changes
+
+- [`348ba3b`](https://github.com/StoryLark/storylark/commit/348ba3b2ccaf14c01670186375f9bf7b1d80161d) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - Add the public content API, bulk import, and the bulk narration queue — plan §8
+  items 1, 3 and 4.
+
+  **Content API (`/api/content/v1`).** A documented, versioned PUSH contract an
+  external publishing system integrates against once. Until now content only
+  arrived through the CLI or through the two PULL connectors; there was no stable
+  way for a publisher's own release step to call StoryLark. The major version is in
+  the path and in every request body (`contractVersion`, required — a missing one
+  is a hard 400), following the same rule `packages/contracts/validate.mjs` applies
+  to brand/presentation/deployment files: additive fields never move it, unknown
+  request fields are ignored rather than rejected. Auth is `X-Admin-Key` with an
+  admin session as the second door, matching `POST /api/admin/publish`. Content
+  pushed here is `origin: sync` with `syncSource.kind: "api"` by default, so the
+  portal shows it read-only and names the pushing system — plan §8's ownership rule
+  applied to the third arrival route — and `managed: false` opts out. The API in
+  turn refuses to overwrite a book a PULL connector owns, because the next sync
+  would revert the push. Every write lands in the same `saveChapter()` the portal's
+  editor calls; there is no second content model and no second write path. Full
+  integrator documentation in `docs/content-api.md`.
+
+  **Bulk import.** `POST /api/content/v1/books` takes an array; `POST
+/api/content/v1/import` takes a zip of the ordinary markdown-folder layout,
+  unpacked with the dependency-free zip codec already in `storylark-contracts` so
+  it works inside a Worker. Both run through the same `pushBooks()`, with an
+  explicit, documented failure policy: `best-effort` (the default) reports per
+  item and answers `207` when part of a batch fails, so one malformed book in fifty
+  costs that book and not the other forty-nine; `all-or-nothing` validates
+  everything before writing anything and is honest that object storage has no
+  transaction, so a storage failure mid-batch is reported per book rather than
+  claimed to have rolled back. Archive entries that are not books come back in an
+  `ignored` list with a reason each.
+
+  **Bulk narration queue.** New `narration_jobs` / `narration_batches` tables
+  (migration 0008, both dialects), a queue engine, `/api/admin/narration/*`, a
+  portal card, and `packages/pipeline/narrate.mjs` — a real worker that claims
+  jobs, synthesises with the same `synthesizeChapter`/`stitchChapter` `publish.mjs`
+  uses, uploads to the same content-hashed keys, and reports back so the deployment
+  updates its own manifest and clears `audioStale`. Portal saves, reverts and every
+  API push enqueue automatically, idempotently per chapter. Progress carries a time
+  estimate measured from this deployment's own completed jobs, and is `null` — with
+  that stated — until something has actually completed. Claims are atomic, stale
+  claims are reclaimed after 30 minutes, and a completion whose content hash no
+  longer matches the live chapter is refused rather than published against words it
+  does not match. Batch completion emails the operator once, following the existing
+  `update-check` notification pattern; it is deliberately not a reader push, since
+  narration is never an announcement.
+
+  The queue is honest about the platform split rather than hiding it: **no**
+  deployment can narrate — a Worker cannot run the model at all, and the Node entry
+  ships no TTS dependency — so `GET /api/admin/narration` returns
+  `runtime.canProcessInDeployment` with the platform's own reason and the command
+  that does the work, and the portal renders those rather than a hard-coded
+  sentence. Documented in `docs/narration-queue.md`.
+
+  Also closes the verification gap AB#7422 recorded: the `409 managed_externally`
+  enforcement is now proven at the HTTP level on the Node/Azure stack — a real
+  PostgreSQL server, the real shipped `migrate-postgres.mjs`, the real
+  `postgresDatabase()` driver and a real socket — in
+  `packages/worker/test/node-http-readonly.test.mjs`.
+
+- [`0522fa9`](https://github.com/StoryLark/storylark/commit/0522fa923b2d60989fe4041fb671abcb7c8c3b4d) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - Per-block re-narration, chapter reorder, and conflict detection between a
+  portal edit and a CLI publish — the three items plan §3 listed as "NOT built"
+  (AB#7412).
+
+  **Per-block re-narration.** `publish.mjs` re-synthesizes only the blocks whose
+  spoken text actually changed and splices the rest of the audio back in from the
+  previous run. The new `packages/pipeline/lib/block-audio.mjs` keeps a
+  content-addressed cache of the per-block chunks the TTS providers already emit,
+  keyed by a hash of each block's type and spoken text — the same hash
+  `stabilizeBlockIds` matches on, and deliberately not the block's id or
+  position, so inserting a paragraph at the top of a chapter renumbers every
+  block after it and still costs one block of narration. Reordering paragraphs,
+  or reverting to text narrated before, costs nothing. The splice is the existing
+  `stitchChapter()`: the chunk list is rebuilt in the chapter's current order and
+  every block's `startMs` and word timings are re-derived from measured (ffprobe)
+  durations, so word-sync highlighting stays correct across a partial
+  re-narration. A metered provider's character budget is now charged for what is
+  actually sent, and `--dry-run` reports the cost per chapter before it is paid.
+  New `--renarrate-all` ignores the cache. An empty cache behaves exactly as
+  before, so deleting `.storylark/work/` costs a re-narration and never a wrong
+  one.
+
+  **Chapter reorder.** `PUT /api/admin/content/books/<b>/chapter-order` plus
+  Up/Down controls in the portal's chapter list. The order of `book.chapters` in
+  the manifest already _is_ the chapter order, so there is no new position field;
+  the route takes the whole order and verifies it is a permutation of what the
+  manifest holds, so a browser tab left open through a publish cannot delete a
+  chapter by omitting it. Never announced — rearranging a table of contents is
+  not new writing.
+
+  **Conflict detection, both directions.** `publish.mjs` now reads the live
+  manifest _before_ it uploads anything and refuses — exit 2, naming each chapter
+  and all three hashes — when the live content differs both from what this
+  machine last published and from what this run is about to write. That leaves
+  the ordinary case silent and never refuses a `--pull`-then-publish, since after
+  a pull the deployment already holds what is about to be written. A chapter that
+  exists live with no local file is refused too, because regenerating the
+  manifest without it would unpublish a story written in the portal. `--force`
+  overrides; chapter-order and book-metadata divergence are warnings rather than
+  refusals. On the portal side the editor sends the `contentHash` it opened at as
+  `baseContentHash`, and a save against a superseded version is refused with
+  `409 stale_edit` offering three honest choices — download the draft, load the
+  live version, or overwrite deliberately. Requests that send no base hash behave
+  exactly as before.
+
+  **Fixes a real bug this surfaced:** `stabilizeBlockIds` could emit DUPLICATE
+  block ids. Insert a paragraph at the top of a chapter and the new block kept
+  its freshly-parsed `b001` while the old first paragraph inherited the same
+  `b001` from the previous publish. That broke three things at once — `stitch.mjs`
+  keys word timings by block id, so the second block silently took the first's
+  timings and word-sync went wrong from there on; reader progress and bookmarks
+  address a block by id; and the chapter's content hash stopped being idempotent,
+  so republishing an unchanged file produced a new hash every time. Fixed in both
+  implementations (`packages/pipeline/lib/md.mjs` and
+  `packages/worker/src/lib/md.ts`) with an extra pass that reserves inherited ids
+  before any parsed id is kept. A chapter with no collision comes out
+  byte-for-byte as before, so no existing content re-hashes.
+
+  Also closes the "authenticated Node/Azure path is untested end to end" gap:
+  `packages/worker/test/node-postgres-admin-content.test.mjs` runs the real Hono
+  app over the real Postgres driver and the real Node content-store driver
+  against a real Postgres, creating an operator through the real installer flow
+  and exercising save, preview, download, revisions, revert, reorder, conflict
+  and delete through a real session cookie. It skips loudly without
+  `STORYLARK_TEST_POSTGRES` rather than passing on a mock.
+
 ## 0.15.5
 
 ### Patch Changes
