@@ -36,9 +36,10 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
   with the text on screen, behind a "Keep screen awake" setting (on by default where supported)
 - **Your story, your pace** — finishing a standalone story now stops by default; an opt-in
   "Auto-play the next story" setting continues automatically for those who want it
-- **Opt-in updates for downstream sites** — a new release opens a pull request in a deployer's
-  site repo with the release notes; merging the PR is the approval that rebuilds and redeploys.
-  The live demo runs this exact flow
+- **Five sample themes ship in-repo** — `storylark`, `loveletter`, `nebula`, `weatherglass`, and
+  `wireless`, each a real, worked brand + theme + presentation, and each importable as a real
+  theme package. (The earlier `gunner-the-lab`/`hold-fast-press` examples were retired in favor
+  of these once theme packages made "install a full worked example" a real, one-file action.)
 - **Runs on Azure, not just Cloudflare** — a database adapter (Postgres driver, also covers AWS
   RDS/Aurora) and a storage adapter (Azure Blob driver) sit behind the same interfaces the
   Cloudflare D1/R2 drivers use, so the API code is identical either way. A documented Azure
@@ -56,16 +57,54 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
   confirmation
 - **Updates you can take in one command** — a Worker or App Service process can't rebuild
   itself, and shouldn't hold a credential that lets it try: an admin-facing update card shows
-  the current vs. latest engine version and hands you the installer command
-  (`install.mjs --update --yes`), which you run from the machine you deploy from with the
-  platform login you already have. It bumps the pinned engine version, migrates, builds, and
-  redeploys. Nothing is stored in the deployment, and the updater can only touch the pinned
-  engine version, never a brand's theme or presentation
+  the current vs. latest engine version and hands you the installer command, which you run from
+  the machine you deploy from with the platform login you already have. It bumps the pinned
+  version, migrates, builds, and redeploys — the updater can only touch the pinned engine
+  version, never a brand's theme or presentation. An optional, off-by-default one-click button
+  does the same thing from `/admin` itself, downloading a checksum-verified prebuilt engine with
+  no build running anywhere
 - **A lightweight admin portal** (`/admin`) — the update card above, a status view (library
   size, push subscriber count), and a text story-upload form that commits markdown straight to
   the site's repo and publishes through the real, unchanged pipeline (never a second copy of
   its logic). An optional scheduled check can also email the operator proactively when a new
   release exists
+- **Your brand, presentation, and deployment config are three separate files, live at runtime**
+  — identity (`brand.json`), library shape and screen arrangement (`presentation.json`), and
+  per-install addresses/keys (`deployment.json`). All three are read fresh on every request, not
+  baked into the JavaScript bundle, so replacing one changes a live site with no rebuild — and a
+  theme can move between deployments without dragging one install's server addresses along with it
+- **Theme packages** — a theme travels as a single `.storylark-theme.zip`, installable from the
+  admin portal's **Brand & themes** card or the CLI, fully validated before anything changes, with
+  five-version history and one-click rollback. The same card edits your brand's own details
+  (name, tagline, colors, fonts) with no package at all
+- **Accounts for admins, not a shared key** — `/admin` sign-in is a normal email-and-password
+  account flagged as an operator, with a one-time setup link and printed recovery codes at
+  install time, and three independent ways back in if you're ever locked out
+- **Edit a published story from your phone** — the admin portal can open any existing chapter,
+  not just upload new ones: a markdown editor with live preview, five-version history with
+  one-click revert, inline image uploads, and Up/Down chapter reordering. An edit can be flagged
+  as a correction so it updates the text without notifying every reader
+- **The publish pipeline and the admin portal can no longer silently clobber each other** — a CLI
+  publish checks the live content before uploading anything and refuses on a real conflict; a
+  portal save is refused if the chapter moved underneath it. `--pull` reconciles the two
+  deliberately when you want to
+- **Re-narration is per block, not per chapter** — editing one paragraph re-synthesizes just that
+  paragraph; the rest of the chapter's audio is reused unchanged
+- **Sync content in from somewhere you already publish** — a git repository of markdown, or your
+  own system's small JSON feed — instead of publishing by hand. StoryLark holds a read-only copy
+  and always defers to wherever the content actually lives; every book and chapter now records
+  its origin so ownership between the CLI, the portal, and a sync never quietly conflicts
+- **A public content API** (`/api/content/v1`) — a documented, versioned HTTP contract for pushing
+  content from your own CMS or publishing system directly into a deployment: single chapters,
+  whole books, or a zip/batch import for onboarding a whole catalogue at once
+- **A bulk narration queue** — anything that arrives outside the CLI (a portal edit, an API push,
+  a bulk import) is queued for narration and processed by a worker you run wherever you already
+  publish from, with real per-job progress and a time estimate measured from this deployment's
+  own completed jobs
+- **Reader-choosable themes, with an admin override** — Settings offers a reader a choice among
+  the sample themes as a visual look, layered on top of your real brand without ever changing its
+  identity. An admin can force one look on every reader from the **Brand & themes** card if they'd
+  rather everyone see the theme they designed
 
 ## Now
 
@@ -82,14 +121,18 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
 - iOS background audio for driving — a research spike
 - A documented AWS recipe (the Postgres + S3-API drivers already make it possible; the
   step-by-step guide and IaC template are the remaining work)
-- In-app admin upload for audio-narrated stories (not just text) — the admin portal's story
-  form is text-only today; narration still needs either TTS credentials configured on the
-  publish workflow or a CLI publish
+- The "Publish a story" **upload form** is still text-only — narration still needs either TTS
+  credentials on the publish workflow or a CLI publish to produce audio for a brand-new story.
+  (Editing or reordering a chapter that already exists is a different, already-shipped path: any
+  portal edit or content-API push is queued and narrated automatically by the bulk narration
+  queue's worker — see the Shipped list above.)
+- A delete button in the portal's content manager — removing a book or chapter still needs the
+  CLI or the content API
 
 ## Later
 
 Hardening toward 1.0: an automated test suite and CI quality gate, a full device/browser QA
 pass, an accessibility audit, rate-limiting across every auth endpoint, complete API
-documentation, and a final API-stability review that freezes the config, theme, and manifest
-contracts for 1.0.0 — including the database/storage adapter interfaces and the installer's
-update contract.
+documentation, and a final API-stability review that freezes the config, theme, presentation,
+deployment, and manifest contracts for 1.0.0 — including the database/storage adapter interfaces
+and the update mechanism's own contract.
