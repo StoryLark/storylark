@@ -46,6 +46,55 @@ fully editable. Nothing becomes read-only by omission.
 when they are, they arrive through this discriminator instead of needing a
 schema change.
 
+## Repo mode inside the deployment — the Connections section
+
+Since the content-management rework (wave 2), a deployment can sync a git
+repository **itself**, with no pipeline run and no operator machine involved.
+The portal's **Connections** section is the whole setup: provider (GitHub at
+launch — other providers are additive drivers), repository URL, visibility,
+branch, path, a read-only token, and a pull interval.
+
+What to know before connecting:
+
+- **Strict contract, one gate.** Only files carrying a `storylark:` block are
+  ingested (see [authoring-stories.md](authoring-stories.md)) — opt-in, never
+  inferred. Every file goes through the same validator the portal and the
+  content API use, so a malformed file is rejected with the same code and
+  message whichever door it would have come through. The connection form
+  **dry-runs the whole repository first**: a repo that does not validate cannot
+  be connected, and every failure names its file and line.
+- **HTTPS only, token in the platform secret store.** A deployment has no ssh
+  client, so SSH is not offered; a read-only token
+  (`CONTENT_SYNC_TOKEN` as a platform secret, or entered in the form) is the
+  credential. It is never written to `deployment.json` — a credential in that
+  committed file is a hard error, unchanged.
+- **Three trigger tiers.** A **webhook** (signature-verified; unsigned or
+  forged deliveries are rejected) makes a push appear within seconds; the
+  **daily scheduled pull** on the deployment's existing cron is the safety
+  net; **Sync now** in the portal is for right now. Concurrent runs collapse
+  into one.
+- **A missing file is flagged, never auto-deleted.** A chapter in the library
+  but absent from a sync is reported `missing` in the sync report; nothing is
+  unpublished until the operator clicks **Remove these N chapters**, which runs
+  the ordinary recoverable delete.
+- **Text syncs instantly; audio does not.** No deployment can run the TTS
+  model. A sync enqueues narration for everything it wrote; the narration
+  worker you already run (`node packages/pipeline/narrate.mjs`) drains it.
+
+The `contentSource` block in `deployment.json` mirrors the same fields for the
+pipeline-side CLI sync below, and supersedes the older `sync` block (which
+keeps working):
+
+```json
+{
+  "contentSource": {
+    "mode": "repo",
+    "repo": { "provider": "github", "url": "https://github.com/mypress/site",
+              "branch": "main", "path": "content", "intervalHours": 24 }
+  }
+}
+```
+
 ## Exactly two connectors
 
 StoryLark ships **two** pull connectors and will not grow a third:

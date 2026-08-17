@@ -90,6 +90,20 @@ from a signed-in browser. Cookie-authenticated requests must also send
 `X-Requested-With: storylark` (a CSRF guard). Key-authenticated requests do not
 need it — a header key is not forgeable by a third-party site.
 
+**Scoped content-API tokens** are the credential to hand a third-party system —
+never `ADMIN_KEY`, which also mints admin setup links. An operator creates one
+in the portal's **Connections** section (named, individually revocable,
+last-used visible); the system sends it as:
+
+```
+Authorization: Bearer sct_…
+```
+
+A token authenticates this API and nothing else: it cannot reach the admin
+surface, trigger updates, or read anything the content API does not serve.
+Revocation takes effect on the next request. Only the token's SHA-256 is stored
+server-side; the plaintext is shown once at creation.
+
 Anything else is `401 unauthorized`.
 
 ---
@@ -106,6 +120,7 @@ Anything else is `401 unauthorized`.
 | `POST /api/content/v1/import` | A `.zip` of the markdown-folder layout. The other bulk door. |
 | `DELETE /api/content/v1/books/:bookId/chapters/:chapterId` | Remove a chapter from the library. |
 | `DELETE /api/content/v1/books/:bookId` | Remove a book from the library. |
+| `POST /api/content/v1/sync/webhook` | The repo-sync push trigger. Authenticated by the provider's payload signature, not by a key — see [content-sync.md](content-sync.md). |
 
 Deletes remove the **manifest entry**. The stored objects — the chapter JSON, the
 source markdown, the audio, the revision history — stay, because they are

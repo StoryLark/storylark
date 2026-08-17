@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { BRAND } from '../brand';
 import { api, call, ApiError, type AuthUser } from '../lib/api';
+import { ConnectionsSection } from './admin/ConnectionsSection';
 import { ContentSection } from './admin/ContentSection';
 import { NarrationSection } from './admin/NarrationSection';
 import { ThemeSection } from './admin/ThemeSection';
@@ -506,6 +507,11 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
           different, narrower path and stays — see the note on its own
           component. */}
       <ContentSection />
+      {/* Connections (wave 2 — AB#7420): the content-source choice, the repo
+          connection with its dry-run gate, sync status + report, the push
+          webhook, and scoped content-API tokens. Directly under the content
+          card because it decides where that card's content comes from. */}
+      <ConnectionsSection />
       {/* Brand & themes (AB#7417 — plan §0c/§0d Phase 4): install a theme
           package, edit the brand's own details, see the version history, roll
           back. Above the platform update card on purpose — changing how the

@@ -233,11 +233,15 @@ export async function runRepoSync(
     }
 
     // GitHub's zipball wraps everything in one `owner-repo-<sha>/` folder;
-    // strip a shared top folder when there is one, then scope to the path.
-    const files = scopeEntries(entries, repo.path);
-    if (files.size === 0) {
-      report.failure = repo.path
-        ? `The archive holds nothing under "${repo.path}". Check the path — it is relative to the repository root.`
+    // strip a shared top folder so every name is REPOSITORY-relative — the
+    // path an author sees in their own repo is the path every error names.
+    const files = stripSharedTop(entries);
+    const scope = repo.path.replace(/^\/+|\/+$/g, '');
+    const scopePrefix = scope ? `${scope}/` : '';
+    const inScope = (name: string) => !scopePrefix || name.startsWith(scopePrefix);
+    if (![...files.keys()].some(inScope)) {
+      report.failure = scope
+        ? `The archive holds nothing under "${scope}". Check the path — it is relative to the repository root.`
         : 'The archive holds no files at all.';
       return await finish(env, report, dryRun);
     }
@@ -246,7 +250,7 @@ export async function runRepoSync(
     const decoder = new TextDecoder();
     const candidates: Candidate[] = [];
     for (const [name, data] of files) {
-      if (!name.toLowerCase().endsWith('.md')) continue;
+      if (!name.toLowerCase().endsWith('.md') || !inScope(name)) continue;
       const markdown = decoder.decode(data);
       if (!isRepoCandidate(markdown)) {
         // Not StoryLark content. Ignored wherever it sits — opt-in, never inferred.
@@ -535,30 +539,25 @@ function push(map: Map<string, Candidate[]>, bookId: string, c: Candidate): void
 }
 
 /**
- * Normalise archive entry names: strip the single shared top-level folder a
- * provider zipball wraps everything in, then scope to the configured path.
- * Pure path mechanics — nothing here reads content.
+ * Normalise archive entry names to repository-relative: strip the single
+ * shared top-level folder a provider zipball wraps everything in. Pure path
+ * mechanics — nothing here reads content. The configured `path` is applied by
+ * the caller as a FILTER on markdown candidacy, not by rewriting names: error
+ * locations stay the paths the author sees in their own repository, and image
+ * references still resolve file-relative then repo-root-relative (§6.5).
  */
-function scopeEntries(entries: Map<string, Uint8Array>, path: string): Map<string, Uint8Array> {
+function stripSharedTop(entries: Map<string, Uint8Array>): Map<string, Uint8Array> {
   const names = [...entries.keys()].filter((n) => !n.endsWith('/'));
   if (names.length === 0) return new Map();
   const firstSeg = (n: string) => (n.includes('/') ? n.slice(0, n.indexOf('/')) : null);
   const top = firstSeg(names[0]);
   const shared = top !== null && names.every((n) => firstSeg(n) === top);
   const prefix = shared ? `${top}/` : '';
-  const scope = path.replace(/^\/+|\/+$/g, '');
-  const scopePrefix = scope ? `${scope}/` : '';
 
   const out = new Map<string, Uint8Array>();
   for (const [name, data] of entries) {
     if (name.endsWith('/')) continue;
-    const rel = prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name;
-    if (scopePrefix) {
-      if (!rel.startsWith(scopePrefix)) continue;
-      out.set(rel.slice(scopePrefix.length), data);
-    } else {
-      out.set(rel, data);
-    }
+    out.set(prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name, data);
   }
   return out;
 }
