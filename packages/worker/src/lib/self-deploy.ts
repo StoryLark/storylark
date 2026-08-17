@@ -7,10 +7,13 @@
  * outside the deployment. The button exists only where the OPERATOR has already
  * given this deployment permission to deploy ITSELF on the platform they chose,
  * and the click that starts it is an admin session's click. Where they have
- * not, `resolveSelfDeploy` returns null, the portal shows the layer-2 command
- * exactly as it does today, and this file may as well not exist. That "off by
- * default and off unless you did something deliberate" property is the whole
- * design; everything below is subordinate to it.
+ * not, `resolveSelfDeploy` returns null with a reason the portal reports as
+ * the fault it now is — since AB#7418's revision the installer provisions
+ * this permission as part of every normal --deploy/--update (and fails loudly
+ * when it cannot), so "no permission" only happens to a deployment that
+ * predates automatic setup or explicitly opted out. The operator stays in
+ * charge either way: nothing here holds a credential they did not implicitly
+ * or explicitly hand over, and --disable-one-click withdraws it.
  *
  * ── Why a seam rather than an if/else ───────────────────────────────────────
  * The same reason `Database` and `ContentStore` are seams: the two platforms
@@ -79,14 +82,21 @@ export interface SelfDeployTarget {
 export function resolveSelfDeploy(env: Env): { target: SelfDeployTarget | null; reason: string } {
   if (env.SELF_DEPLOY) return { target: env.SELF_DEPLOY, reason: '' };
   if (isWorkerd()) {
-    if (!env.CF_API_TOKEN || !env.CF_ACCOUNT_ID) {
+    // Either credential shape works: an API token, or the OAuth session the
+    // installer handed over when the operator had only `wrangler login`.
+    // Since the installer provisions one of them automatically on every
+    // --deploy and --update (and fails loudly when it cannot), having NEITHER
+    // is a fault state — a deployment made before automatic setup existed and
+    // never updated since, or an explicit --disable-one-click — and the
+    // wording below treats it as one, not as a routine platform difference.
+    if (!env.CF_ACCOUNT_ID || (!env.CF_API_TOKEN && !env.CF_OAUTH_REFRESH_TOKEN)) {
       return {
         target: null,
         // Since AB#7418's engine store, this only matters for releases that
         // change the API server itself — engine/frontend updates install
         // through the deployment's own storage with no credential at all.
         reason:
-          'Self-update is off for releases that change the API server (this deployment predates automatic setup, or it was disabled). Turn it on with `node platforms/cloudflare/install.mjs --enable-one-click --yes` from your copy of the site, or take those releases with the command below. Everything else updates from the portal with no setup.',
+          'Self-update is disabled for this deployment — that is a fault state, not how StoryLark normally runs (either this site was deployed before automatic setup existed and has not taken an update since, or one-click updates were explicitly disabled). Re-enable it by running `node platforms/cloudflare/install.mjs --update --yes` from your copy of the site: a normal update provisions self-update automatically, whatever way you are logged in. Engine releases still install from this portal regardless.',
       };
     }
     return { target: cloudflareSelfDeploy(env), reason: '' };
@@ -98,7 +108,7 @@ export function resolveSelfDeploy(env: Env): { target: SelfDeployTarget | null; 
     // generic sentence is only for an entry that predates this feature.
     reason:
       env.SELF_DEPLOY_REASON ||
-      'Self-update is off for releases that change the API server: on Azure App Service it needs this app to have a managed identity with permission to deploy itself — run `node platforms/azure/install.mjs --enable-one-click --yes` to grant it (no credential is stored). Everything else updates from the portal with no setup.',
+      'Self-update is disabled for this deployment — that is a fault state, not how StoryLark normally runs on Azure (the app is missing the managed identity a normal install provisions). Re-enable it by running `node platforms/azure/install.mjs --update --yes` (or `--enable-one-click --yes`) from your copy of the site; no credential is stored either way. Engine releases still install from this portal regardless.',
   };
 }
 
@@ -111,9 +121,177 @@ export function isWorkerd(): boolean {
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
 
+// ── The OAuth credential path (AB#7418, revised) ────────────────────────────
+//
+// When the operator installed with `wrangler login` rather than an API token,
+// the installer hands the deployment the OAuth session's REFRESH token
+// (env.CF_OAUTH_REFRESH_TOKEN) — there is nothing else it could hand over:
+// Cloudflare's wrangler OAuth scopes cannot mint API tokens (verified against
+// wrangler's own shipped scope list; see platforms/cloudflare/
+// wrangler-oauth.mjs for the full account), and an access token alone dies in
+// an hour, which would be a button that silently breaks — worse than no
+// button.
+//
+// A refresh token has its own failure mode: Cloudflare MAY rotate it on every
+// exchange, and only the newest link of the chain stays alive. A rotated
+// value cannot go back into the Worker secret from in here without redeploying
+// the Worker (a secret write creates a new version — churn, and a race against
+// concurrent isolates reading the old env). So the chain's CURRENT state lives
+// in the deployment's own database instead — the `self_update_oauth` row —
+// and the secret is only the chain's SEED. The row records a hash of the seed
+// it grew from, so re-provisioning (a new secret from a fresh `--update`)
+// automatically orphans the old row rather than fighting it.
+//
+// Security posture, stated rather than implied: this moves a live credential
+// from a Worker secret into D1. Both are inside the same trust boundary (the
+// operator's account and this Worker's bindings — anyone who can read this D1
+// database holds the operator's own Cloudflare access already), and the row
+// never leaves the deployment: no route serves it, and the update-status
+// payloads carry only availability booleans. The credential's scope is
+// whatever `wrangler login` grants — broader than the minted-token ideal, and
+// the installer says so out loud at provision time.
+
+/** Wrangler's public OAuth client id (embedded in its open-source CLI — not a secret). */
+export const WRANGLER_OAUTH_CLIENT_ID = '54d11594-84e4-41aa-b438-e81b8fa78ee7';
+const OAUTH_TOKEN_URL = 'https://dash.cloudflare.com/oauth2/token';
+
+/** Don't present a token that could expire mid-deploy: refresh inside this margin. */
+const OAUTH_EXPIRY_MARGIN_MS = 60_000;
+
+/**
+ * Per-isolate cache so a preflight + install pair (or repeated portal loads
+ * within the hour) costs one exchange, not one per call. Keyed by the seed so
+ * tests (and re-provisioned deployments) never cross wires.
+ */
+let oauthMemory: { key: string; accessToken: string; expiresAt: number } | null = null;
+export function resetOAuthTokenCache(): void {
+  oauthMemory = null;
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+interface OAuthStateRow {
+  seed_sha256: string;
+  refresh_token: string;
+  access_token: string | null;
+  expires_at: number | null;
+}
+
+async function readOAuthState(db: Env['DB']): Promise<OAuthStateRow | null> {
+  await db
+    .prepare(
+      'CREATE TABLE IF NOT EXISTS self_update_oauth (id INTEGER PRIMARY KEY CHECK (id = 1), seed_sha256 TEXT NOT NULL, refresh_token TEXT NOT NULL, access_token TEXT, expires_at INTEGER, updated_at INTEGER NOT NULL)'
+    )
+    .run();
+  const { results } = await db.prepare('SELECT seed_sha256, refresh_token, access_token, expires_at FROM self_update_oauth WHERE id = 1').all<OAuthStateRow>();
+  return results[0] ?? null;
+}
+
+async function writeOAuthState(db: Env['DB'], seedHash: string, refreshToken: string, accessToken: string, expiresAt: number): Promise<void> {
+  await db
+    .prepare(
+      'INSERT INTO self_update_oauth (id, seed_sha256, refresh_token, access_token, expires_at, updated_at) VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET seed_sha256 = excluded.seed_sha256, refresh_token = excluded.refresh_token, access_token = excluded.access_token, expires_at = excluded.expires_at, updated_at = excluded.updated_at'
+    )
+    .bind(seedHash, refreshToken, accessToken, expiresAt, Date.now())
+    .run();
+}
+
+/** One refresh-token exchange. Throws with `oauthError` carrying the OAuth error code. */
+async function exchangeRefreshToken(
+  refreshToken: string,
+  tokenUrl: string,
+  clientId: string
+): Promise<{ accessToken: string; refreshToken: string; expiresAt: number }> {
+  const res = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId }).toString(),
+  });
+  const body = (await res.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string; error_description?: string };
+  if (!res.ok || body.error || !body.access_token) {
+    const err = new Error(`Cloudflare OAuth refresh failed: ${body.error_description || body.error || `HTTP ${res.status}`}`) as Error & { oauthError?: string };
+    err.oauthError = body.error;
+    throw err;
+  }
+  return {
+    accessToken: body.access_token,
+    // Rotation is Cloudflare's call — keep the current token when the
+    // response omits a new one (the same rule wrangler itself applies).
+    refreshToken: body.refresh_token || refreshToken,
+    expiresAt: Date.now() + (body.expires_in ?? 3600) * 1000,
+  };
+}
+
+/**
+ * A live access token for the deployment's OAuth session.
+ *
+ * Resolution order: per-isolate memory → the persisted state row (another
+ * isolate may have refreshed an hour ago) → a fresh exchange, whose result —
+ * including any rotated refresh token — is persisted BEFORE it is returned,
+ * so a deploy that fails halfway can never have consumed the chain's only
+ * live link without recording its successor.
+ *
+ * The one concurrency hazard is two isolates racing to exchange the same
+ * refresh token while Cloudflare rotates: the loser gets `invalid_grant`. The
+ * loser's recovery is to re-read the row — the winner persisted the fresh
+ * chain there — and retry once with it. Only if that also fails is the
+ * session genuinely dead (revoked, or superseded outside this deployment),
+ * and the error says exactly what to run to re-provision; preflight() surfaces
+ * it in the portal as the fault it is.
+ */
+export async function getOAuthAccessToken(env: Env, log?: DeployLog): Promise<string> {
+  const seed = env.CF_OAUTH_REFRESH_TOKEN;
+  if (!seed) throw new Error('no CF_OAUTH_REFRESH_TOKEN is configured');
+  const tokenUrl = env.CF_OAUTH_TOKEN_URL || OAUTH_TOKEN_URL;
+  const clientId = env.CF_OAUTH_CLIENT_ID || WRANGLER_OAUTH_CLIENT_ID;
+  const seedHash = await sha256Hex(seed);
+  const cacheKey = `${seedHash}:${tokenUrl}`;
+  const now = Date.now();
+
+  if (oauthMemory && oauthMemory.key === cacheKey && now + OAUTH_EXPIRY_MARGIN_MS < oauthMemory.expiresAt) {
+    return oauthMemory.accessToken;
+  }
+
+  const row = await readOAuthState(env.DB);
+  // A row grown from a DIFFERENT seed belongs to a previous provisioning —
+  // the installer stored a fresh secret since. Start over from the new seed.
+  const current = row && row.seed_sha256 === seedHash ? row : null;
+  if (current?.access_token && current.expires_at && now + OAUTH_EXPIRY_MARGIN_MS < current.expires_at) {
+    oauthMemory = { key: cacheKey, accessToken: current.access_token, expiresAt: current.expires_at };
+    return current.access_token;
+  }
+
+  const tryExchange = async (refreshToken: string) => {
+    const fresh = await exchangeRefreshToken(refreshToken, tokenUrl, clientId);
+    await writeOAuthState(env.DB, seedHash, fresh.refreshToken, fresh.accessToken, fresh.expiresAt);
+    oauthMemory = { key: cacheKey, accessToken: fresh.accessToken, expiresAt: fresh.expiresAt };
+    return fresh.accessToken;
+  };
+
+  const firstTry = current?.refresh_token ?? seed;
+  try {
+    return await tryExchange(firstTry);
+  } catch (err) {
+    if ((err as { oauthError?: string }).oauthError !== 'invalid_grant') throw err;
+    const reread = await readOAuthState(env.DB);
+    if (reread && reread.seed_sha256 === seedHash && reread.refresh_token !== firstTry) {
+      log?.('OAuth refresh raced another instance — retrying with the newer session state.');
+      return await tryExchange(reread.refresh_token);
+    }
+    throw new Error(
+      'The Cloudflare session this deployment holds is no longer valid — it was revoked, or superseded outside this deployment. Re-provision it by running `node platforms/cloudflare/install.mjs --update --yes` from your copy of the site.'
+    );
+  }
+}
+
 /**
  * Redeploy this Worker, from inside this Worker, with the operator's own
- * Cloudflare API token.
+ * credential — a Cloudflare API token, or (when the install only ever had a
+ * `wrangler login`) the OAuth session the installer handed over, exchanged
+ * for a short-lived access token per call by getOAuthAccessToken above.
  *
  * ── The API, as documented ──────────────────────────────────────────────────
  * Cloudflare's own three-phase direct-upload flow
@@ -186,12 +364,19 @@ const CF_API = 'https://api.cloudflare.com/client/v4';
  */
 export function cloudflareSelfDeploy(env: Env): SelfDeployTarget {
   const account = env.CF_ACCOUNT_ID!;
-  const token = env.CF_API_TOKEN!;
   const script = env.CF_SCRIPT_NAME || env.BRAND;
   const api = env.CF_API_BASE || CF_API;
-  const auth = { authorization: `Bearer ${token}` };
+  // Two credential shapes, one deployer (AB#7418, revised): a static API
+  // token, or the OAuth session handed over by an installer that had only
+  // `wrangler login` to work with. The bearer is resolved per call — an OAuth
+  // access token can expire between preflight and install, and
+  // getOAuthAccessToken hides the refresh (and its rotation bookkeeping)
+  // behind this one seam. CF_API_TOKEN wins when both exist: it is the
+  // narrower, deliberately-issued credential.
+  const bearer: () => Promise<string> = env.CF_API_TOKEN ? async () => env.CF_API_TOKEN! : () => getOAuthAccessToken(env);
 
   const call = async (path: string, init: RequestInit = {}) => {
+    const auth = { authorization: `Bearer ${await bearer()}` };
     const res = await fetch(`${api}${path}`, { ...init, headers: { ...auth, ...(init.headers as Record<string, string>) } });
     const text = await res.text();
     let body: { success?: boolean; result?: unknown; errors?: { message?: string }[] } = {};
@@ -209,7 +394,9 @@ export function cloudflareSelfDeploy(env: Env): SelfDeployTarget {
 
   return {
     platform: 'cloudflare',
-    credential: `a Cloudflare API token you issued, scoped to the Worker "${script}"`,
+    credential: env.CF_API_TOKEN
+      ? `a Cloudflare API token you issued, scoped to the Worker "${script}"`
+      : `the Cloudflare login session (wrangler OAuth) the installer handed to this deployment, exchanged for a short-lived token at the moment of use`,
 
     async preflight() {
       try {

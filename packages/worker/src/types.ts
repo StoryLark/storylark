@@ -102,10 +102,29 @@ export interface Env {
   // see platforms/azure/self-deploy.mjs.
   CF_API_TOKEN?: string;
   CF_ACCOUNT_ID?: string;
+  /**
+   * The OAuth alternative to CF_API_TOKEN (AB#7418, revised): when the
+   * operator ran the installer authenticated with `wrangler login` rather
+   * than an API token, there is no API token to mint from or store —
+   * Cloudflare does not let a wrangler OAuth session manage API tokens (its
+   * scope list has no token-management scope; see
+   * platforms/cloudflare/wrangler-oauth.mjs). So the installer hands the
+   * OAuth session itself to the deployment: this secret is the session's
+   * refresh token, and lib/self-deploy's getOAuthAccessToken exchanges it for
+   * a short-lived access token at the moment of use, persisting any rotation
+   * Cloudflare performs in the deployment's own database (the
+   * self_update_oauth table — this secret is the chain's SEED, not
+   * necessarily its current value). Either credential shape enables the same
+   * SelfDeployTarget; CF_API_TOKEN wins when both exist.
+   */
+  CF_OAUTH_REFRESH_TOKEN?: string;
   /** Defaults to BRAND, which is what the installer names the Worker. */
   CF_SCRIPT_NAME?: string;
   /** Test seam only — points the Cloudflare client at a local server. Never set in production. */
   CF_API_BASE?: string;
+  /** Test seams for the OAuth exchange — default to Cloudflare's real endpoint and wrangler's public client id. Never set in production. */
+  CF_OAUTH_TOKEN_URL?: string;
+  CF_OAUTH_CLIENT_ID?: string;
   /** Where prebuilt engine artifacts are published. Defaults to StoryLark/storylark. */
   ENGINE_RELEASE_REPO?: string;
   /** A plain static host for artifacts, instead of the GitHub Releases API. */

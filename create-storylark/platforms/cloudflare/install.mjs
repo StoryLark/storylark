@@ -12,12 +12,12 @@
 //                                                     rebuilds + redeploys an
 //                                                     EXISTING deployment
 //   node platforms/cloudflare/install.mjs --enable-one-click
-//                                                     manually supply the API
-//                                                     token that lets /admin's
-//                                                     "Update now" also cover
-//                                                     API-server releases
-//                                                     (--deploy/--update try to
-//                                                     set this up themselves)
+//                                                     re-run the automatic
+//                                                     self-update provisioning
+//                                                     (or, if that cannot work,
+//                                                     paste a token you scoped
+//                                                     yourself) — --deploy and
+//                                                     --update already do this
 //   node platforms/cloudflare/install.mjs --disable-one-click
 //                                                     turn that off, stickily
 //
@@ -43,6 +43,13 @@ import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import {
+  discoverWranglerAuth,
+  mintScopedToken,
+  provisionSelfUpdateFromOAuth,
+  WRANGLER_CLIENT_ID,
+  WRANGLER_TOKEN_URL,
+} from './wrangler-oauth.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
@@ -322,9 +329,13 @@ async function update() {
 
   migrateBuildDeploy();
 
-  // Existing deployments gain self-update the same way new ones do: as part of
-  // a normal update, automatically, best-effort — never failing the update.
-  await ensureSelfUpdate();
+  // Existing deployments gain self-update the same way new ones do: as part
+  // of a normal update, automatically — including deployments made before
+  // automatic setup existed, and OAuth-authenticated operators. Taking one
+  // update the old way fixes the site permanently going forward. A failure
+  // here fails the command (below), because "updated, but still cannot
+  // self-update" is a fault, not a footnote.
+  const selfUpdate = await ensureSelfUpdate();
 
   const after = pinnedEngineVersion();
   console.log('\n' + '='.repeat(72));
@@ -338,16 +349,20 @@ async function update() {
     console.log('\nEngine: rebuilt and redeployed from this working tree.');
   }
   console.log(`Site:   ${env.APP_ORIGIN}`);
-  console.log('\nNothing about your brand or your content was touched: no resource was');
-  console.log('created or changed, no secret was added, and nothing new is stored in');
-  console.log('the deployment. The only credential used was your own wrangler login.');
+  console.log('\nNothing about your brand or your content was touched, and the update');
+  console.log('itself created no resource and stored nothing. If the self-update step');
+  console.log('above provisioned a credential for the /admin button, it said so there,');
+  console.log('in full — including its scope and how to revoke it.');
   console.log('\nCheck it landed: open /admin on the site — the Platform update card');
   console.log('reads the version out of the deployment itself.');
   console.log('='.repeat(72) + '\n');
+
+  if (!selfUpdate.ok) failSelfUpdateLoudly(selfUpdate.why);
 }
 
 /**
- * Self-update provisioning (AB#7418, revised): part of a NORMAL install.
+ * Self-update provisioning (AB#7418, revised twice): part of a NORMAL install,
+ * and it always ends with a working credential or a loud failure.
  *
  * The /admin "Update now" button needs no credential at all for releases that
  * only change the engine — those install through the deployment's own storage
@@ -357,32 +372,41 @@ async function update() {
  * solves that with a managed identity provisioned at install; this is the
  * Cloudflare counterpart, run automatically by --deploy and --update:
  *
- *   1. If CF_API_TOKEN/CF_ACCOUNT_ID secrets already exist → leave them alone.
+ *   1. If the self-update secrets already exist → leave them alone.
  *   2. If the installer authenticated with an API token (CLOUDFLARE_API_TOKEN)
  *      → try to MINT a new token scoped to Account | Workers Scripts | Edit
  *      and store that; if the operator's token lacks token-creation permission
  *      (common), fall back to storing the token the installer is already
  *      using — disclosed plainly, because it is broader than the minted one
  *      would have been.
- *   3. If the installer authenticated with `wrangler login` (OAuth) → there is
- *      no raw token to mint with or store, so nothing is provisioned; the
- *      printed output says exactly what still works (everything except
- *      API-server releases) and how to finish the job (--enable-one-click).
+ *   3. If the installer authenticated with `wrangler login` (OAuth) → read the
+ *      credentials wrangler itself persisted (plaintext TOML, or the opt-in
+ *      keyring-encrypted file) and provision from them: mint if Cloudflare
+ *      permits it (it currently does not for OAuth sessions — see
+ *      wrangler-oauth.mjs), else hand the OAuth session itself to the
+ *      deployment as a refresh token the Worker exchanges at the moment of
+ *      use. Zero operator action either way.
+ *   4. If nothing usable exists at all, the CALLER fails loudly — a deploy
+ *      that quietly leaves a site unable to self-update is the bug this
+ *      revision exists to eliminate. There is no expected state in which the
+ *      operator is handed a command as their path forward.
  *
- * Every path prints what was provisioned and how to revoke it. What AB#7418's
- * revision removed is the operator hand-creating a token as a prerequisite —
- * not the disclosure.
+ * Every path prints what was provisioned, how broad it is, and how to revoke
+ * it. The manual step is what was removed — never the disclosure.
  *
  * `--disable-one-click` still turns it off, and writes SELF_UPDATE=off into
  * install.env so a later --update does not silently turn it back on.
  */
-const SELF_UPDATE_OFF = (env.SELF_UPDATE ?? '').toLowerCase() === 'off';
+// `let`, not const: an explicit --enable-one-click clears the opt-out before
+// re-running the provisioning, and setSelfUpdateFlag keeps this in sync with
+// what it writes to install.env.
+let SELF_UPDATE_OFF = (env.SELF_UPDATE ?? '').toLowerCase() === 'off';
 
-/** Are the self-update secrets already on this Worker? */
+/** Are the self-update secrets already on this Worker (either credential shape)? */
 function selfUpdateConfigured() {
   try {
     const out = run('wrangler', ['secret', 'list', '--env', env.BRAND_ID], { encoding: 'utf8', cwd: ROOT });
-    return out.includes('CF_API_TOKEN') && out.includes('CF_ACCOUNT_ID');
+    return (out.includes('CF_API_TOKEN') || out.includes('CF_OAUTH_REFRESH_TOKEN')) && out.includes('CF_ACCOUNT_ID');
   } catch {
     return false;
   }
@@ -398,44 +422,6 @@ function resolveAccountId() {
   } catch {
     return '';
   }
-}
-
-/**
- * Mint a token scoped to Workers Scripts | Edit on this one account, using the
- * credential the installer is already authenticated with. Throws with the
- * API's own words when the operator's token cannot create tokens — a common
- * and perfectly reasonable restriction, handled by the caller's fallback.
- */
-async function mintScopedToken(baseToken, accountId) {
-  const api = 'https://api.cloudflare.com/client/v4';
-  const headers = { authorization: `Bearer ${baseToken}`, 'content-type': 'application/json' };
-  const say = (body, status) => body?.errors?.map((e) => e.message).filter(Boolean).join('; ') || `HTTP ${status}`;
-
-  // Permission-group ids are not guessable constants — ask the API for the one
-  // that means "Workers Scripts Write".
-  const groupsRes = await fetch(`${api}/user/tokens/permission_groups`, { headers });
-  const groups = await groupsRes.json().catch(() => ({}));
-  if (!groupsRes.ok || groups.success === false) throw new Error(say(groups, groupsRes.status));
-  const group = (groups.result ?? []).find((g) => g.name === 'Workers Scripts Write');
-  if (!group) throw new Error('the API did not list a "Workers Scripts Write" permission group');
-
-  const res = await fetch(`${api}/user/tokens`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      name: `storylark-self-update-${env.BRAND_ID}`,
-      policies: [
-        {
-          effect: 'allow',
-          resources: { [`com.cloudflare.api.account.${accountId}`]: '*' },
-          permission_groups: [{ id: group.id }],
-        },
-      ],
-    }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.success === false || !body.result?.value) throw new Error(say(body, res.status));
-  return body.result.value;
 }
 
 /** Store the pair of secrets that turn the button on. Token piped, never argv. */
@@ -455,7 +441,12 @@ function storeSelfUpdateSecrets(token, accountId) {
   });
 }
 
-/** Best-effort, never fails the deploy/update that called it. */
+/**
+ * Provision self-update, whatever way the operator is authenticated. Returns
+ * { ok: true } or { ok: false, why } — it never exits itself, because the
+ * loudness of the failure is the caller's decision (--deploy and --update
+ * exit non-zero; see failSelfUpdateLoudly).
+ */
 async function ensureSelfUpdate() {
   console.log('\nSelf-update setup (the /admin "Update now" button)...');
   console.log('Engine releases already update from /admin with NO setup on any platform');
@@ -463,65 +454,134 @@ async function ensureSelfUpdate() {
   console.log('rarer releases that change the API server itself.');
   if (SELF_UPDATE_OFF) {
     console.log('… SELF_UPDATE=off in install.env — leaving self-update disabled, as you asked.');
-    return;
+    return { ok: true, optedOut: true };
   }
   try {
     if (selfUpdateConfigured()) {
       console.log('✓ Already configured for this Worker — leaving it exactly as it is.');
-      return;
+      return { ok: true };
     }
     const accountId = resolveAccountId();
     if (!accountId) {
-      console.log('… skipped: could not determine the Cloudflare account id.');
-      console.log('  Finish it later with: node platforms/cloudflare/install.mjs --enable-one-click --yes');
-      return;
+      return { ok: false, why: 'could not determine the Cloudflare account id (set CF_ACCOUNT_ID in install.env, or check `wrangler whoami`).' };
     }
+
+    // Path 1: the installer was run with an API token in the environment.
     const baseToken = (process.env.CLOUDFLARE_API_TOKEN || '').trim();
-    if (!baseToken) {
-      console.log('… this install authenticated with `wrangler login` (OAuth), which has no');
-      console.log('  raw API token this script could scope or store — that is a Cloudflare');
-      console.log('  boundary, not a choice. Everything except API-server releases still');
-      console.log('  updates from /admin with no setup. To cover those too, either re-run');
-      console.log('  with CLOUDFLARE_API_TOKEN set, or run:');
-      console.log('    node platforms/cloudflare/install.mjs --enable-one-click --yes');
-      return;
+    if (baseToken) {
+      let token;
+      let provisioned;
+      try {
+        token = await mintScopedToken(baseToken, accountId, `storylark-self-update-${env.BRAND_ID}`);
+        provisioned = [
+          `✓ Minted a NEW API token "storylark-self-update-${env.BRAND_ID}", scoped to`,
+          '  Account | Workers Scripts | Edit on this account only, and stored it as a',
+          '  Worker secret. Your own token was not stored.',
+          '  Revoke it anytime at https://dash.cloudflare.com/profile/api-tokens —',
+          '  the button degrades gracefully on the next page load.',
+        ];
+      } catch (err) {
+        token = baseToken;
+        provisioned = [
+          `… Could not mint a scoped token (${err.message}), so the token this`,
+          '  installer authenticated with was stored as the Worker secret instead.',
+          '  NOTE: that token is whatever scope YOU gave it — likely broader than the',
+          '  Workers Scripts | Edit this feature needs. To narrow it: mint a token',
+          '  with just that permission and run --enable-one-click to replace it.',
+          '  Withdraw it anytime with --disable-one-click, or revoke the token at',
+          '  https://dash.cloudflare.com/profile/api-tokens.',
+        ];
+      }
+      storeSelfUpdateSecrets(token, accountId);
+      for (const line of provisioned) console.log(line);
+      return { ok: true };
     }
-    let token;
-    let provisioned;
-    try {
-      token = await mintScopedToken(baseToken, accountId);
-      provisioned = [
-        `✓ Minted a NEW API token "storylark-self-update-${env.BRAND_ID}", scoped to`,
-        '  Account | Workers Scripts | Edit on this account only, and stored it as a',
-        '  Worker secret. Your own token was not stored.',
-        '  Revoke it anytime at https://dash.cloudflare.com/profile/api-tokens —',
-        '  the button degrades gracefully on the next page load.',
-      ];
-    } catch (err) {
-      token = baseToken;
-      provisioned = [
-        `… Could not mint a scoped token (${err.message}), so the token this`,
-        '  installer authenticated with was stored as the Worker secret instead.',
-        '  NOTE: that token is whatever scope YOU gave it — likely broader than the',
-        '  Workers Scripts | Edit this feature needs. To narrow it: mint a token',
-        '  with just that permission and run --enable-one-click to replace it.',
-        '  Withdraw it anytime with --disable-one-click, or revoke the token at',
-        '  https://dash.cloudflare.com/profile/api-tokens.',
-      ];
+
+    // Path 2: `wrangler login` (OAuth). Read the credentials wrangler itself
+    // persisted and provision from them — see wrangler-oauth.mjs for exactly
+    // what is read, why the refresh token is what gets stored, and why the
+    // operator's local wrangler may ask them to log in again afterwards.
+    const auth = discoverWranglerAuth();
+    if (!auth) {
+      return {
+        ok: false,
+        why:
+          'no Cloudflare credential was found to provision from. The installer looked for\n' +
+          '  CLOUDFLARE_API_TOKEN in the environment and for the credentials `wrangler login`\n' +
+          '  stores on this machine (including the keyring-encrypted form), and found neither\n' +
+          '  readable. Run `wrangler login` (or set CLOUDFLARE_API_TOKEN) and re-run\n' +
+          '  `node platforms/cloudflare/install.mjs --update --yes`.',
+      };
     }
-    storeSelfUpdateSecrets(token, accountId);
-    for (const line of provisioned) console.log(line);
+    if (auth.apiToken) {
+      // A wrangler-v1-era api_token in the config file: same posture as the
+      // environment-token path, just sourced from disk.
+      let token;
+      try {
+        token = await mintScopedToken(auth.apiToken, accountId, `storylark-self-update-${env.BRAND_ID}`);
+        console.log(`✓ Minted a NEW API token "storylark-self-update-${env.BRAND_ID}" (scoped to`);
+        console.log('  Account | Workers Scripts | Edit) using the api_token in your wrangler');
+        console.log('  config, and stored it as a Worker secret. Your own token was not stored.');
+      } catch (err) {
+        token = auth.apiToken;
+        console.log(`… Could not mint a scoped token (${err.message}); stored the api_token from`);
+        console.log(`  your wrangler config (${auth.source}) as the Worker secret instead.`);
+        console.log('  Replace it with a narrower one anytime via --enable-one-click.');
+      }
+      storeSelfUpdateSecrets(token, accountId);
+      return { ok: true };
+    }
+    if (!auth.oauth.refreshToken) {
+      return {
+        ok: false,
+        why:
+          `the wrangler credentials at ${auth.source} carry no refresh token, so the\n` +
+          '  session cannot be handed to the deployment. Run `wrangler login` again and\n' +
+          '  re-run `node platforms/cloudflare/install.mjs --update --yes`.',
+      };
+    }
+    console.log(`Found your wrangler login session (${auth.source}). Provisioning from it...`);
+    const { notes } = await provisionSelfUpdateFromOAuth({
+      creds: auth.oauth,
+      accountId,
+      scriptName: env.BRAND_ID,
+      tokenName: `storylark-self-update-${env.BRAND_ID}`,
+    });
+    for (const line of notes) console.log(line);
+    return { ok: true };
   } catch (err) {
-    console.log(`… self-update setup failed (${err.message}). Nothing else about the deploy`);
-    console.log('  is affected. Set it up later with --enable-one-click, or take API-server');
-    console.log('  releases with the --update command.');
+    return { ok: false, why: err.message };
   }
 }
 
 /**
- * --enable-one-click: the manual door, kept for the cases automatic setup
- * cannot cover (OAuth-only login, an operator who wants to supply a token they
- * scoped themselves, or replacing a broad fallback token with a narrow one).
+ * The loud failure (AB#7418, revised): a deploy/update that ends without a
+ * working self-update credential is a FAULT, reported with a non-zero exit —
+ * not a tip printed under a successful banner. The deploy itself already
+ * happened and the site serves; the exit code is about what did NOT happen.
+ */
+function failSelfUpdateLoudly(why) {
+  console.error('\n' + '!'.repeat(72));
+  console.error('SELF-UPDATE WAS NOT PROVISIONED — this deployment cannot take releases');
+  console.error('that change the API server from /admin until it is.');
+  console.error('!'.repeat(72));
+  console.error(`\nReason: ${why}`);
+  console.error('\nThe site itself deployed fine and serves normally, and engine releases');
+  console.error('still update from /admin with no setup. Fix the reason above and re-run:');
+  console.error('  node platforms/cloudflare/install.mjs --update --yes');
+  console.error('(or, to deliberately keep self-update off, run --disable-one-click --yes');
+  console.error('so this stops being reported as a failure).');
+  console.error('!'.repeat(72) + '\n');
+  process.exit(1);
+}
+
+/**
+ * --enable-one-click: runs the same automatic provisioning --deploy/--update
+ * run (so a deployment that predates automatic setup, or was disabled, gets
+ * fixed with one command and zero further action), and only falls back to
+ * prompting for a pasted token when automatic provisioning is impossible —
+ * or when the operator explicitly wants to supply a token they scoped
+ * themselves, via --manual.
  */
 async function enableOneClick() {
   if (!env.BRAND_ID) {
@@ -535,18 +595,30 @@ async function enableOneClick() {
     );
     process.exit(1);
   }
+  if (!args.has('--manual')) {
+    // Enabling on purpose overrides a previous opt-out — but only an explicit
+    // --enable-one-click does; --deploy/--update always respect the flag.
+    if (SELF_UPDATE_OFF) setSelfUpdateFlag('on');
+    const result = await ensureSelfUpdate();
+    if (result.ok) {
+      setSelfUpdateFlag('on');
+      console.log('\n✓ Self-update now covers API-server releases too. Open /admin — the');
+      console.log('  Platform update card\'s "Update now" completes every release.');
+      return;
+    }
+    console.log(`\n… automatic provisioning did not work (${result.why})`);
+    console.log('Falling back to supplying a token by hand:');
+  }
   await doEnableOneClick();
 }
 
 /**
- * The actual work of turning one-click on, split out from enableOneClick() so
- * deploy() can offer it in the same breath as the rest of setup instead of
- * making the operator discover and run a second command later. Still asks
- * for a token the operator mints themselves — Workers have no ambient
- * identity a Worker could use to call the Cloudflare API on its own, unlike
- * Azure's managed identity, so that one step cannot be automated away. What
- * CAN be fixed, and is here: not making it a separate thing to find out
- * about after the fact.
+ * The manual door: paste a token you minted and scoped yourself. No longer a
+ * step anyone is REQUIRED to take — ensureSelfUpdate() provisions
+ * automatically from whatever credential the install ran with, including a
+ * plain `wrangler login` — but kept for the operator who wants to hand the
+ * deployment exactly the token they chose, or to replace a broad fallback
+ * credential with a narrow one (--enable-one-click --manual --yes).
  */
 async function doEnableOneClick() {
   console.log('\n' + '='.repeat(72));
@@ -590,22 +662,54 @@ async function doEnableOneClick() {
 
   console.log('\n✓ Self-update now covers API-server releases too.');
   console.log('  Open /admin — the Platform update card\'s "Update now" completes every');
-  console.log('  release, and still shows the command either way.');
+  console.log('  release. (The command-line equivalent stays documented in the card as');
+  console.log('  reference — it is never the required path.)');
   console.log('  Turn it off with: node platforms/cloudflare/install.mjs --disable-one-click --yes\n');
 }
 
-/** The exact inverse. Deleting the token is also enough on its own — this is just tidier. */
-function disableOneClick() {
+/** The exact inverse. Deleting the credential is also enough on its own — this is just tidier. */
+async function disableOneClick() {
   if (!args.has('--yes')) {
     console.error('\nRe-run with --disable-one-click --yes to confirm.');
     process.exit(1);
   }
-  for (const name of ['CF_API_TOKEN', 'CF_ACCOUNT_ID']) {
+  for (const name of ['CF_API_TOKEN', 'CF_OAUTH_REFRESH_TOKEN', 'CF_ACCOUNT_ID']) {
     try {
       run('wrangler', ['secret', 'delete', name, '--env', env.BRAND_ID], { stdio: 'inherit', cwd: ROOT, input: 'y\n' });
     } catch {
       console.log(`  (${name} was not set — nothing to remove.)`);
     }
+  }
+  // The OAuth-provisioned deployment persists the ROTATED refresh token in its
+  // own database (see storylark-worker's self-deploy: the seed secret above is
+  // only the chain's starting point). Deleting the secret already turns the
+  // feature off — the worker refuses to use the row without the secret — but a
+  // live refresh token should not be left sitting in a table, so best-effort:
+  // read it, revoke it against Cloudflare's OAuth endpoint, delete the row.
+  try {
+    const out = run(
+      'wrangler',
+      ['d1', 'execute', env.BRAND_ID, '--env', env.BRAND_ID, '--remote', '--json', '--command', 'SELECT refresh_token FROM self_update_oauth'],
+      { encoding: 'utf8', cwd: ROOT }
+    );
+    const rows = JSON.parse(out)?.[0]?.results ?? [];
+    for (const row of rows) {
+      if (!row.refresh_token) continue;
+      await fetch(WRANGLER_TOKEN_URL.replace(/token$/, 'revoke'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ token: row.refresh_token, token_type_hint: 'refresh_token', client_id: WRANGLER_CLIENT_ID }).toString(),
+      }).catch(() => undefined);
+    }
+    run(
+      'wrangler',
+      ['d1', 'execute', env.BRAND_ID, '--env', env.BRAND_ID, '--remote', '--command', 'DELETE FROM self_update_oauth'],
+      { encoding: 'utf8', cwd: ROOT }
+    );
+    if (rows.length) console.log('  (Also revoked and removed the OAuth session state the deployment held.)');
+  } catch {
+    // The table may simply not exist (token-based deployments, or no install
+    // ever ran) — nothing to clean is the common case, not an error.
   }
   // Sticky: --deploy/--update provision self-update automatically now, so an
   // explicit opt-out has to be recorded somewhere they will read, or the next
@@ -614,16 +718,17 @@ function disableOneClick() {
   console.log('\n✓ Self-update is off for API-server releases, and SELF_UPDATE=off was');
   console.log('  written to install.env so --update will not re-enable it. Engine releases');
   console.log('  still update from /admin — that path stores no credential to remove.');
-  console.log('  Revoke the token itself at https://dash.cloudflare.com/profile/api-tokens');
-  console.log('  if you have not already.\n');
+  console.log('  If a minted API token existed, revoke it too at');
+  console.log('  https://dash.cloudflare.com/profile/api-tokens if you have not already.\n');
 }
 
-/** Record the operator's self-update choice in install.env. */
+/** Record the operator's self-update choice in install.env (and in this process). */
 function setSelfUpdateFlag(value) {
   let text = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
   if (/^SELF_UPDATE=/m.test(text)) text = text.replace(/^SELF_UPDATE=.*$/m, `SELF_UPDATE=${value}`);
   else text += `${text.endsWith('\n') || text === '' ? '' : '\n'}SELF_UPDATE=${value}\n`;
   writeFileSync(envPath, text);
+  SELF_UPDATE_OFF = value === 'off';
 }
 
 /** One line from stdin. No echo suppression: a terminal that supports it is not guaranteed, and the value is pasted, not typed. */
@@ -708,18 +813,20 @@ async function deploy() {
   await printAdminSetup(env.APP_ORIGIN, adminKey);
 
   // Self-update is part of a normal install now (AB#7418, revised): provision
-  // it automatically, best-effort, and say exactly what was provisioned.
-  await ensureSelfUpdate();
+  // it automatically, say exactly what was provisioned, and treat coming up
+  // empty as a loud, non-zero-exit fault — never a quiet footnote.
+  const selfUpdate = await ensureSelfUpdate();
+  if (!selfUpdate.ok) failSelfUpdateLoudly(selfUpdate.why);
 }
 
 if (args.has('--deploy')) await deploy();
 else if (args.has('--update')) await update();
 else if (args.has('--enable-one-click')) await enableOneClick();
-else if (args.has('--disable-one-click')) disableOneClick();
+else if (args.has('--disable-one-click')) await disableOneClick();
 else if (args.has('--verify') || args.size === 0) verify();
 else {
   console.error(
-    'Usage: node install.mjs --verify | --deploy --yes | --update --yes | --enable-one-click --yes | --disable-one-click --yes'
+    'Usage: node install.mjs --verify | --deploy --yes | --update --yes | --enable-one-click [--manual] --yes | --disable-one-click --yes'
   );
   process.exit(1);
 }

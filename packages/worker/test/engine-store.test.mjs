@@ -616,7 +616,7 @@ test('GET /update-status reports ONE update answer, and detects a core-only rele
       assert.equal(body2.hasUpdate, true);
       assert.equal(body2.release.serverChanged, true);
       assert.equal(body2.updateNow.available, false);
-      assert.match(body2.updateNow.reason, /Self-update is off/);
+      assert.match(body2.updateNow.reason, /Self-update is disabled/);
     } finally {
       globalThis.fetch = realFetch;
     }

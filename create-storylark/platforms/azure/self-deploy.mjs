@@ -106,7 +106,7 @@ export function azureSelfDeploy(env, opts = {}) {
     return {
       target: null,
       reason:
-        'Self-update is off for releases that change the API server: it needs a managed identity on this Web App with permission to deploy it — run `node platforms/azure/install.mjs --enable-one-click --yes` from your copy of the site (a normal --deploy/--update sets this up automatically now). It grants the app that permission and stores no credential anywhere. Engine releases update from the portal regardless.',
+        'Self-update is disabled for this deployment — a fault state, not how StoryLark normally runs on Azure: this Web App is missing the managed identity a normal install provisions. Re-enable it by running `node platforms/azure/install.mjs --update --yes` (or `--enable-one-click --yes`) from your copy of the site; it grants the app that permission and stores no credential anywhere. Engine releases update from the portal regardless.',
     };
   }
 

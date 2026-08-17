@@ -297,11 +297,15 @@ test('a version with no published artifact says so, instead of half-installing s
 
 // ── the not-configured path: the whole feature is opt-in ────────────────────
 
-test('with nothing configured there is no deploy target, and the reason names the CLI', () => {
+test('with nothing configured there is no deploy target, and the reason reads as the fault it is, with the repair spelled out', () => {
   const { target, reason } = resolveSelfDeploy({ BRAND: 'acme' });
   assert.equal(target, null);
-  assert.match(reason, /Self-update is off/);
-  assert.match(reason, /install\.mjs --enable-one-click/);
+  assert.match(reason, /Self-update is disabled/);
+  assert.match(reason, /fault state/);
+  assert.match(reason, /install\.mjs --update/);
+  // The reason must never present the manual command as the operator's path —
+  // it names the automatic repair (a normal --update), not a copy-paste ritual.
+  assert.ok(!/command below/i.test(reason));
 });
 
 test('a Cloudflare token alone is not enough — a half-configured deployment offers no button', () => {

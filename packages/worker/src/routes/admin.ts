@@ -99,12 +99,13 @@ const UPDATE_COMMANDS = {
  * `hasUpdate` compares it against the live npm registry, unauthenticated and
  * read-only.
  *
- * Installing is deliberately NOT something this deployment can do. It hands
- * back `updateCommand`: the installer command the operator runs from their own
- * machine, with the platform credentials they already hold. A deployment that
- * could update itself would have to hold a standing deploy credential, and
- * that credential — a GitHub PAT, in the version this replaced — is exactly
- * what a reading app has no business storing. See docs/updating.md.
+ * Since AB#7418 the answer to "how do I take it" is the updateNow field: the
+ * portal's one button, expected to be available on every healthy deployment
+ * (engine releases through the deployment's own storage; API-server releases
+ * through the self-deploy permission the installer provisions). The
+ * `updateCommand` is still handed back, but as reference documentation — the
+ * floor that works with nothing but the operator's own machine — never as the
+ * path the portal points an operator down. See docs/updating.md.
  */
 admin.get('/update-status', async (c) => {
   try {
@@ -146,7 +147,7 @@ admin.get('/update-status', async (c) => {
     const updateNow = serverChanged
       ? oneClick.available
         ? { available: true as const, mechanism: 'platform-deploy' as const }
-        : { available: false as const, reason: oneClick.reason ?? 'Self-update is off for this deployment.' }
+        : { available: false as const, reason: oneClick.reason ?? 'Self-update is disabled for this deployment.' }
       : store
         ? { available: true as const, mechanism: 'engine-store' as const }
         : oneClick.available
@@ -154,7 +155,7 @@ admin.get('/update-status', async (c) => {
           : {
               available: false as const,
               reason:
-                'This deployment has no writable storage bound, so an engine release cannot be installed from the portal. Bind an R2 bucket (Cloudflare) or set AZURE_STORAGE_CONNECTION_STRING / STORYLARK_LOCAL_CONTENT (Node), or take the update with the command below.',
+                'This deployment has no writable storage bound, so an engine release cannot be installed from the portal — a fault state, since a normal install binds one. Repair it by binding an R2 bucket (Cloudflare) or setting AZURE_STORAGE_CONNECTION_STRING / STORYLARK_LOCAL_CONTENT (Node), or re-running `--update` from your copy of the site.',
             };
 
     return c.json({

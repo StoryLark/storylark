@@ -543,22 +543,29 @@ function StatusSection({ status }: { status: StatusResponse | null }): JSX.Eleme
 }
 
 /**
- * Platform update (AB#7403, reworked AB#7418). Three things, identical on every
- * platform: a notice when a release is available, "Check for updates", and
- * "Update now" — which works with zero setup, because the common case installs
- * through the deployment's own storage (the engine store) and the rest rides a
- * self-deploy permission the installer provisions as part of a normal install.
- * Which mechanism a given release takes is the worker's business; this card
- * never asks the operator to care.
+ * Platform update (AB#7403, reworked AB#7418 — twice). Three things, identical
+ * on every platform: a notice when a release is available, "Check for
+ * updates", and "Update now" — which works with zero setup, because the common
+ * case installs through the deployment's own storage (the engine store) and
+ * the rest rides a self-deploy permission the installer provisions as part of
+ * every normal install and update, whatever way the operator authenticated
+ * (an API token, Azure's managed identity, or a plain `wrangler login` —
+ * whose OAuth session the installer hands to the deployment). Which mechanism
+ * a given release takes is the worker's business; this card never asks the
+ * operator to care.
  *
- * The command never goes away, and that is deliberate. The button depends on a
- * release artifact existing, storage answering, and (for server releases) a
+ * The command never goes away, and that is deliberate: the button depends on
+ * a release artifact existing, storage answering, and (for server releases) a
  * platform API having a good day; the command depends on none of those. It is
- * the floor, and a card that hid it as soon as something fancier existed would
- * be hiding the thing that always works. But it is documentation and an escape
- * hatch — never the only option offered, except in the ONE degraded state left:
- * a release that changes the API server on a deployment whose self-update was
- * disabled or predates automatic setup. Then the card says so plainly.
+ * the floor that always works. But — the second AB#7418 revision — it is
+ * REFERENCE documentation, folded away below the card, and never presented as
+ * the thing the operator has to go do. There is no expected state in which
+ * the button is unavailable. If a deployment nonetheless has no self-deploy
+ * permission (deployed before automatic setup and never updated since, or
+ * explicitly opted out with --disable-one-click), that is a FAULT state: the
+ * card says self-update is disabled and how to re-enable it, in the worker's
+ * words — it must never read like a routine platform difference with a
+ * command as its answer.
  */
 const UPDATE_DOCS_URL = 'https://storylark.org/docs/updating.html';
 
@@ -583,7 +590,8 @@ function UpdateSection({
   const degradedReason = updateStatus?.updateNow
     ? updateStatus.updateNow.available
       ? undefined
-      : (updateStatus.updateNow.reason ?? 'Self-update is off for this deployment.')
+      : (updateStatus.updateNow.reason ??
+        'Self-update is disabled for this deployment — a fault state, not a platform difference. Re-enable it by running a normal update from your copy of the site.')
     : oneClick && !oneClick.available
       ? oneClick.reason
       : undefined;
@@ -763,22 +771,30 @@ function UpdateSection({
           )}
           {engineMessage && <p class="settings-note">{engineMessage}</p>}
 
-          <p class="settings-note">
-            {updateStatus.hasUpdate
-              ? `${canUpdateNow ? 'You can also take it' : 'To take it'}, run this from your copy of the site, on the machine you deploy from:`
-              : 'When there is one, you take it by running this from your copy of the site, on the machine you deploy from:'}
-          </p>
-          <pre class="admin-command">{command}</pre>
-          <button class="btn-ghost" onClick={() => copy(command)}>
-            {copied ? 'Copied' : 'Copy command'}
-          </button>
-          <p class="settings-note">
-            It pulls the new engine, migrates, rebuilds with your brand untouched, and redeploys — using the platform login
-            you already have. It works whatever state the button is in, and stores nothing on the site.{' '}
-            <a href={updateStatus.updateDocsUrl ?? UPDATE_DOCS_URL} target="_blank" rel="noreferrer">
-              How updating works
-            </a>
-          </p>
+          {/* Reference only — never the operator's path. "Update now" is the
+              way to update; this stays because the command is the one path
+              with no moving parts, and hiding the thing that always works
+              would be its own kind of dishonesty. Folded away so it reads as
+              the documentation it is. */}
+          <details class="admin-update-reference">
+            <summary>Reference: the command-line equivalent</summary>
+            <p class="settings-note">
+              You should never need this — "Update now" completes every release by itself. For the record, this is what it
+              does, runnable from your copy of the site on the machine you deploy from (it works even when this portal
+              cannot, which is why it stays documented):
+            </p>
+            <pre class="admin-command">{command}</pre>
+            <button class="btn-ghost" onClick={() => copy(command)}>
+              {copied ? 'Copied' : 'Copy command'}
+            </button>
+            <p class="settings-note">
+              It pulls the new engine, migrates, rebuilds with your brand untouched, and redeploys — using the platform
+              login you already have, storing nothing on the site.{' '}
+              <a href={updateStatus.updateDocsUrl ?? UPDATE_DOCS_URL} target="_blank" rel="noreferrer">
+                How updating works
+              </a>
+            </p>
+          </details>
         </>
       )}
     </section>
