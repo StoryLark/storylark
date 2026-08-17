@@ -368,7 +368,20 @@ async function enableOneClick() {
     );
     process.exit(1);
   }
+  await doEnableOneClick();
+}
 
+/**
+ * The actual work of turning one-click on, split out from enableOneClick() so
+ * deploy() can offer it in the same breath as the rest of setup instead of
+ * making the operator discover and run a second command later. Still asks
+ * for a token the operator mints themselves — Workers have no ambient
+ * identity a Worker could use to call the Cloudflare API on its own, unlike
+ * Azure's managed identity, so that one step cannot be automated away. What
+ * CAN be fixed, and is here: not making it a separate thing to find out
+ * about after the fact.
+ */
+async function doEnableOneClick() {
   console.log('\n' + '='.repeat(72));
   console.log('ONE-CLICK UPDATES — what you are about to allow');
   console.log('='.repeat(72));
@@ -522,6 +535,19 @@ async function deploy() {
 
   console.log('\nWaiting for the site to come up so we can mint your admin setup link...');
   await printAdminSetup(env.APP_ORIGIN, adminKey);
+
+  console.log('\n' + '='.repeat(72));
+  console.log('One more thing: the admin portal can show a real "Install update" button');
+  console.log('instead of a copy-paste command, if you want one now. Costs one Cloudflare');
+  console.log('API token you create in the next step (skip with N — nothing else changes,');
+  console.log('you can always run --enable-one-click later).');
+  console.log('='.repeat(72));
+  const wantsOneClick = (await prompt('\nSet up the update button now? [y/N] ')).trim().toLowerCase();
+  if (wantsOneClick === 'y' || wantsOneClick === 'yes') {
+    await doEnableOneClick();
+  } else {
+    console.log('\nSkipped. Turn it on anytime with: node platforms/cloudflare/install.mjs --enable-one-click --yes');
+  }
 }
 
 if (args.has('--deploy')) await deploy();
