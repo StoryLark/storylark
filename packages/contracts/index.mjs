@@ -4,3 +4,4 @@
 export * from './validate.mjs';
 export * from './zip.mjs';
 export * from './theme-package.mjs';
+export * from './content.mjs';

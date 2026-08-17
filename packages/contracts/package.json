@@ -22,6 +22,10 @@
       "types": "./zip.d.ts",
       "default": "./zip.mjs"
     },
+    "./content": {
+      "types": "./content.d.ts",
+      "default": "./content.mjs"
+    },
     "./theme-package": {
       "types": "./theme-package.d.ts",
       "default": "./theme-package.mjs"
@@ -40,6 +44,8 @@
     "validate.d.ts",
     "zip.mjs",
     "zip.d.ts",
+    "content.mjs",
+    "content.d.ts",
     "theme-package.mjs",
     "theme-package.d.ts",
     "engine-package.mjs",
