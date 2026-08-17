@@ -9,6 +9,9 @@
     "url": "git+https://github.com/StoryLark/storylark.git",
     "directory": "packages/contracts"
   },
+  "bin": {
+    "storylark-validate-content": "./bin/validate-content.mjs"
+  },
   "exports": {
     ".": {
       "types": "./index.d.ts",
@@ -25,6 +28,10 @@
     "./content": {
       "types": "./content.d.ts",
       "default": "./content.mjs"
+    },
+    "./content-folder": {
+      "types": "./content-folder.d.ts",
+      "default": "./content-folder.mjs"
     },
     "./theme-package": {
       "types": "./theme-package.d.ts",
@@ -46,6 +53,9 @@
     "zip.d.ts",
     "content.mjs",
     "content.d.ts",
+    "content-folder.mjs",
+    "content-folder.d.ts",
+    "bin/",
     "theme-package.mjs",
     "theme-package.d.ts",
     "engine-package.mjs",
