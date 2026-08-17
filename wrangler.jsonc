@@ -54,19 +54,7 @@
       // carries the project and the environment in its name — the account's
       // existing convention, matched rather than replaced.
       "account_id": "513fcac25bb11fbe8c772ab242433445",
-      // The custom domain is deliberately absent until the storylark.dev zone
-      // moves accounts. A Worker custom domain can only be claimed by the
-      // account that holds the zone, and the zone
-      // (918e5e8982edeeb79a1bebd713902cd2) is still in the original account —
-      // verified, the API refuses the id here. Until it moves, this deploys to
-      // https://storylark-demo-prod.turnerpublishing.workers.dev and the live
-      // domains keep serving from the old account, untouched.
-      //
-      // When the zone moves, restore:
-      //   "routes": [{ "pattern": "app.storylark.dev", "custom_domain": true }],
-      // and attach the content origin:
-      //   wrangler r2 bucket domain add storylark-demo-content-prod \
-      //     --domain content.storylark.dev --zone-id <zone id> -y
+      "routes": [{ "pattern": "app.storylark.dev", "custom_domain": true }],
       "d1_databases": [
         {
           "binding": "DB",
