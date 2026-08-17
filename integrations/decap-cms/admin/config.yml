@@ -1,0 +1,135 @@
+# Decap CMS reference integration for StoryLark's repo-sync transport.
+#
+# This file is a REAL Decap config — standard schema, no invented syntax.
+# It produces markdown files whose frontmatter carries a `storylark:` block in
+# the exact shape `packages/contracts/content.mjs` validates (see
+# storylark-ops/pmo/scf-v1.md §3). Nothing here is StoryLark-specific config —
+# it is ordinary Decap `object`/`string`/`number`/`boolean` widgets, which is
+# the whole point: any git-based CMS that can write YAML frontmatter can be a
+# StoryLark transport with zero StoryLark-side code.
+#
+# Setup: see ../README.md.
+
+backend:
+  name: github
+  repo: your-org/your-content-repo   # the SAME repo already connected under
+                                      # admin → Content source → Connections
+  branch: main
+  # Decap needs its OWN write-capable OAuth app to commit to GitHub — this is
+  # unrelated to, and separate from, the read-only token StoryLark's repo-sync
+  # holds (repo-connection-standard-v1.md §3.1). See README "Authentication"
+  # for why these must never be the same credential.
+
+# Uncomment to test the CMS UI against a local git checkout with no OAuth
+# hop at all (`npx decap-server` in a second terminal):
+# local_backend: true
+
+media_folder: "content/images/uploads"
+public_folder: "/content/images/uploads"
+
+collections:
+  # ── type: book ────────────────────────────────────────────────────────────
+  # Book metadata only — no prose. §4.2 of the format: a `type: book` file in
+  # repo mode must name its own `book` id, because the folder tree carries no
+  # meaning, so this collection's schema makes that field required.
+  - name: "books"
+    label: "Books"
+    folder: "content/books"
+    create: true
+    slug: "{{fields.book}}"
+    extension: "md"
+    format: "frontmatter"
+    fields:
+      - { label: "Title", name: "title", widget: "string" }
+      - { label: "Author", name: "author", widget: "string", required: false }
+      - { label: "Description", name: "description", widget: "text", required: false }
+      - label: "StoryLark"
+        name: "storylark"
+        widget: "object"
+        collapsed: false
+        summary: "{{fields.book}}"
+        fields:
+          - label: "Type"
+            name: "type"
+            widget: "hidden"
+            default: "book"
+          - label: "Book id"
+            name: "book"
+            widget: "string"
+            hint: "Lowercase letters, digits and hyphens only — this is a storage key and URL segment, and it never changes once published."
+            pattern: ["^[a-z0-9][a-z0-9-]{0,63}$", "1-64 characters: lowercase letters, digits, hyphens; must start with a letter or digit."]
+          - label: "Cover image"
+            name: "cover"
+            widget: "image"
+            required: false
+            media_folder: "{{media_folder}}"
+            public_folder: "{{public_folder}}"
+            hint: "A path relative to this file. StoryLark ingests the image on sync — never enter a full URL."
+          - label: "Contract version"
+            name: "contractVersion"
+            widget: "hidden"
+            default: 1
+    # A book file's body must stay empty — `type: book` is metadata only
+    # (type_mismatch if it carries prose). Decap has no "forbid the body"
+    # widget, so this is enforced by the gate on sync, not by the CMS UI —
+    # exactly the boundary this reference integration is meant to prove:
+    # Decap's job is producing bytes, StoryLark's gate is the only judge.
+
+  # ── type: chapter ────────────────────────────────────────────────────────
+  - name: "chapters"
+    label: "Chapters"
+    folder: "content/chapters"
+    create: true
+    slug: "{{fields.chapter}}"
+    extension: "md"
+    format: "frontmatter"
+    fields:
+      - { label: "Title", name: "title", widget: "string" }
+      - label: "StoryLark"
+        name: "storylark"
+        widget: "object"
+        collapsed: false
+        summary: "{{fields.book}} / {{fields.chapter}} (order {{fields.order}})"
+        fields:
+          - label: "Type"
+            name: "type"
+            widget: "hidden"
+            default: "chapter"
+          - label: "Book id"
+            name: "book"
+            widget: "string"
+            hint: "Must match an existing book's `storylark.book` id, or a `type: book` file in the same commit that declares it."
+            pattern: ["^[a-z0-9][a-z0-9-]{0,63}$", "1-64 characters: lowercase letters, digits, hyphens; must start with a letter or digit."]
+          - label: "Chapter id"
+            name: "chapter"
+            widget: "string"
+            hint: "This chapter's own id. Stable — changing it creates a new chapter, it does not rename the old one."
+            pattern: ["^[a-z0-9][a-z0-9-]{0,63}$", "1-64 characters: lowercase letters, digits, hyphens; must start with a letter or digit."]
+          - label: "Order"
+            name: "order"
+            widget: "number"
+            value_type: "int"
+            hint: "Position in the book. Gaps are fine (10, 20, 30); two chapters claiming the same order fail the sync."
+          - label: "Publish"
+            name: "publish"
+            widget: "boolean"
+            default: true
+            required: false
+            hint: "Uncheck to withhold this chapter — it is valid content that just isn't out yet. Nothing is written until this is checked."
+          - label: "Title override"
+            name: "title"
+            widget: "string"
+            required: false
+            hint: "Overrides the Title field above, if set."
+          - label: "Cover image"
+            name: "cover"
+            widget: "image"
+            required: false
+            media_folder: "{{media_folder}}"
+            public_folder: "{{public_folder}}"
+            required: false
+          - label: "Contract version"
+            name: "contractVersion"
+            widget: "hidden"
+            default: 1
+      - { label: "Chapter text", name: "body", widget: "markdown" }
