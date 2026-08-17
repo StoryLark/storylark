@@ -62,10 +62,16 @@ two paths cannot drift. What it does *not* share is provisioning: `--update`
 never creates infrastructure, never edits `wrangler.jsonc`, never writes a
 secret. That's what makes it safe to re-run at any time.
 
-**Layer 3 — one-click, in the portal (opt-in, off by default).** See
-[The prebuilt engine](#the-prebuilt-engine-layer-3) below. It does not
-replace layer 2 and does not change anything above: a deployment that has
-not opted in behaves exactly as this section describes.
+**Layer 3 — "Update now", in the portal.** One button, identical on every
+platform, and since the engine store landed it is no longer opt-in for the
+common case: a release that only changes the engine installs through the
+deployment's own storage with zero credentials (see
+[The engine store](#the-engine-store-how-update-now-needs-no-platform)
+below), and a release that changes the worker rides a self-deploy
+permission the installer provisions as part of a normal install. Layer 2
+remains the floor: always shown, always working, and the only path in the
+one degraded state left (worker changed + self-deploy disabled or
+never provisioned).
 
 ## The prebuilt engine (layer 3)
 
@@ -117,13 +123,87 @@ structurally impossible rather than merely avoided.
 
 ### The flow
 
-1. **Is there a target?** No credential, no button, `501` from the route.
-2. **Which version?** The npm registry — the same source the portal showed,
-   so the number clicked is the number installed.
-3. **Download and verify.** Checksum first, then the package's own per-file
-   digests. Nothing has touched the deployment yet, by construction: the
-   first call that can is inside `install()`.
-4. **Migrate, then swap**, inside the platform target.
+1. **Which version?** The npm registry — the same source the portal showed,
+   so the number clicked is the number installed. (`storylark-core`'s
+   version names the release; see the note in routes/admin.ts.)
+2. **Download and verify.** Checksum first, then the package's own per-file
+   digests. Nothing has touched the deployment yet, by construction.
+3. **Which mechanism?** Decided from the downloaded package's own
+   `workerVersion` against the running worker's — not from a registry
+   guess. Worker unchanged → the engine store (below): migrate in-process,
+   write the files, flip the pointer. Worker changed → the platform target;
+   and only when THAT is absent does the route answer `501` with the
+   command. Never surfaced as a user-facing tier: one button, one result.
+4. **Migrate, then swap** — always in that order, whichever mechanism.
+
+### The engine store — how "Update now" needs no platform
+
+The deploy-API path above was only ever needed because the engine's files
+lived in the immutable build. The theme store (AB#7417) had already proven
+the alternative: write files into the deployment's own `ContentStore` — R2
+on Cloudflare, Azure Blob or a local directory on Node, the same seam
+content editing and themes already bind — and have the serving path prefer
+them over the build. `packages/worker/src/lib/engine-store.ts` applies
+exactly that to the engine itself:
+
+```
+engine/active.json                 the version being served (+ its file list)
+engine/index.json                  the version history (five kept, live pinned)
+engine/versions/<vid>/dist/<path>  each installed engine, immutable, prefixed
+```
+
+Properties that matter, and how they are held:
+
+- **Atomic flip.** The HTML references hashed asset names, so documents and
+  bundle must move together. `active.json` is written LAST, names one
+  version, and carries that version's complete file list — a request
+  resolves it once and serves every byte from that one version's prefix.
+  There is no "newest file wins" anywhere.
+- **Stragglers survive.** A client that loaded version N-1's HTML just
+  before the flip still requests N-1's hashed assets; they live under their
+  own prefix until history evicts them (which is why the history floor is
+  2), and the serving path falls back to the history on an active-version
+  miss.
+- **Identity is unwritable, twice.** `readEnginePackage` rejects a package
+  carrying `brand.json`, `theme.css`, `presentation.json`,
+  `manifest.webmanifest` or `icons/`; `installEngineVersion` re-checks
+  `isBrandOwned` on every path before writing. Both fences are the same
+  rule from `storylark-contracts/engine-package` — defined once.
+- **Rollback is a pointer move.** `activateEngineVersion` re-points at an
+  archived version after verifying its files still exist; "serve the
+  built-in engine" deletes only the pointer. Both leave the history intact.
+
+**The cost, stated:** `run_worker_first` in wrangler.jsonc is now `/*` with
+no `/assets/*` exclusion — every asset request costs a Worker invocation,
+because an installed engine's bundle lives in storage the asset router
+cannot see. Mitigated where it matters: the store check is a negative-result
+cache (~10s TTL, module-level in engine-store.ts so an install resets it in
+the same isolate), so a deployment with nothing installed — the default —
+pays one in-memory check per asset request, not a storage read. The TTL is
+made invisible to clients holding a just-installed engine's HTML by a
+fresh, cache-bypassing re-check whenever a hashed-asset request would
+otherwise fall through to the SPA shell.
+
+The Node/Azure entry (`platforms/azure/server.mjs`) serves the same store
+through the same `readActiveEngineCached`, so the mechanism — and the code
+that implements it — is one thing, not a per-platform pair.
+
+### The remaining boundary, honestly
+
+A running Cloudflare Worker cannot replace its own script: no eval, no
+remote dynamic import — a platform restriction, not a design choice. So a
+release that changes `storylark-worker` still needs a platform deploy, and
+that needs a permission. The requirement's answer is to absorb it at
+INSTALL time rather than surface it to the operator: Azure's installer
+provisions a managed identity + Website Contributor automatically during
+`--deploy`/`--update`; Cloudflare's tries to mint a `Workers Scripts |
+Edit`-scoped token with the credential the install already used (falling
+back to storing that credential, disclosed), and says plainly when an
+OAuth-only login makes neither possible. `--disable-one-click` turns it
+off and records `SELF_UPDATE=off` in install.env so a routine update does
+not undo the choice. The one state where the portal shows a command
+instead of completing the update itself is: worker changed AND no
+self-deploy permission exists.
 
 ### Per platform
 
