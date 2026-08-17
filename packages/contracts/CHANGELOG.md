@@ -1,5 +1,124 @@
 # storylark-contracts
 
+## 0.5.0
+
+### Minor Changes
+
+- [`5db49fd`](https://github.com/StoryLark/storylark/commit/5db49fd67bfdbec51c22cfccf37827a7ed93971f) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - ONE content gate for every transport, plus portal book lifecycle (AB#7420 —
+  content-management rework, wave 1).
+
+  - **contracts**: new `storylark-contracts/content` — the single content
+    validator every transport calls. It reads the namespaced, additive
+    `storylark:` frontmatter block (`type` / `book` / `chapter` / `order` /
+    `publish` / `title` / `cover` / `contractVersion`), validates strictly
+    (no inference, no repair: missing required fields, bad ids, non-integer or
+    tied `order`, URLs as covers are all errors with stable codes, messages and
+    line numbers), and normalises with the spec defaults (`publish: true`,
+    `contractVersion: 1`). `requireBlock` enforces the repo rule — a file
+    without a `storylark:` block is not StoryLark content — while portal/API
+    candidates carry transport identity, which is what keeps every pre-block
+    chapter in existing deployments valid.
+  - **worker**: the public content API and the portal's admin content routes both
+    validate through the shared gate. Rejections carry the gate's structured
+    `errors` list; the top-level `error` code is now the gate's specific stable
+    code (e.g. `unclosed_frontmatter`) instead of the old umbrella
+    `invalid_markdown`. `storylark.publish: false` is withheld — accepted,
+    reported (`withheld`, `summary.chaptersWithheld`), nothing written — and
+    `storylark.title` overrides the top-level title on save. When every chapter
+    in a push declares `storylark.order`, that order decides the book's chapter
+    order; ties reject the book without costing the rest of the batch.
+  - **core**: the portal can finally create and delete books/stories. "New
+    book"/"New story" (id, title, author, description, cover) and typed-
+    confirmation "Delete" call the existing public `/api/content/v1` routes
+    authenticated by the admin session — one implementation, two credentials,
+    the same discipline theme import uses. Created books are `managed: false`
+    (portal-owned, editable); a new story opens straight into the editor.
+
+  Pre-contract content is untouched: markdown without a `storylark:` block keeps
+  saving, syncing and rendering exactly as before.
+
+- [`8f4a564`](https://github.com/StoryLark/storylark/commit/8f4a56463f850a9934e70a7907c643fe89250d54) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - The repo transport, sync triggers, per-book presentation and scoped
+  content-API tokens (AB#7420 — content-management rework, wave 2).
+
+  - **contracts**: the vocabulary gains the two manifest-context codes —
+    `unknown_book` (a chapter naming a book neither held nor declared by the
+    same arrival; arrivals are evaluated as a SET, so a `type: book` file
+    anywhere in the batch satisfies the reference) and `book_owned_elsewhere`
+    (the first writer owns a `bookId`; a different source is rejected with the
+    owner named). The stored manifest now joins the `order_tie` check
+    (`existingChapters`): an order an incumbent declared last month collides
+    exactly as one declared in the same batch, same code, same message —
+    re-declaring the order a chapter already owns is not a tie. Transport-
+    supplied ids are validated by the gate itself, `type: book` must name its
+    book in repo mode, and `isRepoCandidate` settles candidacy so a broken
+    frontmatter fence that mentions `storylark:` is rejected rather than
+    silently ignored.
+  - **worker**: a deployment now syncs a git repository itself. The repo
+    transport fetches the provider's archive over HTTPS (a Worker cannot shell
+    to `git`), unpacks it with the existing zip reader, walks the configured
+    path and hands every candidate to the one gate — no validation of its own,
+    no inference. Three trigger tiers: a signature-verified webhook
+    (`POST /api/content/v1/sync/webhook` — unsigned or forged deliveries are
+    rejected), a daily pull as a second job on the EXISTING update-check cron
+    (schedule unchanged; the interval gates per connection), and Sync now, with
+    concurrent runs collapsed. A chapter present in the manifest and absent
+    from the arrival is reported `missing` and NEVER auto-deleted; removal is
+    the operator's one click, running the ordinary recoverable delete. Images
+    are ingested with the portal upload's exact allowlist (SVG refused) and
+    references rewritten to the deployment's own copies. GitHub ships first,
+    behind a two-function provider seam (archive URL + webhook verify), so the
+    next provider is a driver, not a refactor. Migration 0009 adds the
+    connection state and `content_api_tokens`; scoped bearer tokens
+    (`Authorization: Bearer sct_…`) authenticate the content API and nothing
+    else, individually revocable with last-used visibility. Books gain the
+    derived `single` presentation flag, recomputed on every chapter-set write.
+  - **core**: the Connections section — the three-way content-source choice
+    (portal / repo / CMS-API; a primary source, never a lock), the repo
+    connection form (SSH declined in words, dry-run gate: a repo that does not
+    validate cannot be connected), sync status and report with the missing
+    list, webhook secret shown exactly once, and content-API token management.
+    A mixed library renders per book: a `single` book opens straight into its
+    text, a multi-chapter book keeps its chapter list, whatever the
+    library-wide layout says; manifests without the flag behave exactly as
+    before.
+
+  Pre-strict content is untouched: existing deployments' chapters keep saving,
+  syncing and rendering exactly as they did, and `deployment.json`'s legacy
+  `sync` block keeps working (`contentSource.repo` supersedes it when present).
+
+### Patch Changes
+
+- [`972d37e`](https://github.com/StoryLark/storylark/commit/972d37e4b7b61860f4f76dfe0c61c05f41b10c4c) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - CONTENT_ORIGIN is now optional: content serves same-origin by default (AB#7395).
+
+  A brand-new Cloudflare deployment no longer needs an R2 custom domain — or any
+  DNS work — before content loads. With `contentOrigin` unset (`""`, the scaffold
+  default), `contentUrl()` builds root-relative URLs and the Worker answers
+  `GET /manifest.json` and `GET /books/*` straight out of the CONTENT R2 bucket,
+  with native Range/conditional support and the same cache-control the publish
+  pipeline wrote each object with (manifest `max-age=60`, hashed objects
+  immutable). Only those two public prefixes are exposed — theme state in the
+  bucket is not.
+
+  - Worker: same-origin content routes in `index.ts`; `CONTENT_ORIGIN`/`CONTENT`
+    are optional in `Env`; `/api/admin/status` counts books from the bound store
+    instead of fetching the content origin; narration claims fall back to
+    `APP_ORIGIN` for `contentUrl`; portal upload/list URLs are root-relative when
+    same-origin.
+  - Core: the service worker recognises same-origin content requests
+    (`/manifest.json`, `/books/*`) so offline downloads and content caching work
+    with `contentOrigin: ""`; the admin cover thumbnail renders with a
+    root-relative URL.
+  - create-storylark: `CONTENT_ORIGIN` removed from the Cloudflare installer's
+    required values (blank = same-origin); the wizard prompt says leaving it
+    blank needs no DNS setup; the scaffold's `wrangler.jsonc` defaults it to
+    `""`.
+  - contracts: `deployment.schema.json` documents `contentOrigin: ""` as
+    same-origin.
+
+  Deployments with a real `CONTENT_ORIGIN` (e.g. an R2 custom domain) are
+  unchanged — a separate content domain remains supported and still lets content
+  bypass the Worker entirely.
+
 ## 0.4.0
 
 ### Minor Changes
