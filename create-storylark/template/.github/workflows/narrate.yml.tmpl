@@ -1,0 +1,69 @@
+name: Narrate queued content
+
+# Drain this site's bulk narration queue on a schedule (AB#7412).
+#
+# Neither this repo's Cloudflare Worker nor its Node/Azure deployment can run
+# the narration model themselves — a Worker has no filesystem for the ~90MB of
+# weights, no native ONNX runtime and no ffmpeg, and the Node entry
+# deliberately ships none of TTS's dependencies either. So every chapter saved
+# through the admin portal, pushed over the content API, or pulled in by
+# sync.yml queues up narration work that nothing drains on its own. This
+# workflow is what drains it — the exact same packages/pipeline/narrate.mjs
+# the admin portal's Narration card tells you to run by hand, just on a
+# schedule instead of requiring an operator to remember.
+#
+# Configure (Settings → Secrets and variables → Actions):
+#   Secrets
+#     ADMIN_KEY                        the same key publish.mjs/sync.mjs use
+#     AZURE_SPEECH_KEY / AZURE_SPEECH_REGION   only if the brand's narrator
+#                                       voice is an Azure voice rather than the
+#                                       local Kokoro model
+#     AZURE_STORAGE_CONNECTION_STRING  Azure/Node deployments
+#     CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID   Cloudflare deployments
+#                                       (R2), same as publish.yml/sync.yml need
+#
+# The deployment URL and narrator voice come from deployment/__BRAND_ID__/
+# deployment.json and brands/__BRAND_ID__/brand.json, already committed in
+# this repo — nothing else to set. With no ADMIN_KEY secret, the step fails
+# with narrate.mjs's own explanation rather than silently doing nothing.
+#
+# Delete this file if you'd rather drain the queue by hand or from your own
+# infrastructure — the admin portal's Narration card works exactly the same
+# either way, it just won't drain itself.
+
+on:
+  schedule:
+    # Nightly, 58 minutes past the hour sync.yml runs on. Off the hour, and
+    # after sync, so a sync's freshly-queued chapters get picked up the same
+    # night rather than waiting for the following one.
+    - cron: '58 4 * * *'
+  workflow_dispatch:
+
+concurrency: narrate-content
+
+jobs:
+  narrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+
+      - name: Drain the narration queue
+        env:
+          ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+          AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          AZURE_SPEECH_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          STORAGE_FLAG=""
+          if [ "${{ vars.STORYLARK_PLATFORM }}" = "azure" ]; then STORAGE_FLAG="--storage azure-blob"; fi
+          node node_modules/storylark-pipeline/narrate.mjs --brand __BRAND_ID__ $STORAGE_FLAG
+        # Cloudflare deploys need CLOUDFLARE_API_TOKEN/ACCOUNT_ID as repo
+        # secrets for `wrangler r2 object put` (used internally by the R2
+        # storage driver) to authenticate non-interactively in CI — the same
+        # requirement publish.yml and sync.yml already have.
