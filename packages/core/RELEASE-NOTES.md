@@ -3,7 +3,14 @@
      short paragraphs, and - bullets only (HTML comments are not rendered). This is
      separate from CHANGELOG.md, which Changesets owns and auto-generates.
      Headings MUST be storylark-core npm versions — that is the version the app shows
-     on screen (About → Version & build), so every entry here names a real release. -->
+     on screen (About → Version & build), so every entry here names a real release.
+
+     Ownership (AB#7396): THIS FILE is the one source of truth for human-readable
+     release notes. Per-package CHANGELOG.md files stay Changesets-owned (mechanical,
+     per-package, never hand-edited here or copied from here). storylark-org's
+     src/docs/changelog.md is a GENERATED copy of this file, kept in sync by
+     .github/workflows/sync-release-notes.yml on every push to main that touches this
+     file — never hand-edit changelog.md in storylark-org; edit this file instead. -->
 
 # Release notes
 

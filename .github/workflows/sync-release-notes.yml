@@ -1,0 +1,70 @@
+name: Sync release notes to storylark-org
+
+# AB#7396 — Consolidate changelog ownership to one source of truth.
+#
+# packages/core/RELEASE-NOTES.md is the ONE curated, human-facing source of
+# release notes (see the header comment in that file). Per-package
+# CHANGELOG.md files stay Changesets-owned and mechanical — they are never
+# touched here. storylark-org/src/docs/changelog.md is a GENERATED copy of
+# RELEASE-NOTES.md and must never be hand-edited there; this workflow is the
+# only thing that writes to it. Its content also drives the org site's
+# version banner (build.mjs parses the first `## x.y.z` heading), so keeping
+# it in lock-step with the engine's file keeps that banner honest too.
+#
+# ── Manual setup required (one-time, repo owner) ─────────────────────────
+# This job pushes to a DIFFERENT repository (StoryLark/storylark-org), so
+# the default GITHUB_TOKEN (scoped to this repo only) cannot be used. Create
+# a fine-grained personal access token scoped to StoryLark/storylark-org
+# with "Contents: Read and write" permission, then add it as the
+# ORG_SITE_SYNC_TOKEN secret on THIS repo (storylark/storylark ->
+# Settings -> Secrets and variables -> Actions). Until that secret exists,
+# this workflow will fail at the checkout-storylark-org step; it does not
+# block or affect the release pipeline in release.yml.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/core/RELEASE-NOTES.md
+  workflow_dispatch: {}
+
+concurrency: sync-release-notes-${{ github.ref }}
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout storylark (source of truth)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            packages/core/RELEASE-NOTES.md
+          sparse-checkout-cone-mode: false
+          path: storylark
+
+      - name: Checkout storylark-org (generated copy)
+        uses: actions/checkout@v4
+        with:
+          repository: StoryLark/storylark-org
+          token: ${{ secrets.ORG_SITE_SYNC_TOKEN }}
+          path: storylark-org
+
+      - name: Copy RELEASE-NOTES.md over changelog.md
+        run: cp storylark/packages/core/RELEASE-NOTES.md storylark-org/src/docs/changelog.md
+
+      - name: Commit and push only if content changed
+        working-directory: storylark-org
+        run: |
+          if git diff --quiet -- src/docs/changelog.md; then
+            echo "No change — src/docs/changelog.md already matches RELEASE-NOTES.md."
+            exit 0
+          fi
+          git config user.name "storylark-release-bot"
+          git config user.email "actions@github.com"
+          git add src/docs/changelog.md
+          git commit -m "docs(changelog): sync from storylark packages/core/RELEASE-NOTES.md" \
+            -m "Automated sync (AB#7396) — see storylark/.github/workflows/sync-release-notes.yml. Source commit: ${{ github.repository }}@${{ github.sha }}"
+          git push origin HEAD:main

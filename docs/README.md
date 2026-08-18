@@ -112,7 +112,12 @@ the same codebase.
 ## Project status
 
 - **[Roadmap](../packages/core/ROADMAP.md)** — what's coming.
-- **[Changelog](../packages/core/CHANGELOG.md)** — what's shipped.
+- **[Release notes](../packages/core/RELEASE-NOTES.md)** — curated, human-facing
+  notes per release; the one source of truth (AB#7396). storylark.org's
+  `/releases/` section is a generated copy of this file — never hand-edit it
+  there.
+- **[Changelog](../packages/core/CHANGELOG.md)** — the auto-generated, per-commit
+  technical changelog (Changesets-owned, per package).
 
 ---
 
