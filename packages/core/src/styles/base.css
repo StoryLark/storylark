@@ -351,6 +351,41 @@ select:focus-visible {
    Scoped to .admin-screen on purpose. The reader-facing Settings screen shares
    .settings-section and is a short list of related preferences, where the flat
    treatment reads better than a stack of boxes. */
+
+/* The nav that splits the portal into Content / Appearance / System pages
+   (AB#7474), under the screen header. A tab bar, not a sidebar: .screen caps
+   the column at 42rem, where a sidebar would just eat into an already narrow
+   width. Only the active page's sections render — this bar is what switches
+   between them. Scrolls sideways rather than wrapping, so it holds its shape
+   on a phone the same way it does on desktop. */
+.admin-nav {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0 0 1rem;
+  border-bottom: 1px solid var(--rule);
+  overflow-x: auto;
+}
+
+.admin-nav-item {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.9rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-muted);
+  font-family: var(--font-headers);
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.admin-nav-item-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
 .admin-screen .settings-section {
   border: 1px solid var(--rule);
   border-top: 1px solid var(--rule); /* overrides the flat rule's dashed top */

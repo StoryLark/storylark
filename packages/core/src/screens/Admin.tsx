@@ -472,10 +472,35 @@ function RecoverForm({ onRecovered, onBack }: { onRecovered: () => Promise<void>
   );
 }
 
+/**
+ * The three admin sub-pages (AB#7474). Splitting six independently-scrolling
+ * sections into pages by job — get content in and narrated, control how the
+ * site looks, and everything about the deployment itself — rather than one
+ * endless stack.
+ */
+type AdminPage = 'content' | 'appearance' | 'system';
+
+const ADMIN_PAGES: { id: AdminPage; label: string }[] = [
+  { id: 'content', label: 'Content' },
+  { id: 'appearance', label: 'Appearance' },
+  { id: 'system', label: 'System' },
+];
+
+function isAdminPage(value: string): value is AdminPage {
+  return ADMIN_PAGES.some((p) => p.id === value);
+}
+
+/** `content` is the default landing page — the owner named it as the one that matters most. */
+function pageFromHash(): AdminPage {
+  const hash = location.hash.slice(1);
+  return isAdminPage(hash) ? hash : 'content';
+}
+
 function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatusResponse | null>(null);
   const [error, setError] = useState('');
+  const [page, setPage] = useState<AdminPage>(() => pageFromHash());
 
   const refresh = () => {
     setError('');
@@ -487,7 +512,19 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
       .catch((e) => setError(errorText(e, 'Could not check for updates.')));
     return Promise.all([statusP, updateP]).then(() => undefined);
   };
+  // status + update-status feed the System page, but they load once here —
+  // not on every tab switch — the same way they always have.
   useEffect(() => void refresh(), []);
+
+  // The hash is the persisted page (survives a reload, and is linkable), kept
+  // in its own listener rather than the reader app's router: the admin bundle
+  // is deliberately separate from it (AB#7404), so this is the plain
+  // `location.hash` / `hashchange` API, nothing imported.
+  useEffect(() => {
+    const onHashChange = () => setPage(pageFromHash());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   return (
     <div class="screen admin-screen">
@@ -498,34 +535,72 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
         </button>
       </header>
 
+      <AdminNav page={page} />
+
       {error && <p class="settings-note admin-error">{error}</p>}
 
-      <StatusSection status={status} />
-      {/* Content management (AB#7420/AB#7421 — plan §3): list → open → edit →
-          save → republish, against the source markdown the deployment now
-          stores for itself. Book creation offers both an upload path and a
-          repo-connect path from here (AB#7474) — this is the one entry
-          point for getting content in, replacing the old separate
-          GitHub-publish form. */}
-      <ContentSection />
-      {/* Connections (wave 2 — AB#7420): the content-source choice, the repo
-          connection with its dry-run gate, sync status + report, the push
-          webhook, and scoped content-API tokens. Directly under the content
-          card because it decides where that card's content comes from. */}
-      <ConnectionsSection />
-      {/* Brand & themes (AB#7417 — plan §0c/§0d Phase 4): install a theme
-          package, edit the brand's own details, see the version history, roll
-          back. Above the platform update card on purpose — changing how the
-          site looks is an everyday operator job; updating the engine is not. */}
-      {/* Narration queue (AB#7412 — plan §8 item 4). Directly under the content
-          card because it is the other half of the same job: editing or importing
-          text is what puts work in this queue, and an operator who has just
-          imported fifty stories should see what that costs without scrolling
-          past the brand settings to find out. */}
-      <NarrationSection />
-      <ThemeSection />
-      <UpdateSection updateStatus={updateStatus} onCheck={refresh} />
+      {page === 'content' && (
+        <div id="admin-page-content" role="tabpanel" aria-labelledby="admin-tab-content">
+          <p class="settings-note">What's in the library, where it comes from, and what's queued to narrate.</p>
+          {/* Content management (AB#7420/AB#7421 — plan §3): list → open → edit →
+              save → republish, against the source markdown the deployment now
+              stores for itself. Book creation offers both an upload path and a
+              repo-connect path from here (AB#7474) — this is the one entry
+              point for getting content in, replacing the old separate
+              GitHub-publish form. */}
+          <ContentSection />
+          {/* Connections (wave 2 — AB#7420): the content-source choice, the repo
+              connection with its dry-run gate, sync status + report, the push
+              webhook, and scoped content-API tokens. Directly under the content
+              card because it decides where that card's content comes from. */}
+          <ConnectionsSection />
+          {/* Narration queue (AB#7412 — plan §8 item 4). Directly under the
+              connections card because it is the other half of the same job:
+              editing or importing text is what puts work in this queue, and an
+              operator who has just imported fifty stories should see what that
+              costs without hunting for it. */}
+          <NarrationSection />
+        </div>
+      )}
+
+      {page === 'appearance' && (
+        <div id="admin-page-appearance" role="tabpanel" aria-labelledby="admin-tab-appearance">
+          {/* Brand & themes (AB#7417 — plan §0c/§0d Phase 4): install a theme
+              package, edit the brand's own details, see the version history,
+              roll back. Its own page — changing how the site looks is a
+              distinct job from getting content in or running the deployment. */}
+          <ThemeSection />
+        </div>
+      )}
+
+      {page === 'system' && (
+        <div id="admin-page-system" role="tabpanel" aria-labelledby="admin-tab-system">
+          <StatusSection status={status} />
+          <UpdateSection updateStatus={updateStatus} onCheck={refresh} />
+        </div>
+      )}
     </div>
+  );
+}
+
+/** The persistent nav under the header — real `<a>`s so the hash is a normal, linkable, bookmarkable URL. */
+function AdminNav({ page }: { page: AdminPage }): JSX.Element {
+  return (
+    <nav class="admin-nav" role="tablist" aria-label="Admin sections">
+      {ADMIN_PAGES.map((p) => (
+        <a
+          key={p.id}
+          href={`#${p.id}`}
+          role="tab"
+          id={`admin-tab-${p.id}`}
+          aria-selected={page === p.id ? 'true' : 'false'}
+          aria-controls={`admin-page-${p.id}`}
+          class={`admin-nav-item${page === p.id ? ' admin-nav-item-active' : ''}`}
+        >
+          {p.label}
+        </a>
+      ))}
+    </nav>
   );
 }
 
