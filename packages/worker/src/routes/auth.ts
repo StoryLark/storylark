@@ -11,6 +11,19 @@ function ipBucket(c: { req: { header(name: string): string | undefined } }, pref
   return `${prefix}:${c.req.header('cf-connecting-ip') ?? 'ip?'}`;
 }
 
+/**
+ * Target email address, namespaced per endpoint. Used alongside (never
+ * instead of) the IP bucket on endpoints that send mail: an attacker who
+ * rotates IPs would otherwise stay under any single IP's limit while still
+ * mail-bombing one address's inbox. Applied to every syntactically valid
+ * email regardless of whether an account exists for it, so hitting this
+ * limit reveals nothing about account existence — same non-enumeration
+ * property the "always answer ok:true" responses around it already have.
+ */
+function emailBucket(prefix: string, email: string): string {
+  return `${prefix}:email:${email}`;
+}
+
 export const auth = new Hono<AppContext>();
 
 // ---- Email + username + password (primary sign-in surface) ----
@@ -160,6 +173,13 @@ auth.post('/password/forgot', async (c) => {
   // Always 200: never reveal whether this email has an account.
   if (!EMAIL_RE.test(email)) return c.json({ ok: true });
 
+  // Per-email limit too (see emailBucket above): this is the endpoint that
+  // sends a real email, so it's the one an IP-rotating attacker would use to
+  // flood one inbox with reset mail.
+  if (!(await rateLimit(c.env.DB, emailBucket('forgot', email), 5, 15 * 60 * 1000))) {
+    return c.json({ error: 'rate_limited' }, 429);
+  }
+
   const user = await c.env.DB.prepare('SELECT id, password_hash FROM users WHERE email = ?')
     .bind(email)
     .first<{ id: string; password_hash: string | null }>();
@@ -208,6 +228,13 @@ auth.post('/password/forgot', async (c) => {
 
 auth.post('/password/reset', async (c) => {
   if (c.req.header('x-requested-with') !== 'storylark') return c.json({ error: 'missing_csrf_header' }, 403);
+  // This is the one gap the rest of the file didn't have: a successful guess
+  // here hands over the account outright, whether by guessing the 32-byte
+  // token or (far more feasible) the 6-digit code. Same tightness as
+  // /api/admin/recover guessing a recovery code.
+  if (!(await rateLimit(c.env.DB, ipBucket(c, 'password-reset'), 10, 15 * 60 * 1000))) {
+    return c.json({ error: 'rate_limited' }, 429);
+  }
   const body = await c.req
     .json<{ token?: string; email?: string; code?: string; password?: string }>()
     .catch(() => ({}) as { token?: string; email?: string; code?: string; password?: string });
@@ -277,6 +304,13 @@ auth.post('/magic/request', async (c) => {
   // Always answer 200 so the endpoint can't be used to enumerate accounts.
   if (!EMAIL_RE.test(email)) return c.json({ ok: true });
 
+  // Per-email limit too (see emailBucket above): this is the endpoint that
+  // sends a real email, so it's the one an IP-rotating attacker would use to
+  // flood one inbox with sign-in mail.
+  if (!(await rateLimit(c.env.DB, emailBucket('magic', email), 5, 15 * 60 * 1000))) {
+    return c.json({ error: 'rate_limited' }, 429);
+  }
+
   const now = Date.now();
   const { count } = (await c.env.DB.prepare(
     'SELECT COUNT(*) as count FROM magic_links WHERE email = ? AND expires_at > ? AND used_at IS NULL'
@@ -317,6 +351,12 @@ auth.post('/magic/request', async (c) => {
 // the session cookie on THIS response, landing it in the caller's context.
 auth.post('/code/verify', async (c) => {
   if (c.req.header('x-requested-with') !== 'storylark') return c.json({ error: 'missing_csrf_header' }, 403);
+  // Guessing the 6-digit code signs the attacker in as that email outright —
+  // same tightness as /api/admin/recover guessing a recovery code, and the
+  // other half of the gap /password/reset closes above.
+  if (!(await rateLimit(c.env.DB, ipBucket(c, 'code-verify'), 10, 15 * 60 * 1000))) {
+    return c.json({ error: 'rate_limited' }, 429);
+  }
   const body = await c.req.json<{ email?: string; code?: string }>().catch(() => ({}) as { email?: string; code?: string });
   const email = (body.email ?? '').trim().toLowerCase();
   const code = (body.code ?? '').trim();
