@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.19.0
+
+### Minor Changes
+
+- [`9f666b0`](https://github.com/StoryLark/storylark/commit/9f666b02b59e8e2f0a017d754306bac5a194922f) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - Add per-voice preview samples to the narrator picker in Settings: publish now synthesizes a short sample sentence per curated voice (skipped when it already exists, like chapter audio) and the picker gets a preview button that plays it — so choosing a narrator is no longer a blind pick. Additive: manifests without samples render the picker exactly as before, with no button and no errors (AB#7389).
+
+- [`9f666b0`](https://github.com/StoryLark/storylark/commit/9f666b02b59e8e2f0a017d754306bac5a194922f) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - Add an overall release build number (`YYMM.BUILD.PATCH`, derived from git history at build time) alongside each package's own semver, shown on both the reader About screen and the admin portal's System page. The admin view shows the app bundle's release and the worker's reported release independently, so a deploy that lands ahead of or behind a release is visible instead of silently confusing (AB#7653).
+
 ## 0.18.0
 
 ### Minor Changes
