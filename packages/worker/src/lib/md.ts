@@ -69,6 +69,18 @@ const MESSAGE_RE = /^> \*\*(.+?) \((.+?)\):\*\* (.*)$/;
 const IMAGE_LINE_RE = /^!\[([^\]]*)\]\(([^)]+)\)$/;
 
 /**
+ * The publish pipeline resolves root-relative story artwork on the marketing
+ * site, not the PWA's `app.` host. Keep every Worker-side save and comparison
+ * on that same rule so moving a chapter between transports cannot change its
+ * hash merely because `/images/...` was expanded by one transport and not the
+ * other.
+ */
+export function siteOriginFromAppOrigin(appOrigin?: string): string | undefined {
+  const origin = appOrigin?.trim().replace(/\/+$/, '');
+  return origin ? origin.replace('://app.', '://') : undefined;
+}
+
+/**
  * Parses a markdown prose body into StoryLark blocks. Rules, byte-for-byte the
  * ones in `packages/pipeline/lib/md.mjs`:
  *   ---                       → scene-break

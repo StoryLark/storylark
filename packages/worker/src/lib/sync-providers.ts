@@ -24,7 +24,16 @@
  * words rather than offering a dead option (§6.1).
  */
 
-/** What a provider driver knows how to do. Exactly two capabilities (§10.2). */
+export interface SyncProviderFiles {
+  /** Repository-relative file names selected by the configured content path. */
+  names: string[];
+  /** Read one repository-relative file on demand. Missing paths return undefined. */
+  read(path: string): Promise<Uint8Array | undefined>;
+  /** Batch-read text candidates when the provider can do so in fewer requests. */
+  readMany?(paths: string[]): Promise<Map<string, Uint8Array>>;
+}
+
+/** What a provider driver knows how to do. */
 export interface SyncProviderDriver {
   id: string;
   label: string;
@@ -33,6 +42,12 @@ export interface SyncProviderDriver {
   /** The credential-free (or token-authed) archive endpoint for one ref (§6.3). */
   archiveUrl(repo: { owner: string; repo: string }, ref: string, baseOverride?: string): string;
   archiveHeaders(token?: string): Record<string, string>;
+  /**
+   * Enumerate the configured content path and read individual files on demand.
+   * This avoids loading a large repository's unrelated assets into Worker
+   * memory before `path` can be applied.
+   */
+  files?(repo: { owner: string; repo: string }, ref: string, path: string, token?: string, baseOverride?: string): Promise<SyncProviderFiles>;
   /** The request header carrying this provider's webhook signature (§6.2). */
   signatureHeaderName: string;
   /** The request header naming the event kind, and the value meaning "a push". */
@@ -102,6 +117,91 @@ const github: SyncProviderDriver = {
     };
   },
 
+  async files(repo, ref, path, token, baseOverride) {
+    const base = (baseOverride ?? 'https://api.github.com').replace(/\/+$/, '');
+    const headers = this.archiveHeaders(token);
+    const root = normaliseRepoPath(path);
+    const names: string[] = [];
+
+    const endpoint = (file: string): string => {
+      const encoded = normaliseRepoPath(file)
+        .split('/')
+        .filter(Boolean)
+        .map((part) => encodeURIComponent(part))
+        .join('/');
+      const suffix = encoded ? `/contents/${encoded}` : '/contents';
+      return `${base}/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}${suffix}?ref=${encodeURIComponent(ref)}`;
+    };
+
+    const walk = async (dir: string): Promise<void> => {
+      const res = await fetch(endpoint(dir), { headers, redirect: 'follow' });
+      if (!res.ok) throw new Error(`GitHub answered ${res.status} while listing "${dir || '/'}".`);
+      const entries = (await res.json()) as { type?: unknown; path?: unknown }[];
+      if (!Array.isArray(entries)) throw new Error(`GitHub did not return a directory listing for "${dir || '/'}".`);
+      for (const entry of entries) {
+        if (typeof entry.path !== 'string') continue;
+        if (entry.type === 'dir') await walk(entry.path);
+        else if (entry.type === 'file' && entry.path.toLowerCase().endsWith('.md')) names.push(entry.path);
+      }
+    };
+
+    await walk(root);
+    names.sort();
+    const read = async (file: string): Promise<Uint8Array | undefined> => {
+      const safe = normaliseRepoPath(file);
+      const res = await fetch(endpoint(safe), {
+        headers: { ...headers, Accept: 'application/vnd.github.raw+json' },
+        redirect: 'follow',
+      });
+      if (res.status === 404) return undefined;
+      if (!res.ok) throw new Error(`GitHub answered ${res.status} while reading "${safe}".`);
+      return new Uint8Array(await res.arrayBuffer());
+    };
+    return {
+      names,
+      // GitHub's GraphQL API requires authentication even for public repos.
+      // Anonymous public syncs keep the REST reader; authenticated public and
+      // private syncs get batching so large libraries stay under Workers Free's
+      // external-subrequest ceiling.
+      ...(token ? { async readMany(files: string[]) {
+        const found = new Map<string, Uint8Array>();
+        const graphql = baseOverride ? `${base}/graphql` : 'https://api.github.com/graphql';
+        // Fifty aliases keeps GitHub query cost and response size modest while
+        // turning a 42-story library from 42 external subrequests into one.
+        for (let offset = 0; offset < files.length; offset += 50) {
+          const batch = files.slice(offset, offset + 50).map(normaliseRepoPath);
+          const selections = batch
+            .map((file, i) => `f${i}: object(expression: ${JSON.stringify(`${ref}:${file}`)}) { ... on Blob { text isTruncated } }`)
+            .join('\n');
+          const query = `query { repository(owner: ${JSON.stringify(repo.owner)}, name: ${JSON.stringify(repo.repo)}) { ${selections} } }`;
+          const res = await fetch(graphql, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query }),
+          });
+          if (!res.ok) throw new Error(`GitHub answered ${res.status} while batch-reading Markdown files.`);
+          const payload = (await res.json()) as {
+            data?: { repository?: Record<string, { text?: unknown; isTruncated?: unknown } | null> | null };
+            errors?: { message?: unknown }[];
+          };
+          if (payload.errors?.length) {
+            throw new Error(`GitHub could not batch-read Markdown files: ${String(payload.errors[0].message ?? 'unknown GraphQL error')}`);
+          }
+          const objects = payload.data?.repository;
+          if (!objects) throw new Error('GitHub did not return the requested repository while batch-reading Markdown files.');
+          for (let i = 0; i < batch.length; i++) {
+            const blob = objects[`f${i}`];
+            if (!blob || typeof blob.text !== 'string') continue;
+            if (blob.isTruncated === true) throw new Error(`GitHub truncated "${batch[i]}"; split the file before syncing it.`);
+            found.set(batch[i], encoder.encode(blob.text));
+          }
+        }
+        return found;
+      } } : {}),
+      read,
+    };
+  },
+
   signatureHeaderName: 'x-hub-signature-256',
   eventHeaderName: 'x-github-event',
   pushEventName: 'push',
@@ -137,4 +237,18 @@ export const SYNC_PROVIDERS: Record<string, SyncProviderDriver> = { github };
 
 export function providerOf(id: unknown): SyncProviderDriver | undefined {
   return typeof id === 'string' ? SYNC_PROVIDERS[id] : undefined;
+}
+
+function normaliseRepoPath(path: string): string {
+  const out: string[] = [];
+  for (const part of path.replace(/\\/g, '/').split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (out.length === 0) throw new Error(`Repository path "${path}" escapes the repository root.`);
+      out.pop();
+    } else {
+      out.push(part);
+    }
+  }
+  return out.join('/');
 }

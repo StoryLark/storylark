@@ -68,6 +68,16 @@ What to know before connecting:
   (`CONTENT_SYNC_TOKEN` as a platform secret, or entered in the form) is the
   credential. It is never written to `deployment.json` — a credential in that
   committed file is a hard error, unchanged.
+- **The configured path is applied before file bodies are downloaded.** The
+  GitHub driver lists only that subtree, batch-reads its Markdown through the
+  GraphQL API when a token is available, and fetches referenced covers or
+  chapter images only when the validator needs them. A publisher repository
+  can therefore contain hundreds of megabytes of unrelated art without being
+  loaded into Worker memory. Paths in reports stay repository-relative, and a
+  relative asset may live outside the Markdown subtree as long as it remains
+  inside the repository. GitHub requires authentication for GraphQL even when
+  the repository is public, so anonymous public syncs use individual REST
+  reads; give a large public library a read-only token to enable batching.
 - **Three trigger tiers.** A **webhook** (signature-verified; unsigned or
   forged deliveries are rejected) makes a push appear within seconds; the
   **daily scheduled pull** on the deployment's existing cron is the safety
@@ -88,6 +98,15 @@ What to know before connecting:
 - **Text syncs instantly; audio does not.** No deployment can run the TTS
   model. A sync enqueues narration for everything it wrote; the narration
   worker you already run (`node packages/pipeline/narrate.mjs`) drains it.
+
+Cloudflare Workers Free permits 50 external subrequests per invocation. The
+batched Markdown path leaves that budget for cover and image verification, but
+a catalogue declaring roughly 50 distinct repository-hosted assets in one run
+can still reach the platform ceiling. Split that catalogue into smaller source
+sets or use Workers Paid; StoryLark reports the provider failure and writes no
+partial library. Root-relative story artwork (`/images/...`) is resolved with
+the same marketing-site origin rule as the publish pipeline, so switching
+transports does not create a false content change.
 
 The `contentSource` block in `deployment.json` mirrors the same fields for the
 pipeline-side CLI sync below, and supersedes the older `sync` block (which

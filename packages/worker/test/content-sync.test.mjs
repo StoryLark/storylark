@@ -90,6 +90,55 @@ async function syncDeployment() {
   };
 }
 
+/** GitHub Contents API-shaped source: path-first, individual files on demand. */
+async function contentsDeployment() {
+  const story = withBlock({ type: 'story', title: 'Path First' });
+  const requests = [];
+  const server = createServer((req, res) => {
+    requests.push(`${req.method} ${req.url}`);
+    const url = new URL(req.url, 'http://127.0.0.1');
+    if (url.pathname === '/repos/acme/stories/contents/content') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify([
+          { type: 'file', path: 'content/path-first.md', size: Buffer.byteLength(story) },
+          { type: 'file', path: 'content/unrelated-250mb.bin', size: 250 * 1024 * 1024 },
+        ])
+      );
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/graphql') {
+      let body = '';
+      req.setEncoding('utf8');
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', () => {
+        assert.match(body, /content\/path-first\.md/, 'the batch asks only for the in-scope Markdown candidate');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: { repository: { f0: { text: story, isTruncated: false } } } }));
+      });
+      return;
+    }
+    if (url.pathname === '/repos/acme/stories/contents/content/path-first.md') {
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+      res.end(story);
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const dep = await testDeployment({ CONTENT_SYNC_GITHUB_API_BASE: base, CONTENT_SYNC_TOKEN: 'github-app-test-token' });
+  return {
+    dep,
+    requests,
+    close: async () => {
+      server.close();
+      await dep.close();
+    },
+  };
+}
+
 /** A real admin session through the real installer flow (wave 1's helper). */
 async function adminSession(dep) {
   const { app } = await import('../src/index.ts');
@@ -411,6 +460,22 @@ test('a cross-source collision is book_owned_elsewhere, naming the owner; same s
   }
 });
 
+test('GitHub reads only the configured content path and never downloads an unrelated large repository archive', async (t) => {
+  const box = await contentsDeployment();
+  t.after(() => box.close());
+  const session = await adminSession(box.dep);
+
+  const connected = await connect(session);
+  assert.equal(connected.report.candidates, 1);
+  const synced = await session('POST', '/api/admin/content-source/sync');
+  assert.equal(synced.status, 200, synced.text);
+  assert.equal(synced.json.report.chaptersWritten, 1);
+  assert.equal((await box.dep.manifest()).books[0].id, 'path-first');
+  assert.equal(box.requests.some((path) => path.includes('zipball')), false, 'the whole archive was never requested');
+  assert.equal(box.requests.some((path) => path.includes('unrelated-250mb.bin')), false, 'an unrelated large file was never requested');
+  assert.equal(box.requests.some((path) => path.includes('/contents/content/path-first.md')), false, 'Markdown bodies were batch-read');
+});
+
 test('matching-only adoption migrates an unchanged live book without touching narration; mismatches remain blocked', async (t) => {
   const box = await syncDeployment();
   t.after(() => box.close());
@@ -418,12 +483,13 @@ test('matching-only adoption migrates an unchanged live book without touching na
 
   // A legacy CLI/API book: same visible title and prose as the repository,
   // but no storylark block and therefore no repo ownership metadata.
-  const legacy = `---\ntitle: Adopt Me\n---\n\n${PROSE}\n`;
+  const illustratedProse = `${PROSE}\n\n![A faithful dog](/images/stories/adopt-me.png)`;
+  const legacy = `---\ntitle: Adopt Me\n---\n\n${illustratedProse}\n`;
   const created = await box.dep.call('PUT', '/api/content/v1/books/adopt-me', {
     contractVersion: 1,
     title: 'Adopt Me',
     managed: false,
-    chapters: [{ id: 'full', markdown: legacy }],
+    chapters: [{ id: 'story', markdown: legacy }],
   });
   assert.equal(created.status, 200, created.text);
 
@@ -446,8 +512,14 @@ test('matching-only adoption migrates an unchanged live book without touching na
     timings: chapter.timings,
     voices: chapter.voices,
   };
+  const liveContent = JSON.parse(await readFile(join(box.dep.dir, chapter.content), 'utf8'));
+  assert.equal(
+    liveContent.blocks.find((block) => block.type === 'image').src,
+    'https://example.test/images/stories/adopt-me.png',
+    'root-relative artwork uses the same marketing-site origin as the publish pipeline'
+  );
 
-  const repoMarkdown = withBlock({ type: 'story', title: 'Adopt Me' });
+  const repoMarkdown = withBlock({ type: 'story', title: 'Adopt Me', order: 1 }, illustratedProse);
   const adoptingConnection = { ...CONNECTION, adoptMatchingExisting: true };
 
   // An explicit adoption request is still a refusal when one word differs.
@@ -477,6 +549,8 @@ test('matching-only adoption migrates an unchanged live book without touching na
   assert.equal(adopted.syncSource.url, CONNECTION.url);
   assert.equal(adopted.chapters[0].origin, 'sync');
   assert.equal(adopted.chapters[0].declaredType, 'story');
+  assert.equal(adopted.chapters[0].id, 'story', 'an implicit story chapter preserves the live singleton id and reader URLs');
+  assert.equal(adopted.chapters[0].order, undefined, 'a standalone story order belongs to the shelf, not its only chapter');
   assert.deepEqual(
     {
       contentHash: adopted.chapters[0].contentHash,

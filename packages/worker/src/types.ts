@@ -40,6 +40,8 @@ export interface Env {
   CONTENT_SYNC_TOKEN?: string;
   /** Test seam only — points the provider archive fetch at a local server. Never set in production. */
   CONTENT_SYNC_ARCHIVE_BASE?: string;
+  /** Test seam only — points GitHub Contents API calls at a local server. Never set in production. */
+  CONTENT_SYNC_GITHUB_API_BASE?: string;
   /** Theme versions kept for rollback (AB#7417 — plan §0c). Default 5; see lib/theme-store.ts. */
   THEME_VERSIONS?: string;
   /** Engine versions kept for rollback (AB#7418). Default 5, floor 2; see lib/engine-store.ts. */
