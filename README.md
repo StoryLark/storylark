@@ -59,7 +59,18 @@ npm run publish      # node packages/pipeline/publish.mjs --brand storylark
 
 ## Build your own branded app
 
-StoryLark is designed to be deployed once per brand from the same codebase:
+For a publisher site, use the standalone npm scaffold (it installs exact
+compatible packages and records provenance for you):
+
+```
+npm create storylark my-site -- --deploy
+```
+
+Run `npm create storylark my-site` without `--deploy` to brand and inspect it
+first, then use `npm run doctor` and `npm run setup`. Clone this repository only
+when you are developing or forking the StoryLark engine itself.
+
+Each deployed site has:
 
 1. Add a brand under `brands/<id>/` (`brand.json` for identity, `theme.css` for the
    visual tokens, plus manifest + icons), its shape in `presentation/<id>/`, and its

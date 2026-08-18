@@ -95,6 +95,15 @@ const REQUIRED = ['BRAND_ID', 'APP_ORIGIN', 'MAIL_FROM', 'APP_NAME'];
 // STORYLARK_CONTENT_ORIGIN override — needs a string, never undefined.
 env.CONTENT_ORIGIN = (env.CONTENT_ORIGIN ?? '').trim();
 
+// Brand identity and Cloudflare resource identity are usually the same, but
+// existing publishers often have deliberate production names. Keep branding
+// stable while allowing the installer/update path to address those resources
+// explicitly instead of forcing a rename or a hand-maintained fork.
+const deployEnv = () => (env.CLOUDFLARE_ENV || env.BRAND_ID || '').trim();
+const workerName = () => (env.WORKER_NAME || env.BRAND_ID || '').trim();
+const d1Database = () => (env.D1_DATABASE || env.BRAND_ID || '').trim();
+const r2Bucket = () => (env.R2_BUCKET || `${env.BRAND_ID || ''}-content`).trim();
+
 /**
  * Admin bootstrap (AB#7404), shared with platforms/azure/install.mjs.
  *
@@ -224,24 +233,24 @@ function verify(quiet = false) {
 function ensureWranglerEnvBlock() {
   const wranglerPath = join(ROOT, 'wrangler.jsonc');
   const text = readFileSync(wranglerPath, 'utf8');
-  if (text.includes(`"${env.BRAND_ID}": {`)) {
-    console.log(`✓ wrangler.jsonc already has an env block for "${env.BRAND_ID}"`);
+  if (text.includes(`"${deployEnv()}": {`)) {
+    console.log(`✓ wrangler.jsonc already has an env block for "${deployEnv()}"`);
     return;
   }
   const block = `,
-    "${env.BRAND_ID}": {
-      "name": "${env.BRAND_ID}",
+    "${deployEnv()}": {
+      "name": "${workerName()}",
       "routes": [{ "pattern": "${new URL(env.APP_ORIGIN).host}", "custom_domain": true }],
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "${env.BRAND_ID}",
+          "database_name": "${d1Database()}",
           "database_id": "00000000-0000-0000-0000-000000000000",
           "migrations_dir": "packages/worker/migrations"
         }
       ],
       "r2_buckets": [
-        { "binding": "CONTENT", "bucket_name": "${env.BRAND_ID}-content" }
+        { "binding": "CONTENT", "bucket_name": "${r2Bucket()}" }
       ],
       "vars": {
         "BRAND": "${env.BRAND_ID}",
@@ -256,7 +265,7 @@ function ensureWranglerEnvBlock() {
   const insertAt = text.lastIndexOf('\n  }');
   const updated = text.slice(0, insertAt) + block + text.slice(insertAt);
   writeFileSync(wranglerPath, updated);
-  console.log(`✓ Added a wrangler.jsonc env block for "${env.BRAND_ID}" — fill in the real database_id after creating D1 below.`);
+  console.log(`✓ Added a wrangler.jsonc env block for "${deployEnv()}" — fill in the real database_id after creating D1 below.`);
 }
 
 /**
@@ -267,7 +276,7 @@ function ensureWranglerEnvBlock() {
  */
 function migrateBuildDeploy() {
   console.log('\nApplying D1 migrations...');
-  run('wrangler', ['d1', 'migrations', 'apply', env.BRAND_ID, '--env', env.BRAND_ID, '--remote'], { stdio: 'inherit', cwd: ROOT });
+  run('wrangler', ['d1', 'migrations', 'apply', d1Database(), '--env', deployEnv(), '--remote'], { stdio: 'inherit', cwd: ROOT });
 
   console.log(`\nBuilding app for brand "${env.BRAND_ID}"...`);
   const buildArgs = IS_MONOREPO ? ['run', 'build', '-w', 'app', '--', '--mode', env.BRAND_ID] : ['run', 'build'];
@@ -282,8 +291,8 @@ function migrateBuildDeploy() {
     env: { ...process.env, STORYLARK_APP_ORIGIN: env.APP_ORIGIN, STORYLARK_CONTENT_ORIGIN: env.CONTENT_ORIGIN },
   });
 
-  console.log(`\nDeploying Worker "${env.BRAND_ID}"...`);
-  run('wrangler', ['deploy', '--env', env.BRAND_ID], { stdio: 'inherit', cwd: ROOT });
+  console.log(`\nDeploying Worker "${workerName()}" (environment "${deployEnv()}")...`);
+  run('wrangler', ['deploy', '--env', deployEnv()], { stdio: 'inherit', cwd: ROOT });
 }
 
 /** The pinned storylark-worker version in this site's package.json, or null. */
@@ -405,7 +414,7 @@ let SELF_UPDATE_OFF = (env.SELF_UPDATE ?? '').toLowerCase() === 'off';
 /** Are the self-update secrets already on this Worker (either credential shape)? */
 function selfUpdateConfigured() {
   try {
-    const out = run('wrangler', ['secret', 'list', '--env', env.BRAND_ID], { encoding: 'utf8', cwd: ROOT });
+    const out = run('wrangler', ['secret', 'list', '--env', deployEnv()], { encoding: 'utf8', cwd: ROOT });
     return (out.includes('CF_API_TOKEN') || out.includes('CF_OAUTH_REFRESH_TOKEN')) && out.includes('CF_ACCOUNT_ID');
   } catch {
     return false;
@@ -426,12 +435,12 @@ function resolveAccountId() {
 
 /** Store the pair of secrets that turn the button on. Token piped, never argv. */
 function storeSelfUpdateSecrets(token, accountId) {
-  run('wrangler', ['secret', 'put', 'CF_API_TOKEN', '--env', env.BRAND_ID], {
+  run('wrangler', ['secret', 'put', 'CF_API_TOKEN', '--env', deployEnv()], {
     input: token,
     stdio: ['pipe', 'inherit', 'inherit'],
     cwd: ROOT,
   });
-  run('wrangler', ['secret', 'put', 'CF_ACCOUNT_ID', '--env', env.BRAND_ID], {
+  run('wrangler', ['secret', 'put', 'CF_ACCOUNT_ID', '--env', deployEnv()], {
     // A secret rather than a var: it is not sensitive on its own, but keeping
     // it beside the token means one `--disable-one-click` removes the pair and
     // there is no half-configured state where the portal thinks it is enabled.
@@ -544,7 +553,7 @@ async function ensureSelfUpdate() {
     const { notes } = await provisionSelfUpdateFromOAuth({
       creds: auth.oauth,
       accountId,
-      scriptName: env.BRAND_ID,
+      scriptName: workerName(),
       tokenName: `storylark-self-update-${env.BRAND_ID}`,
     });
     for (const line of notes) console.log(line);
@@ -675,7 +684,7 @@ async function disableOneClick() {
   }
   for (const name of ['CF_API_TOKEN', 'CF_OAUTH_REFRESH_TOKEN', 'CF_ACCOUNT_ID']) {
     try {
-      run('wrangler', ['secret', 'delete', name, '--env', env.BRAND_ID], { stdio: 'inherit', cwd: ROOT, input: 'y\n' });
+      run('wrangler', ['secret', 'delete', name, '--env', deployEnv()], { stdio: 'inherit', cwd: ROOT, input: 'y\n' });
     } catch {
       console.log(`  (${name} was not set — nothing to remove.)`);
     }
@@ -689,7 +698,7 @@ async function disableOneClick() {
   try {
     const out = run(
       'wrangler',
-      ['d1', 'execute', env.BRAND_ID, '--env', env.BRAND_ID, '--remote', '--json', '--command', 'SELECT refresh_token FROM self_update_oauth'],
+      ['d1', 'execute', d1Database(), '--env', deployEnv(), '--remote', '--json', '--command', 'SELECT refresh_token FROM self_update_oauth'],
       { encoding: 'utf8', cwd: ROOT }
     );
     const rows = JSON.parse(out)?.[0]?.results ?? [];
@@ -703,7 +712,7 @@ async function disableOneClick() {
     }
     run(
       'wrangler',
-      ['d1', 'execute', env.BRAND_ID, '--env', env.BRAND_ID, '--remote', '--command', 'DELETE FROM self_update_oauth'],
+      ['d1', 'execute', d1Database(), '--env', deployEnv(), '--remote', '--command', 'DELETE FROM self_update_oauth'],
       { encoding: 'utf8', cwd: ROOT }
     );
     if (rows.length) console.log('  (Also revoked and removed the OAuth session state the deployment held.)');
@@ -756,10 +765,10 @@ async function deploy() {
 
   ensureWranglerEnvBlock();
 
-  console.log(`\nCreating D1 database "${env.BRAND_ID}"...`);
+  console.log(`\nCreating D1 database "${d1Database()}"...`);
   let databaseId;
   try {
-    const out = run('wrangler', ['d1', 'create', env.BRAND_ID, '--json'], { encoding: 'utf8', cwd: ROOT });
+    const out = run('wrangler', ['d1', 'create', d1Database(), '--json'], { encoding: 'utf8', cwd: ROOT });
     databaseId = JSON.parse(out).d1_databases?.[0]?.database_id ?? JSON.parse(out).uuid;
   } catch (err) {
     console.error('Could not create/parse the D1 database. If it already exists, find its id with `wrangler d1 list` and set it in wrangler.jsonc by hand.');
@@ -768,14 +777,14 @@ async function deploy() {
   if (!databaseId) throw new Error('wrangler d1 create --json did not return a database_id — check the wrangler version.');
   const wranglerPath = join(ROOT, 'wrangler.jsonc');
   const patched = readFileSync(wranglerPath, 'utf8').replace(
-    new RegExp(`("database_name": "${env.BRAND_ID}",\\s*\\n\\s*"database_id": ")[^"]*(")`),
+    new RegExp(`("database_name": "${d1Database()}",\\s*\\n\\s*"database_id": ")[^"]*(")`),
     `$1${databaseId}$2`
   );
   writeFileSync(wranglerPath, patched);
   console.log(`✓ wrangler.jsonc updated with database_id ${databaseId}`);
 
-  console.log(`\nCreating R2 bucket "${env.BRAND_ID}-content"...`);
-  run('wrangler', ['r2', 'bucket', 'create', `${env.BRAND_ID}-content`], { stdio: 'inherit', cwd: ROOT });
+  console.log(`\nCreating R2 bucket "${r2Bucket()}"...`);
+  run('wrangler', ['r2', 'bucket', 'create', r2Bucket()], { stdio: 'inherit', cwd: ROOT });
 
   migrateBuildDeploy();
 
@@ -785,7 +794,7 @@ async function deploy() {
   const adminKey = env.ADMIN_KEY || generateAdminKey();
   if (!env.ADMIN_KEY) console.log('\nNo ADMIN_KEY in install.env — generating one for this deployment.');
   console.log('Setting the ADMIN_KEY secret...');
-  run('wrangler', ['secret', 'put', 'ADMIN_KEY', '--env', env.BRAND_ID], {
+  run('wrangler', ['secret', 'put', 'ADMIN_KEY', '--env', deployEnv()], {
     // Piped, never on the command line: an argv value would land in the
     // shell history and in any process listing on this machine.
     input: adminKey,
@@ -797,7 +806,7 @@ async function deploy() {
   if (env.CONTENT_ORIGIN) {
     console.log(
       `\nCONTENT_ORIGIN is ${env.CONTENT_ORIGIN}: attach an R2 custom domain to the\n` +
-        `"${env.BRAND_ID}-content" bucket so it serves there (Cloudflare dashboard -> R2 ->\n` +
+        `"${r2Bucket()}" bucket so it serves there (Cloudflare dashboard -> R2 ->\n` +
         'bucket -> Settings -> Custom Domains). Content will not load until that domain resolves.'
     );
   } else {

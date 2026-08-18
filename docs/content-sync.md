@@ -68,6 +68,16 @@ What to know before connecting:
   (`CONTENT_SYNC_TOKEN` as a platform secret, or entered in the form) is the
   credential. It is never written to `deployment.json` — a credential in that
   committed file is a hard error, unchanged.
+- **The configured path is applied before file bodies are downloaded.** The
+  GitHub driver lists only that subtree, batch-reads its Markdown through the
+  GraphQL API when a token is available, and fetches referenced covers or
+  chapter images only when the validator needs them. A publisher repository
+  can therefore contain hundreds of megabytes of unrelated art without being
+  loaded into Worker memory. Paths in reports stay repository-relative, and a
+  relative asset may live outside the Markdown subtree as long as it remains
+  inside the repository. GitHub requires authentication for GraphQL even when
+  the repository is public, so anonymous public syncs use individual REST
+  reads; give a large public library a read-only token to enable batching.
 - **Three trigger tiers.** A **webhook** (signature-verified; unsigned or
   forged deliveries are rejected) makes a push appear within seconds; the
   **daily scheduled pull** on the deployment's existing cron is the safety
@@ -77,9 +87,26 @@ What to know before connecting:
   but absent from a sync is reported `missing` in the sync report; nothing is
   unpublished until the operator clicks **Remove these N chapters**, which runs
   the ordinary recoverable delete.
+- **Existing content is never silently claimed.** The first writer still owns
+  each book id. When moving an already-published library to repo mode, enable
+  **Adopt matching live books** explicitly. StoryLark then compares the complete
+  chapter set, rendered content hashes, declared order, visible book metadata,
+  and cover identity. A changed word or missing chapter blocks the connection
+  and writes nothing. A match changes only ownership metadata: content objects,
+  narration, timings, and every voice variant remain attached. Run **Sync now**
+  twice after connecting; the second report must show zero writes.
 - **Text syncs instantly; audio does not.** No deployment can run the TTS
   model. A sync enqueues narration for everything it wrote; the narration
   worker you already run (`node packages/pipeline/narrate.mjs`) drains it.
+
+Cloudflare Workers Free permits 50 external subrequests per invocation. The
+batched Markdown path leaves that budget for cover and image verification, but
+a catalogue declaring roughly 50 distinct repository-hosted assets in one run
+can still reach the platform ceiling. Split that catalogue into smaller source
+sets or use Workers Paid; StoryLark reports the provider failure and writes no
+partial library. Root-relative story artwork (`/images/...`) is resolved with
+the same marketing-site origin rule as the publish pipeline, so switching
+transports does not create a false content change.
 
 The `contentSource` block in `deployment.json` mirrors the same fields for the
 pipeline-side CLI sync below, and supersedes the older `sync` block (which

@@ -24,6 +24,7 @@ import { Hono } from 'hono';
 import { app as workerApp } from 'storylark-worker';
 import { postgresDatabase } from 'storylark-worker/db/postgres';
 import { checkForUpdateAndNotify } from 'storylark-worker/lib/update-check';
+import { scheduledContentSync } from 'storylark-worker/lib/repo-sync';
 import { contentStoreFromEnv } from './content-store.mjs';
 
 // Serve-time deployment config (AB#7414) arrived in storylark-worker 0.9.0.
@@ -538,4 +539,9 @@ serve({ fetch: app.fetch, port }, (info) => {
 const DAY_MS = 24 * 60 * 60 * 1000;
 setInterval(() => {
   checkForUpdateAndNotify(env).catch((err) => console.error('Update check failed:', err));
+  // Content sync (wave 2 — design §10.3): the same second-job-on-the-existing-
+  // schedule Cloudflare's cron runs. The job self-gates on the connection's
+  // configured interval and no-ops when no repo is connected, so this costs a
+  // database read a day on a deployment that never configured one.
+  scheduledContentSync(env).catch((err) => console.error('Content sync failed:', err));
 }, DAY_MS);

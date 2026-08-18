@@ -65,7 +65,8 @@ export function validateContentFolder(rootDir) {
   const errors = [];
   let ignored = 0;
   const candidates = []; // { file, markdown, record }
-  const declaredBooks = new Set(); // book ids a `type: book` or `type: story` file in this folder declares
+  const declaredBooks = new Map(); // book id → the declaring `type: book` or `type: story` candidate
+  const duplicateDeclarations = new Set();
 
   for (const abs of files) {
     const file = relative(rootDir, abs).split('\\').join('/');
@@ -95,7 +96,15 @@ export function validateContentFolder(rootDir) {
       continue;
     }
     if (verdict.record.type === 'book' || verdict.record.type === 'story') {
-      declaredBooks.add(verdict.record.book);
+      const bookId = verdict.record.book;
+      const previous = declaredBooks.get(bookId);
+      if (previous) {
+        const message = `book "${bookId}" is declared by more than one file in this arrival. Keep exactly one \`type: book\` or \`type: story\` declaration.`;
+        if (!duplicateDeclarations.has(bookId)) errors.push({ code: 'duplicate_book', message, file: previous.file });
+        errors.push({ code: 'duplicate_book', message, file });
+        duplicateDeclarations.add(bookId);
+      }
+      declaredBooks.set(bookId, { file });
     }
     candidates.push({ file, markdown, record: verdict.record });
   }

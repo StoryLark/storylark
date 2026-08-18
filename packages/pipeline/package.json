@@ -44,7 +44,7 @@
     "@huggingface/transformers": "^3.8.1",
     "kokoro-js": "^1.2.1",
     "microsoft-cognitiveservices-speech-sdk": "^1.42.0",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.3",
     "@azure/storage-blob": "^12.26.0"
   }
 }

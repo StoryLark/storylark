@@ -29,6 +29,12 @@ export interface RepoConnection {
   path: string;
   /** Scheduled-pull interval. The cron itself stays daily (§10.3); a larger value skips runs. */
   intervalHours: number;
+  /**
+   * Explicit migration opt-in. A non-repo book may be adopted only when the
+   * complete incoming chapter set renders to the hashes already live. A
+   * mismatch remains book_owned_elsewhere and writes nothing.
+   */
+  adoptMatchingExisting?: boolean;
 }
 
 export interface ContentSourceConfig {

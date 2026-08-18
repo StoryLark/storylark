@@ -55,7 +55,7 @@ import type {
 } from '../content-types';
 import { DEFAULT_ORIGIN } from '../content-types';
 import { getJson, getText, putJson, putText, type ContentStore } from './content-store';
-import { chapterMeta, contentHash, parseBlocks, readFrontmatter, stabilizeBlockIds } from './md';
+import { chapterMeta, contentHash, parseBlocks, readFrontmatter, siteOriginFromAppOrigin, stabilizeBlockIds } from './md';
 import { CONTENT_ID_RE, readStorylarkBlock, validateChapterCandidate } from 'storylark-contracts/content';
 
 export const MANIFEST_KEY = 'manifest.json';
@@ -456,7 +456,10 @@ export async function saveChapter(opts: SaveOptions): Promise<SaveResult> {
     : undefined;
 
   const { data, body } = readFrontmatter(markdown);
-  const blocks: Block[] = await stabilizeBlockIds(parseBlocks(body), previous);
+  const blocks: Block[] = await stabilizeBlockIds(
+    parseBlocks(body, { siteOrigin: siteOriginFromAppOrigin(env.APP_ORIGIN) }),
+    previous
+  );
   const meta = chapterMeta(blocks);
   // Title precedence per the content contract: `storylark.title` overrides the
   // top-level `title`. Content without a `storylark:` block (all pre-contract

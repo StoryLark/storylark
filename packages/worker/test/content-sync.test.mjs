@@ -23,7 +23,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createHmac } from 'node:crypto';
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { zip } from 'storylark-contracts/zip';
@@ -83,6 +83,55 @@ async function syncDeployment() {
     stage: async (entries) => {
       current = await makeArchive(entries);
     },
+    close: async () => {
+      server.close();
+      await dep.close();
+    },
+  };
+}
+
+/** GitHub Contents API-shaped source: path-first, individual files on demand. */
+async function contentsDeployment() {
+  const story = withBlock({ type: 'story', title: 'Path First' });
+  const requests = [];
+  const server = createServer((req, res) => {
+    requests.push(`${req.method} ${req.url}`);
+    const url = new URL(req.url, 'http://127.0.0.1');
+    if (url.pathname === '/repos/acme/stories/contents/content') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify([
+          { type: 'file', path: 'content/path-first.md', size: Buffer.byteLength(story) },
+          { type: 'file', path: 'content/unrelated-250mb.bin', size: 250 * 1024 * 1024 },
+        ])
+      );
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/graphql') {
+      let body = '';
+      req.setEncoding('utf8');
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', () => {
+        assert.match(body, /content\/path-first\.md/, 'the batch asks only for the in-scope Markdown candidate');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: { repository: { f0: { text: story, isTruncated: false } } } }));
+      });
+      return;
+    }
+    if (url.pathname === '/repos/acme/stories/contents/content/path-first.md') {
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+      res.end(story);
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const dep = await testDeployment({ CONTENT_SYNC_GITHUB_API_BASE: base, CONTENT_SYNC_TOKEN: 'github-app-test-token' });
+  return {
+    dep,
+    requests,
     close: async () => {
       server.close();
       await dep.close();
@@ -275,6 +324,64 @@ test('connect dry-runs and refuses an invalid repo; a valid one connects and syn
   assert.equal(after.libraryVersion, manifest.libraryVersion, 'nothing changed, nothing bumped');
 });
 
+test('an invalid arrival is atomic: a valid sibling edit is not partially published', async (t) => {
+  const box = await syncDeployment();
+  t.after(() => box.close());
+  const session = await adminSession(box.dep);
+  await connect(session);
+  await session('POST', '/api/admin/content-source/sync');
+
+  const before = await box.dep.manifest();
+  const beforeSource = await readFile(join(box.dep.dir, 'books', 'winterlight', 'source', 'full.md'), 'utf8');
+  const changed = fixtureV1();
+  changed['content/winterlight.md'] = withBlock({ type: 'story', title: 'Winterlight' }, `${PROSE} This edit must wait.`);
+  changed['content/broken.md'] = withBlock({ type: 'chapter', book: 'the-keepers', chapter: 'broken', order: 'not-an-integer' });
+  await box.stage(changed);
+
+  const sync = await session('POST', '/api/admin/content-source/sync');
+  assert.equal(sync.status, 200, sync.text);
+  assert.equal(sync.json.ok, false);
+  assert.ok(sync.json.report.errors.some((e) => e.code === 'invalid_order'));
+  assert.equal(sync.json.report.chaptersWritten, 0, 'validation failure writes no valid siblings');
+  assert.equal(await readFile(join(box.dep.dir, 'books', 'winterlight', 'source', 'full.md'), 'utf8'), beforeSource);
+  const after = await box.dep.manifest();
+  assert.deepEqual(after, before, 'the complete manifest stays byte-for-byte equivalent as JSON');
+});
+
+test('an unchanged repo sync preserves narration, timings and every narrator voice path', async (t) => {
+  const box = await syncDeployment();
+  t.after(() => box.close());
+  const session = await adminSession(box.dep);
+  await connect(session);
+  await session('POST', '/api/admin/content-source/sync');
+
+  const manifestPath = join(box.dep.dir, 'manifest.json');
+  const before = await box.dep.manifest();
+  const chapter = before.books.find((b) => b.id === 'winterlight').chapters[0];
+  chapter.hasAudio = true;
+  chapter.audioDurationMs = 12_345;
+  chapter.audio = 'books/winterlight/audio/full.primary.mp3';
+  chapter.timings = 'books/winterlight/timings/full.primary.json';
+  chapter.audioStale = false;
+  chapter.voices = {
+    harper: { audio: 'books/winterlight/audio/full.harper.mp3', timings: 'books/winterlight/timings/full.harper.json' },
+    isla: { audio: 'books/winterlight/audio/full.isla.mp3', timings: 'books/winterlight/timings/full.isla.json' },
+    ethan: { audio: 'books/winterlight/audio/full.ethan.mp3', timings: 'books/winterlight/timings/full.ethan.json' },
+  };
+  await writeFile(manifestPath, `${JSON.stringify(before, null, 2)}\n`);
+
+  const sync = await session('POST', '/api/admin/content-source/sync');
+  assert.equal(sync.status, 200, sync.text);
+  assert.equal(sync.json.report.chaptersWritten, 0);
+  const after = await box.dep.manifest();
+  const preserved = after.books.find((b) => b.id === 'winterlight').chapters[0];
+  assert.equal(after.libraryVersion, before.libraryVersion, 'a no-op does not churn the manifest version');
+  assert.equal(preserved.audio, chapter.audio);
+  assert.equal(preserved.timings, chapter.timings);
+  assert.deepEqual(preserved.voices, chapter.voices);
+  assert.equal(preserved.audioStale, false);
+});
+
 /* ────────────────────────────────────────────────────────────────────────────
  * §10.1 — missing is a flag and a human click, never an inference
  * ──────────────────────────────────────────────────────────────────────────── */
@@ -351,6 +458,117 @@ test('a cross-source collision is book_owned_elsewhere, naming the owner; same s
     assert.equal(mine.origin, 'portal');
     assert.deepEqual(mine.chapters, []);
   }
+});
+
+test('GitHub reads only the configured content path and never downloads an unrelated large repository archive', async (t) => {
+  const box = await contentsDeployment();
+  t.after(() => box.close());
+  const session = await adminSession(box.dep);
+
+  const connected = await connect(session);
+  assert.equal(connected.report.candidates, 1);
+  const synced = await session('POST', '/api/admin/content-source/sync');
+  assert.equal(synced.status, 200, synced.text);
+  assert.equal(synced.json.report.chaptersWritten, 1);
+  assert.equal((await box.dep.manifest()).books[0].id, 'path-first');
+  assert.equal(box.requests.some((path) => path.includes('zipball')), false, 'the whole archive was never requested');
+  assert.equal(box.requests.some((path) => path.includes('unrelated-250mb.bin')), false, 'an unrelated large file was never requested');
+  assert.equal(box.requests.some((path) => path.includes('/contents/content/path-first.md')), false, 'Markdown bodies were batch-read');
+});
+
+test('matching-only adoption migrates an unchanged live book without touching narration; mismatches remain blocked', async (t) => {
+  const box = await syncDeployment();
+  t.after(() => box.close());
+  const session = await adminSession(box.dep);
+
+  // A legacy CLI/API book: same visible title and prose as the repository,
+  // but no storylark block and therefore no repo ownership metadata.
+  const illustratedProse = `${PROSE}\n\n![A faithful dog](/images/stories/adopt-me.png)`;
+  const legacy = `---\ntitle: Adopt Me\n---\n\n${illustratedProse}\n`;
+  const created = await box.dep.call('PUT', '/api/content/v1/books/adopt-me', {
+    contractVersion: 1,
+    title: 'Adopt Me',
+    managed: false,
+    chapters: [{ id: 'story', markdown: legacy }],
+  });
+  assert.equal(created.status, 200, created.text);
+
+  // Give it the assets adoption must preserve. They need not exist for this
+  // ownership test; the manifest references are the zero-loss contract.
+  let manifest = await box.dep.manifest();
+  const live = manifest.books.find((book) => book.id === 'adopt-me');
+  const chapter = live.chapters[0];
+  chapter.hasAudio = true;
+  chapter.audio = 'books/adopt-me/audio/full.primary.mp3';
+  chapter.timings = 'books/adopt-me/audio/full.primary.json';
+  chapter.voices = {
+    warm: { audio: 'books/adopt-me/audio/full.warm.mp3', timings: 'books/adopt-me/audio/full.warm.json' },
+  };
+  await writeFile(join(box.dep.dir, 'manifest.json'), JSON.stringify(manifest));
+  const protectedFields = {
+    contentHash: chapter.contentHash,
+    content: chapter.content,
+    audio: chapter.audio,
+    timings: chapter.timings,
+    voices: chapter.voices,
+  };
+  const liveContent = JSON.parse(await readFile(join(box.dep.dir, chapter.content), 'utf8'));
+  assert.equal(
+    liveContent.blocks.find((block) => block.type === 'image').src,
+    'https://example.test/images/stories/adopt-me.png',
+    'root-relative artwork uses the same marketing-site origin as the publish pipeline'
+  );
+
+  const repoMarkdown = withBlock({ type: 'story', title: 'Adopt Me', order: 1 }, illustratedProse);
+  const adoptingConnection = { ...CONNECTION, adoptMatchingExisting: true };
+
+  // An explicit adoption request is still a refusal when one word differs.
+  await box.stage({ 'content/adopt-me.md': repoMarkdown.replace('perfectly ordinary', 'materially different') });
+  const mismatch = await session('PUT', '/api/admin/content-source', { mode: 'repo', repo: adoptingConnection });
+  assert.equal(mismatch.status, 422, mismatch.text);
+  assert.equal(mismatch.json.report.errors[0].code, 'book_owned_elsewhere');
+  assert.match(mismatch.json.report.errors[0].message, /renders to .* not the live hash/);
+  manifest = await box.dep.manifest();
+  assert.equal(manifest.books.find((book) => book.id === 'adopt-me').origin, 'portal', 'a mismatch changes no ownership');
+
+  // The exact rendered match connects in a dry run, then adopts without a
+  // chapter save (the operation that would mark audio stale).
+  await box.stage({ 'content/adopt-me.md': repoMarkdown });
+  const connected = await session('PUT', '/api/admin/content-source', { mode: 'repo', repo: adoptingConnection });
+  assert.equal(connected.status, 200, connected.text);
+  assert.deepEqual(connected.json.report.adoptionCandidates, ['adopt-me']);
+  const synced = await session('POST', '/api/admin/content-source/sync');
+  assert.equal(synced.status, 200, synced.text);
+  assert.deepEqual(synced.json.report.adopted, ['adopt-me']);
+  assert.equal(synced.json.report.chaptersWritten, 0);
+  assert.equal(synced.json.report.chaptersUnchanged, 1);
+
+  manifest = await box.dep.manifest();
+  const adopted = manifest.books.find((book) => book.id === 'adopt-me');
+  assert.equal(adopted.origin, 'sync');
+  assert.equal(adopted.syncSource.url, CONNECTION.url);
+  assert.equal(adopted.chapters[0].origin, 'sync');
+  assert.equal(adopted.chapters[0].declaredType, 'story');
+  assert.equal(adopted.chapters[0].id, 'story', 'an implicit story chapter preserves the live singleton id and reader URLs');
+  assert.equal(adopted.chapters[0].order, undefined, 'a standalone story order belongs to the shelf, not its only chapter');
+  assert.deepEqual(
+    {
+      contentHash: adopted.chapters[0].contentHash,
+      content: adopted.chapters[0].content,
+      audio: adopted.chapters[0].audio,
+      timings: adopted.chapters[0].timings,
+      voices: adopted.chapters[0].voices,
+    },
+    protectedFields,
+    'content and every narration reference survive adoption'
+  );
+  assert.notEqual(adopted.chapters[0].audioStale, true);
+  assert.equal((await box.dep.call('GET', '/api/library/version')).json.version, manifest.libraryVersion, 'readers are told the adopted manifest moved');
+
+  const adoptedVersion = manifest.libraryVersion;
+  const repeated = await session('POST', '/api/admin/content-source/sync');
+  assert.equal(repeated.json.report.chaptersWritten, 0);
+  assert.equal((await box.dep.manifest()).libraryVersion, adoptedVersion, 'the second sync is a no-op');
 });
 
 test('§10.6: a declared order colliding with a stored incumbent is the same order_tie through every door', async (t) => {

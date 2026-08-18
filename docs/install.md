@@ -3,27 +3,22 @@
 Every way to get a branded StoryLark site running, from "just try it" to "one
 command to a live URL."
 
-## The two starting points
+## Recommended: create a standalone publisher site
 
-**Clone the engine repo** — you get everything: the packages, the base
-brand, the docs, and both platforms' deploy tooling in `platforms/`.
-
-```
-git clone https://github.com/StoryLark/storylark.git
-cd storylark
-npm install
-```
-
-**`npm create storylark`** — a thin, standalone site is generated for you in
-a new folder: an entry file, config, a brand seeded from the base theme, and
-`platforms/` copied in. No engine source, no monorepo — just your site.
+**`npm create storylark`** generates a thin site and runs `npm install` for
+you. The result contains exact compatible versions of `storylark-core`,
+`storylark-worker`, and `storylark-pipeline`, plus a package lock and a
+non-secret `.storylark/project.json` provenance marker. It does not copy the
+engine source or create a monorepo.
 
 ```
 npm create storylark my-site
 ```
 
-Both starting points end up with the same `platforms/` tooling available, so
-everything below works from either one.
+Use `npm run doctor` in the new folder before setup, or
+`npm run doctor -- --json` in automation. `--no-install` exists only for an
+advanced operator who deliberately wants to manage dependency installation;
+it cannot be combined with `--deploy`.
 
 ## Installing to a platform
 
@@ -55,10 +50,13 @@ and runs that platform's installer for you:
 node platforms/wizard.mjs
 ```
 
+The wizard verifies first, then asks for confirmation before it deploys. A
+non-interactive deployment must state both `--deploy` and `--yes`.
+
 Non-interactive (scriptable) form:
 
 ```
-node platforms/wizard.mjs --platform=cloudflare BRAND_ID=my-site APP_ORIGIN=https://app.example.com ...
+node platforms/wizard.mjs --platform=cloudflare --deploy --yes BRAND_ID=my-site APP_ORIGIN=https://app.example.com ...
 ```
 
 Works identically whether you cloned the repo or ran `npm create storylark`
@@ -70,6 +68,21 @@ Works identically whether you cloned the repo or ran `npm create storylark`
 into the wizard — one command, a few prompts, done. This is the "seamless"
 path: you never see the copy step and the wizard as separate actions, just
 one continuous flow ending at a live site.
+
+## Advanced: clone the engine
+
+Clone `StoryLark/storylark` only when you intend to develop, debug, or fork the
+engine itself. It is a workspace checkout, not the normal way to operate one
+publisher site:
+
+```
+git clone https://github.com/StoryLark/storylark.git
+cd storylark
+npm install
+```
+
+Running `npm install` at the workspace root is required. A clone without that
+step is not an installed StoryLark deployment.
 
 ## What every path has in common
 

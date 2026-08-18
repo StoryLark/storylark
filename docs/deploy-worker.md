@@ -89,7 +89,7 @@ real content domain, or explicitly to `""`).
 
 | Field | Type | Default | What it is |
 |---|---|---|---|
-| `CONTENT_SYNC_TOKEN` | **secret**, never a var | unset | Read-only credential for the repo content sync (`content-sync.md`). Set as a platform secret (`wrangler secret put CONTENT_SYNC_TOKEN`) when the connected repo is private and you'd rather not store the token in the database via the portal's form. When absent, a token entered in **Connections** (stored in the database) is the fallback; the secret wins when both exist. A public repo needs neither. |
+| `CONTENT_SYNC_TOKEN` | **secret**, never a var | unset | Read-only credential for the repo content sync (`content-sync.md`). Set as a platform secret (`wrangler secret put CONTENT_SYNC_TOKEN`) when the connected repo is private and you'd rather not store the token in the database via the portal's form. When absent, a token entered in **Connections** (stored in the database) is the fallback; the secret wins when both exist. A public repo needs neither, although a token enables batched Markdown reads for large catalogues. This value must remain valid for scheduled pulls: a one-hour GitHub App installation token is suitable for a rehearsal, not as a durable daily-sync secret unless another system refreshes it. |
 | `CONTENT_SYNC_ARCHIVE_BASE` | test seam only | unset | Points the provider archive fetch at a local server. **Never set in production.** |
 
 ### Theme & engine version history

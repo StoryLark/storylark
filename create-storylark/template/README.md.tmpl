@@ -2,7 +2,7 @@
 
 A branded [StoryLark](https://github.com/StoryLark/storylark) site, created with
 `npm create storylark`. The engine comes from npm (`storylark-core` +
-`storylark-worker`, pinned exactly); this folder owns only the brand theme
+`storylark-worker` + `storylark-pipeline`, pinned exactly); this folder owns only the brand theme
 (`brands/__BRAND_ID__/`), content, and deployment config.
 
 ## Deploy
@@ -12,9 +12,16 @@ npm run setup
 ```
 
 Runs the setup wizard — pick your platform (Cloudflare or Azure), answer a
-few questions, and it verifies everything is ready to deploy. See
+few questions, verify the result, then confirm deployment. See
 `platforms/cloudflare/README.md` or `platforms/azure/README.md` for the full
 manual steps if you'd rather not use the wizard.
+
+Check the installation without changing anything:
+
+```
+npm run doctor
+npm run doctor -- --json
+```
 
 ## Brand your site
 
@@ -29,7 +36,8 @@ in the engine repo, or start from a theme in the
 npm run publish -- --source content
 ```
 
-Stories are plain markdown — see
+StoryLark supports both standalone `type: story` files and multi-chapter books
+with one `type: book` declaration plus ordered `type: chapter` files. See
 [authoring-stories.md](https://github.com/StoryLark/storylark/blob/main/docs/authoring-stories.md).
 
 ## Day to day
