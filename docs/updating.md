@@ -3,11 +3,11 @@
 How your deployed site receives platform updates — from the operator's
 chair, not the code's.
 
-## Nothing updates without you
+## Automatic checks, operator-approved installs
 
-StoryLark never updates itself. There is no background process that changes
-what's running and no schedule that applies anything. What there is: the
-site tells you a new release exists, and you take it — normally with one
+StoryLark checks for releases automatically each day, but never installs one
+without an administrator's approval. No background process changes what is
+running. The site tells you a new release exists, and you take it — normally with one
 button in `/admin`, always available as one command from your own machine.
 
 The portal path is the same on every platform, because of how it works
@@ -25,8 +25,8 @@ Two ways, both free of credentials:
    card shows what you're running versus the latest release, with a link to
    the release notes, and a **Check for updates** button. The check is an
    unauthenticated read of the public npm registry.
-2. **Get told** — if you've set `ADMIN_EMAIL` and `RESEND_API_KEY`, a daily
-   check emails you when a new release exists. You never have to remember
+2. **Get told** — the daily check is enabled by the deployment schedule. If
+   you've set `ADMIN_EMAIL` and `RESEND_API_KEY`, it emails you when a new release exists. You never have to remember
    to look. See [`admin-guide.md`](admin-guide.md) for setting these up.
 
 ## Part 2 — Update now
@@ -204,6 +204,12 @@ The portal shows the log and the error. Every failure before the switch is
 a pure no-op — download, checksum and package validation cannot touch the
 deployment. Take the update with the command instead; that path needs none
 of this and is always available.
+
+Before changing a production deployment, follow
+[`deployment-safety.md`](deployment-safety.md). It treats the current database,
+manifest, content, narration, timings, voice tracks, accounts, and reader
+progress as protected data and requires a verified backup plus a no-op second
+sync before cutover.
 
 ## Running an update from CI instead
 

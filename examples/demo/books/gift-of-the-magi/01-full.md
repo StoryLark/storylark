@@ -1,5 +1,13 @@
 ---
+title: The Gift of the Magi
+author: O. Henry
+description: A young couple, poor but in love, each secretly sell their most prized possession to buy the other a Christmas gift.
 label: Read
+storylark:
+  contractVersion: 1
+  type: story
+  book: gift-of-the-magi
+  title: The Gift of the Magi
 ---
 
 
@@ -225,8 +233,6 @@ the greatest treasures of their house. But in a last word to the wise
 of these days let it be said that of all who give gifts these two were
 the wisest. Of all who give and receive gifts, such as they are wisest.
 Everywhere they are wisest. They are the magi.
-
-
 
 
 

@@ -6,7 +6,7 @@
 // install.mjs --verify (and offers --deploy). No install logic lives here —
 // this only ever fills out the form and presses the button.
 import { createInterface } from 'node:readline/promises';
-import { writeFileSync, existsSync } from 'node:fs';
+import { writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
@@ -75,14 +75,30 @@ function writeEnvFile(platform, values) {
   return path;
 }
 
+function recordPlatform(platform) {
+  const marker = join(__dirname, '..', '.storylark', 'project.json');
+  if (!existsSync(marker)) return;
+  const project = JSON.parse(readFileSync(marker, 'utf8'));
+  project.platform = platform;
+  writeFileSync(marker, JSON.stringify(project, null, 2) + '\n');
+}
+
+async function confirmDeploy(rl) {
+  const answer = (await rl.question('\nVerification passed. Deploy real resources now? [y/N] ')).trim().toLowerCase();
+  return answer === 'y' || answer === 'yes';
+}
+
 async function main() {
   // Non-interactive mode for the one-experience installer / CI: pass
   // --platform=<name> plus KEY=value pairs as remaining args.
   const argv = process.argv.slice(2);
   const platformArg = argv.find((a) => a.startsWith('--platform='))?.split('=')[1];
+  const deployRequested = argv.includes('--deploy');
+  const yes = argv.includes('--yes');
 
   let platform;
   let values;
+  let rl = null;
   if (platformArg && PLATFORMS[platformArg]) {
     platform = platformArg;
     values = {};
@@ -91,13 +107,13 @@ async function main() {
       values[k] = rest.join('=');
     }
   } else {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    rl = createInterface({ input: process.stdin, output: process.stdout });
     platform = await promptPlatform(rl);
     values = await collectValues(rl, platform);
-    rl.close();
   }
 
   const envPath = writeEnvFile(platform, values);
+  recordPlatform(platform);
   console.log(`\nWrote ${envPath}`);
 
   // Best-effort: publish.yml (content publishing, AB#7405) reads this repo
@@ -122,7 +138,36 @@ async function main() {
     stdio: 'inherit',
     cwd: installerDir,
   });
-  process.exit(result.status ?? 0);
+  if (result.error) throw result.error;
+  if ((result.status ?? 1) !== 0) {
+    rl?.close();
+    process.exit(result.status ?? 1);
+  }
+
+  let deploy = deployRequested;
+  if (deployRequested && !yes && rl) deploy = await confirmDeploy(rl);
+  else if (!deployRequested && rl) deploy = await confirmDeploy(rl);
+  rl?.close();
+
+  if (!deploy) {
+    console.log('\nVerified only. Re-run `npm run setup -- --deploy` when you are ready to provision.');
+    return;
+  }
+  if (deployRequested && !yes && !rl && platformArg) {
+    console.error('\nNon-interactive deployment requires both --deploy and --yes.');
+    process.exit(1);
+  }
+
+  console.log(`\nDeploying ${PLATFORMS[platform].label}...\n`);
+  const deployed = spawnSync(process.execPath, [join(installerDir, 'install.mjs'), '--deploy', '--yes'], {
+    stdio: 'inherit',
+    cwd: installerDir,
+  });
+  if (deployed.error) throw deployed.error;
+  process.exit(deployed.status ?? 1);
 }
 
-main();
+main().catch((err) => {
+  console.error(`\nStoryLark setup failed: ${err.message ?? err}`);
+  process.exitCode = 1;
+});

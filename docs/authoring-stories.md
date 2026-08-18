@@ -135,7 +135,10 @@ agree with the address it arrived at.
 
 Validation is one gate with one error vocabulary: the same bad file produces
 the same error code and message whether it comes through the portal (inline),
-a repo sync (skipped and listed), or the API (`422`).
+a repo sync, or the API (`422`). A repository arrival is atomic: every problem
+is listed, and nothing from that arrival is published until all candidates are
+valid. A source file that disappears is reported as missing but is never
+deleted automatically.
 
 ## Markdown block conventions
 

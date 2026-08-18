@@ -1,5 +1,13 @@
 ---
+title: The Yellow Wallpaper
+author: Charlotte Perkins Gilman
+description: A woman confined to a room for a rest cure grows fixated on its lurid wallpaper in this landmark 1892 story.
 label: Read
+storylark:
+  contractVersion: 1
+  type: story
+  book: the-yellow-wallpaper
+  title: The Yellow Wallpaper
 ---
 
 
@@ -840,7 +848,5 @@ pulled off most of the paper, so you can’t put me back!”
 
 Now why should that man have fainted? But he did, and right across my
 path by the wall, so that I had to creep over him every time!
-
-
 
 

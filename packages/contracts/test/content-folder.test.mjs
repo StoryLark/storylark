@@ -49,7 +49,7 @@ async function tempFolder() {
  * 1. validateContentFolder calls the real gate
  * ──────────────────────────────────────────────────────────────────────────── */
 
-test('a clean folder passes silently', async (t) => {
+test('a mixed library of a chaptered book and a standalone story passes silently', async (t) => {
   const { dir, cleanup } = await tempFolder();
   t.after(cleanup);
 
@@ -66,13 +66,17 @@ test('a clean folder passes silently', async (t) => {
     join(dir, 'the-keepers', '02-the-keeper.md'),
     withBlock({ type: 'chapter', book: 'the-keepers', chapter: 'the-keeper', order: 2 })
   );
+  await writeFile(
+    join(dir, 'a-single-story.md'),
+    withBlock({ type: 'story', book: 'a-single-story', title: 'A Single Story' })
+  );
   await writeFile(join(dir, 'README.md'), '# Just notes\n\nNot StoryLark content — no block.\n');
 
   const result = validateContentFolder(dir);
   assert.deepEqual(result.errors, [], 'a clean folder has no errors at all');
-  assert.equal(result.checked, 4, 'every .md file is walked');
+  assert.equal(result.checked, 5, 'every .md file is walked');
   assert.equal(result.ignored, 1, 'the block-less README is ignored, not an error');
-  assert.equal(result.candidates, 3, 'the book file and both chapters were judged');
+  assert.equal(result.candidates, 4, 'the book, both chapters, and standalone story were judged');
 });
 
 test('a malformed storylark: block reports the exact code, message and field a live transport would give', async (t) => {
@@ -151,6 +155,18 @@ test('a chapter naming a book nothing in the folder declares is unknown_book', a
   assert.equal(result.errors.length, 1);
   assert.equal(result.errors[0].code, 'unknown_book');
   assert.match(result.errors[0].message, /nowhere/);
+});
+
+test('two files declaring the same book id are duplicate_book', async (t) => {
+  const { dir, cleanup } = await tempFolder();
+  t.after(cleanup);
+  await writeFile(join(dir, 'book-a.md'), `---\nstorylark:\n  type: book\n  book: repeated\n---\n`);
+  await writeFile(join(dir, 'book-b.md'), `---\nstorylark:\n  type: book\n  book: repeated\n---\n`);
+
+  const result = validateContentFolder(dir);
+  const duplicates = result.errors.filter((e) => e.code === 'duplicate_book');
+  assert.equal(duplicates.length, 2, 'both ambiguous declaration files are named');
+  assert.deepEqual(duplicates.map((e) => e.file).sort(), ['book-a.md', 'book-b.md']);
 });
 
 /* ────────────────────────────────────────────────────────────────────────────

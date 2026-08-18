@@ -273,7 +273,9 @@ export async function runRepoSync(
       };
       const verdict = validateChapterCandidate(candidate, { requireBlock: true });
       if (!verdict.ok) {
-        // Skip it, name it, move on — one malformed chapter must not fail the sync.
+        // Judge the whole arrival before writing anything. We still collect
+        // every useful error, but a malformed candidate makes the batch
+        // ineligible for publication (the atomic validation gate below).
         report.errors.push(...verdict.errors);
         continue;
       }
@@ -283,11 +285,28 @@ export async function runRepoSync(
     // ── Group the arrival as a SET (§10.7) ────────────────────────────────
     const manifest = await readManifest(store);
     const declaredBooks = new Map<string, Candidate>(); // type: book / story declarations
+    const duplicateDeclarations = new Set<string>();
     const chapterGroups = new Map<string, Candidate[]>();
     for (const c of candidates) {
       if (c.record.type === 'book') {
+        const previous = declaredBooks.get(c.record.book as string);
+        if (previous) {
+          const bookId = c.record.book as string;
+          const message = `book "${bookId}" is declared by more than one file in this arrival. Keep exactly one \`type: book\` or \`type: story\` declaration.`;
+          if (!duplicateDeclarations.has(bookId)) report.errors.push({ code: 'duplicate_book', message, file: previous.file } as ContentError);
+          report.errors.push({ code: 'duplicate_book', message, file: c.file } as ContentError);
+          duplicateDeclarations.add(bookId);
+        }
         declaredBooks.set(c.record.book as string, c);
       } else if (c.record.type === 'story') {
+        const previous = declaredBooks.get(c.record.book as string);
+        if (previous) {
+          const bookId = c.record.book as string;
+          const message = `book "${bookId}" is declared by more than one file in this arrival. Keep exactly one \`type: book\` or \`type: story\` declaration.`;
+          if (!duplicateDeclarations.has(bookId)) report.errors.push({ code: 'duplicate_book', message, file: previous.file } as ContentError);
+          report.errors.push({ code: 'duplicate_book', message, file: c.file } as ContentError);
+          duplicateDeclarations.add(bookId);
+        }
         declaredBooks.set(c.record.book as string, c);
         push(chapterGroups, c.record.book as string, c);
       } else {
@@ -398,7 +417,10 @@ export async function runRepoSync(
     }
 
     report.books = accepted.size;
-    if (dryRun) {
+    // Validation is all-or-nothing. A report may contain every problem in the
+    // arrival, but no valid sibling is allowed to publish beside an invalid
+    // one: fixing a typo must never also reveal a partially-applied library.
+    if (dryRun || report.errors.length > 0) {
       report.ok = report.failure === undefined && report.errors.length === 0;
       return await finish(env, report, dryRun);
     }

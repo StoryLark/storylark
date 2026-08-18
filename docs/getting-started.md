@@ -11,15 +11,19 @@ Where you end up depends on what you're trying to do:
 
 ## Deploying your own site
 
-There are two starting points, and two ways to drive each one — four paths,
-same result:
+The supported publisher path is:
 
-| | Manual | Wizard-driven |
-|---|---|---|
-| **Clone the repo** | `git clone` the engine, fill in an env file yourself, run the platform installer | `git clone`, then `node platforms/wizard.mjs` asks the questions and runs the installer for you |
-| **`npm create storylark`** | Scaffolds a standalone site folder, fill in an env file yourself, run the installer | `npm create storylark my-site -- --deploy` — one command, a few prompts, ends at a live URL |
+```
+npm create storylark my-site -- --deploy
+```
 
-Every path asks you to pick a platform (Cloudflare or Azure) as part of it —
+It scaffolds a standalone site, installs exact compatible packages, verifies
+the selected platform, asks for confirmation, and deploys. Run
+`npm create storylark my-site` without `--deploy` if you want to review and
+brand the generated site first; resume later with `npm run setup`. Use
+`npm run doctor` at any point to check the local installation.
+
+The setup asks you to pick a platform (Cloudflare or Azure) —
 nothing above assumes Cloudflare. Prerequisites differ by platform:
 
 - **Node.js 20+** either way.
@@ -30,8 +34,8 @@ nothing above assumes Cloudflare. Prerequisites differ by platform:
 - **ffmpeg / ffprobe** on your `PATH` — only needed to *publish audio* (the
   TTS stitch step), regardless of platform.
 
-Full detail on all four paths, what each one produces, and what's shared
-across every path (your brand folder, CI wiring, updating) is in
+Full detail on the npm path, its manual controls, and the advanced engine
+contributor path is in
 [`install.md`](install.md).
 
 ## Running the engine locally

@@ -1,16 +1,15 @@
 #!/usr/bin/env node
 // npm create storylark (AB#7402). Two experiences, one machine underneath:
 //
-//   npm create storylark my-site           "copy" experience — you land in
-//                                           the folder and choose manually
-//                                           or run `npm run setup` yourself
+//   npm create storylark my-site           safe publisher experience — copies
+//                                           the site and installs dependencies
 //
 //   npm create storylark my-site -- --deploy   "one-experience installer" —
 //                                           chains straight into the wizard
 //                                           with no visible seam
 //
-// Copies template/ into the target folder (filling __BRAND_ID__/__APP_NAME__/
-// __ENGINE_VERSION__), scaffolds brands/<id>/ from the engine's base brand,
+// Copies template/ into the target folder (filling package versions),
+// scaffolds brands/<id>/ from the engine's base brand,
 // and copies platforms/ (the wizard + both platform installers) in.
 import { createInterface } from 'node:readline/promises';
 import { mkdirSync, readdirSync, statSync, readFileSync, writeFileSync, cpSync, existsSync } from 'node:fs';
@@ -26,6 +25,7 @@ const PKG_ROOT = join(__dirname, '..');
 // published, ENGINE_ROOT resolution below falls back to fetching the
 // published brands/theme instead.
 const ENGINE_ROOT = join(PKG_ROOT, '..');
+const CREATE_VERSION = JSON.parse(readFileSync(join(PKG_ROOT, 'package.json'), 'utf8')).version;
 
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
@@ -56,12 +56,13 @@ async function latestVersion(pkg, fallback) {
   }
 }
 
-function copyTemplate(targetDir, brandId, appName, coreVersion, workerVersion) {
+export function copyTemplate(targetDir, brandId, appName, coreVersion, workerVersion, pipelineVersion) {
   const replacements = {
     __BRAND_ID__: brandId,
     __APP_NAME__: appName,
     __CORE_VERSION__: coreVersion,
     __WORKER_VERSION__: workerVersion,
+    __PIPELINE_VERSION__: pipelineVersion,
   };
   function walk(src, dest) {
     for (const name of readdirSync(src)) {
@@ -148,6 +149,26 @@ function scaffoldBrand(targetDir, brandId, appName) {
   });
 }
 
+export function writeProjectMarker(targetDir, brandId, versions) {
+  const dir = join(targetDir, '.storylark');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'project.json'),
+    JSON.stringify(
+      {
+        contractVersion: 1,
+        installMethod: 'npm-create',
+        createStorylarkVersion: CREATE_VERSION,
+        platform: null,
+        brandId,
+        packages: versions,
+      },
+      null,
+      2
+    ) + '\n'
+  );
+}
+
 function copyPlatforms(targetDir) {
   // Bundled inside this package (create-storylark/platforms/, kept in sync
   // with the engine repo's platforms/ by sync-platforms.mjs, run as a
@@ -169,10 +190,37 @@ function flag(argv, name) {
   return arg ? arg.slice(name.length + 3) : undefined;
 }
 
+export function installDependencies(targetDir, runner = spawnSync) {
+  const command = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const result = runner(command, ['install'], { stdio: 'inherit', cwd: targetDir });
+  if (result.error) throw result.error;
+  if ((result.status ?? 1) !== 0) throw new Error(`npm install failed with exit code ${result.status ?? 'unknown'}.`);
+}
+
+export function wizardArgs(argv) {
+  return argv.filter(
+    (arg) =>
+      arg === '--deploy' ||
+      arg === '--yes' ||
+      arg.startsWith('--platform=') ||
+      (!arg.startsWith('--') && arg.includes('='))
+  );
+}
+
+export function runWizard(targetDir, args, runner = spawnSync) {
+  const result = runner(process.execPath, [join(targetDir, 'platforms', 'wizard.mjs'), ...args], {
+    stdio: 'inherit',
+    cwd: targetDir,
+  });
+  if (result.error) throw result.error;
+  if ((result.status ?? 1) !== 0) throw new Error(`StoryLark setup failed with exit code ${result.status ?? 'unknown'}.`);
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const deployFlag = argv.includes('--deploy');
-  const positional = argv.filter((a) => !a.startsWith('--'));
+  const noInstall = argv.includes('--no-install');
+  const positional = argv.filter((a) => !a.startsWith('--') && !a.includes('='));
 
   // --name/--brand/--app-name make this scriptable (CI, testing) without
   // readline's piped-stdin quirks; omit any of them to be prompted instead.
@@ -193,28 +241,45 @@ async function main() {
   rl?.close();
 
   console.log(`\nFetching the current StoryLark engine versions...`);
-  const [coreVersion, workerVersion] = await Promise.all([
-    latestVersion('storylark-core', '0.5.0'),
-    latestVersion('storylark-worker', '0.4.0'),
+  const [coreVersion, workerVersion, pipelineVersion] = await Promise.all([
+    latestVersion('storylark-core', '0.19.0'),
+    latestVersion('storylark-worker', '0.19.0'),
+    latestVersion('storylark-pipeline', '0.19.0'),
   ]);
-  console.log(`Using storylark-core ${coreVersion}, storylark-worker ${workerVersion}.`);
+  console.log(`Using storylark-core ${coreVersion}, storylark-worker ${workerVersion}, storylark-pipeline ${pipelineVersion}.`);
 
   console.log(`\nCreating ${targetName}/ ...`);
-  copyTemplate(targetDir, brandId, appName, coreVersion, workerVersion);
+  copyTemplate(targetDir, brandId, appName, coreVersion, workerVersion, pipelineVersion);
   scaffoldBrand(targetDir, brandId, appName);
   copyPlatforms(targetDir);
+  writeProjectMarker(targetDir, brandId, {
+    'storylark-core': coreVersion,
+    'storylark-worker': workerVersion,
+    'storylark-pipeline': pipelineVersion,
+  });
   console.log(`✓ ${targetName}/ created.`);
 
-  if (deployFlag) {
-    console.log('\nContinuing straight into setup (no separate step)...\n');
-    const result = spawnSync(process.execPath, [join(targetDir, 'platforms', 'wizard.mjs')], {
-      stdio: 'inherit',
-      cwd: targetDir,
-    });
-    process.exit(result.status ?? 0);
+  if (!noInstall) {
+    console.log('\nInstalling dependencies...');
+    installDependencies(targetDir);
+    console.log('✓ Dependencies installed and locked.');
   } else {
-    console.log(`\nNext:\n  cd ${targetName}\n  npm install\n  npm run setup   # or edit brands/${brandId}/ by hand first`);
+    console.log('\nSkipped dependency installation (--no-install). Run `npm install` before setup.');
+  }
+
+  if (deployFlag) {
+    if (noInstall) throw new Error('--deploy cannot be combined with --no-install. Install dependencies before deploying.');
+    console.log('\nContinuing straight into setup (no separate step)...\n');
+    runWizard(targetDir, wizardArgs(argv));
+  } else {
+    console.log(`\nNext:\n  cd ${targetName}\n  npm run doctor\n  npm run setup   # or edit brands/${brandId}/ by hand first`);
   }
 }
 
-main();
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isMain) {
+  main().catch((err) => {
+    console.error(`\ncreate-storylark: ${err.message ?? err}`);
+    process.exitCode = 1;
+  });
+}

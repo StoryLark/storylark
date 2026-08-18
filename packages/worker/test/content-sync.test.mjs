@@ -23,7 +23,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createHmac } from 'node:crypto';
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { zip } from 'storylark-contracts/zip';
@@ -273,6 +273,64 @@ test('connect dry-runs and refuses an invalid repo; a valid one connects and syn
   assert.equal(again.json.report.chaptersUnchanged, 3);
   const after = await box.dep.manifest();
   assert.equal(after.libraryVersion, manifest.libraryVersion, 'nothing changed, nothing bumped');
+});
+
+test('an invalid arrival is atomic: a valid sibling edit is not partially published', async (t) => {
+  const box = await syncDeployment();
+  t.after(() => box.close());
+  const session = await adminSession(box.dep);
+  await connect(session);
+  await session('POST', '/api/admin/content-source/sync');
+
+  const before = await box.dep.manifest();
+  const beforeSource = await readFile(join(box.dep.dir, 'books', 'winterlight', 'source', 'full.md'), 'utf8');
+  const changed = fixtureV1();
+  changed['content/winterlight.md'] = withBlock({ type: 'story', title: 'Winterlight' }, `${PROSE} This edit must wait.`);
+  changed['content/broken.md'] = withBlock({ type: 'chapter', book: 'the-keepers', chapter: 'broken', order: 'not-an-integer' });
+  await box.stage(changed);
+
+  const sync = await session('POST', '/api/admin/content-source/sync');
+  assert.equal(sync.status, 200, sync.text);
+  assert.equal(sync.json.ok, false);
+  assert.ok(sync.json.report.errors.some((e) => e.code === 'invalid_order'));
+  assert.equal(sync.json.report.chaptersWritten, 0, 'validation failure writes no valid siblings');
+  assert.equal(await readFile(join(box.dep.dir, 'books', 'winterlight', 'source', 'full.md'), 'utf8'), beforeSource);
+  const after = await box.dep.manifest();
+  assert.deepEqual(after, before, 'the complete manifest stays byte-for-byte equivalent as JSON');
+});
+
+test('an unchanged repo sync preserves narration, timings and every narrator voice path', async (t) => {
+  const box = await syncDeployment();
+  t.after(() => box.close());
+  const session = await adminSession(box.dep);
+  await connect(session);
+  await session('POST', '/api/admin/content-source/sync');
+
+  const manifestPath = join(box.dep.dir, 'manifest.json');
+  const before = await box.dep.manifest();
+  const chapter = before.books.find((b) => b.id === 'winterlight').chapters[0];
+  chapter.hasAudio = true;
+  chapter.audioDurationMs = 12_345;
+  chapter.audio = 'books/winterlight/audio/full.primary.mp3';
+  chapter.timings = 'books/winterlight/timings/full.primary.json';
+  chapter.audioStale = false;
+  chapter.voices = {
+    harper: { audio: 'books/winterlight/audio/full.harper.mp3', timings: 'books/winterlight/timings/full.harper.json' },
+    isla: { audio: 'books/winterlight/audio/full.isla.mp3', timings: 'books/winterlight/timings/full.isla.json' },
+    ethan: { audio: 'books/winterlight/audio/full.ethan.mp3', timings: 'books/winterlight/timings/full.ethan.json' },
+  };
+  await writeFile(manifestPath, `${JSON.stringify(before, null, 2)}\n`);
+
+  const sync = await session('POST', '/api/admin/content-source/sync');
+  assert.equal(sync.status, 200, sync.text);
+  assert.equal(sync.json.report.chaptersWritten, 0);
+  const after = await box.dep.manifest();
+  const preserved = after.books.find((b) => b.id === 'winterlight').chapters[0];
+  assert.equal(after.libraryVersion, before.libraryVersion, 'a no-op does not churn the manifest version');
+  assert.equal(preserved.audio, chapter.audio);
+  assert.equal(preserved.timings, chapter.timings);
+  assert.deepEqual(preserved.voices, chapter.voices);
+  assert.equal(preserved.audioStale, false);
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
