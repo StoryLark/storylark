@@ -117,7 +117,15 @@ function readRepoConnection(raw: unknown): RepoConnection | { error: string } {
   if (!Number.isFinite(intervalHours) || intervalHours < 1 || intervalHours > 24 * 30) {
     return { error: '`repo.intervalHours` must be between 1 and 720. The daily cron is the floor in practice (§10.3); a webhook is the instant tier.' };
   }
-  return { provider: provider.id, url, visibility, branch, path, intervalHours: Math.round(intervalHours) };
+  return {
+    provider: provider.id,
+    url,
+    visibility,
+    branch,
+    path,
+    intervalHours: Math.round(intervalHours),
+    ...(o.adoptMatchingExisting === true ? { adoptMatchingExisting: true } : {}),
+  };
 }
 
 /**

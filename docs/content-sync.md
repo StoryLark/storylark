@@ -77,6 +77,14 @@ What to know before connecting:
   but absent from a sync is reported `missing` in the sync report; nothing is
   unpublished until the operator clicks **Remove these N chapters**, which runs
   the ordinary recoverable delete.
+- **Existing content is never silently claimed.** The first writer still owns
+  each book id. When moving an already-published library to repo mode, enable
+  **Adopt matching live books** explicitly. StoryLark then compares the complete
+  chapter set, rendered content hashes, declared order, visible book metadata,
+  and cover identity. A changed word or missing chapter blocks the connection
+  and writes nothing. A match changes only ownership metadata: content objects,
+  narration, timings, and every voice variant remain attached. Run **Sync now**
+  twice after connecting; the second report must show zero writes.
 - **Text syncs instantly; audio does not.** No deployment can run the TTS
   model. A sync enqueues narration for everything it wrote; the narration
   worker you already run (`node packages/pipeline/narrate.mjs`) drains it.

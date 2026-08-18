@@ -411,6 +411,92 @@ test('a cross-source collision is book_owned_elsewhere, naming the owner; same s
   }
 });
 
+test('matching-only adoption migrates an unchanged live book without touching narration; mismatches remain blocked', async (t) => {
+  const box = await syncDeployment();
+  t.after(() => box.close());
+  const session = await adminSession(box.dep);
+
+  // A legacy CLI/API book: same visible title and prose as the repository,
+  // but no storylark block and therefore no repo ownership metadata.
+  const legacy = `---\ntitle: Adopt Me\n---\n\n${PROSE}\n`;
+  const created = await box.dep.call('PUT', '/api/content/v1/books/adopt-me', {
+    contractVersion: 1,
+    title: 'Adopt Me',
+    managed: false,
+    chapters: [{ id: 'full', markdown: legacy }],
+  });
+  assert.equal(created.status, 200, created.text);
+
+  // Give it the assets adoption must preserve. They need not exist for this
+  // ownership test; the manifest references are the zero-loss contract.
+  let manifest = await box.dep.manifest();
+  const live = manifest.books.find((book) => book.id === 'adopt-me');
+  const chapter = live.chapters[0];
+  chapter.hasAudio = true;
+  chapter.audio = 'books/adopt-me/audio/full.primary.mp3';
+  chapter.timings = 'books/adopt-me/audio/full.primary.json';
+  chapter.voices = {
+    warm: { audio: 'books/adopt-me/audio/full.warm.mp3', timings: 'books/adopt-me/audio/full.warm.json' },
+  };
+  await writeFile(join(box.dep.dir, 'manifest.json'), JSON.stringify(manifest));
+  const protectedFields = {
+    contentHash: chapter.contentHash,
+    content: chapter.content,
+    audio: chapter.audio,
+    timings: chapter.timings,
+    voices: chapter.voices,
+  };
+
+  const repoMarkdown = withBlock({ type: 'story', title: 'Adopt Me' });
+  const adoptingConnection = { ...CONNECTION, adoptMatchingExisting: true };
+
+  // An explicit adoption request is still a refusal when one word differs.
+  await box.stage({ 'content/adopt-me.md': repoMarkdown.replace('perfectly ordinary', 'materially different') });
+  const mismatch = await session('PUT', '/api/admin/content-source', { mode: 'repo', repo: adoptingConnection });
+  assert.equal(mismatch.status, 422, mismatch.text);
+  assert.equal(mismatch.json.report.errors[0].code, 'book_owned_elsewhere');
+  assert.match(mismatch.json.report.errors[0].message, /renders to .* not the live hash/);
+  manifest = await box.dep.manifest();
+  assert.equal(manifest.books.find((book) => book.id === 'adopt-me').origin, 'portal', 'a mismatch changes no ownership');
+
+  // The exact rendered match connects in a dry run, then adopts without a
+  // chapter save (the operation that would mark audio stale).
+  await box.stage({ 'content/adopt-me.md': repoMarkdown });
+  const connected = await session('PUT', '/api/admin/content-source', { mode: 'repo', repo: adoptingConnection });
+  assert.equal(connected.status, 200, connected.text);
+  assert.deepEqual(connected.json.report.adoptionCandidates, ['adopt-me']);
+  const synced = await session('POST', '/api/admin/content-source/sync');
+  assert.equal(synced.status, 200, synced.text);
+  assert.deepEqual(synced.json.report.adopted, ['adopt-me']);
+  assert.equal(synced.json.report.chaptersWritten, 0);
+  assert.equal(synced.json.report.chaptersUnchanged, 1);
+
+  manifest = await box.dep.manifest();
+  const adopted = manifest.books.find((book) => book.id === 'adopt-me');
+  assert.equal(adopted.origin, 'sync');
+  assert.equal(adopted.syncSource.url, CONNECTION.url);
+  assert.equal(adopted.chapters[0].origin, 'sync');
+  assert.equal(adopted.chapters[0].declaredType, 'story');
+  assert.deepEqual(
+    {
+      contentHash: adopted.chapters[0].contentHash,
+      content: adopted.chapters[0].content,
+      audio: adopted.chapters[0].audio,
+      timings: adopted.chapters[0].timings,
+      voices: adopted.chapters[0].voices,
+    },
+    protectedFields,
+    'content and every narration reference survive adoption'
+  );
+  assert.notEqual(adopted.chapters[0].audioStale, true);
+  assert.equal((await box.dep.call('GET', '/api/library/version')).json.version, manifest.libraryVersion, 'readers are told the adopted manifest moved');
+
+  const adoptedVersion = manifest.libraryVersion;
+  const repeated = await session('POST', '/api/admin/content-source/sync');
+  assert.equal(repeated.json.report.chaptersWritten, 0);
+  assert.equal((await box.dep.manifest()).libraryVersion, adoptedVersion, 'the second sync is a no-op');
+});
+
 test('§10.6: a declared order colliding with a stored incumbent is the same order_tie through every door', async (t) => {
   const box = await syncDeployment();
   t.after(() => box.close());

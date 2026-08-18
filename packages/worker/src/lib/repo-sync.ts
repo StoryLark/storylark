@@ -34,8 +34,8 @@
  */
 
 import type { Env } from '../types';
-import type { BookEntry, SyncSource } from '../content-types';
-import { getText, IMMUTABLE, type ContentStore } from './content-store';
+import type { BookEntry, ChapterContent, ChapterEntry, SyncSource } from '../content-types';
+import { getJson, getText, IMMUTABLE, type ContentStore } from './content-store';
 import {
   announceVersionOf,
   findBook,
@@ -47,7 +47,7 @@ import {
   syncSourceOf,
   writeManifest,
 } from './content';
-import { readFrontmatter } from './md';
+import { contentHash, parseBlocks, readFrontmatter, stabilizeBlockIds } from './md';
 import { sha256Bytes } from './crypto';
 import { enqueue } from './narration';
 import { recordPublish } from './notify';
@@ -92,6 +92,10 @@ export interface SyncReport {
   imageProblems: { file: string; reference: string; reason: string }[];
   /** §10.1 — present in the manifest, absent from this arrival. Reported, NEVER auto-deleted. */
   missing: { bookId: string; chapterId: string; title?: string }[];
+  /** Existing non-repo books proven safe to adopt by complete hash parity. */
+  adoptionCandidates: string[];
+  /** Books whose ownership changed during this real run. Empty for dry-runs. */
+  adopted: string[];
   libraryVersion?: number;
   /** A transport-level failure (fetch, unzip, configuration) in one sentence. */
   failure?: string;
@@ -116,6 +120,81 @@ interface Candidate {
   record: ContentRecord;
 }
 
+/**
+ * Render an incoming candidate exactly far enough to compare it with the live
+ * chapter. This is read-only: no source, revision, content object, manifest,
+ * narration, or timing is touched. Reusing the live blocks for ID
+ * stabilisation makes the result the same hash saveChapter would produce.
+ */
+async function candidateHash(store: ContentStore, candidate: Candidate, existing: ChapterEntry): Promise<string> {
+  const previous = await getJson<ChapterContent>(store, existing.content);
+  const { data, body } = readFrontmatter(candidate.markdown);
+  const blocks = await stabilizeBlockIds(parseBlocks(body), previous?.blocks);
+  const declared = readStorylarkBlock(candidate.markdown);
+  const declaredTitle =
+    declared.present && typeof declared.fields.title === 'string' && declared.fields.title.trim() !== ''
+      ? declared.fields.title
+      : undefined;
+  const title = declaredTitle ?? (typeof data.title === 'string' ? data.title : (existing.title ?? existing.id));
+  return contentHash({ blocks, title });
+}
+
+/**
+ * The one permitted exception to first-writer ownership: an operator may ask
+ * a repo connection to ADOPT a library that is already live, but only when the
+ * complete chapter set and every rendered content hash are identical. Visible
+ * book metadata, declared ordering, and cover identity must match too. Any
+ * uncertainty is a refusal, never a best guess.
+ */
+async function adoptionMismatch(
+  store: ContentStore,
+  existing: BookEntry,
+  declared: Candidate | undefined,
+  group: Candidate[],
+  files: Map<string, Uint8Array>
+): Promise<string | null> {
+  const incoming = group.filter((candidate) => candidate.record.publish !== false);
+  const incomingIds = incoming.map((candidate) => candidate.record.chapter ?? 'full').sort();
+  const existingIds = (existing.chapters ?? []).map((chapter) => chapter.id).sort();
+  if (JSON.stringify(incomingIds) !== JSON.stringify(existingIds)) {
+    return `the complete chapter set differs (live: ${existingIds.join(', ') || 'none'}; repo: ${incomingIds.join(', ') || 'none'})`;
+  }
+
+  for (const candidate of incoming) {
+    const chapterId = candidate.record.chapter ?? 'full';
+    const live = (existing.chapters ?? []).find((chapter) => chapter.id === chapterId);
+    if (!live) return `chapter "${chapterId}" is not live`;
+    const hash = await candidateHash(store, candidate, live);
+    if (hash !== live.contentHash) return `chapter "${chapterId}" renders to ${hash}, not the live hash ${live.contentHash}`;
+    const incomingOrder = candidate.record.declaredOrder;
+    if (incomingOrder !== undefined && incomingOrder !== live.order) {
+      return `chapter "${chapterId}" declares order ${incomingOrder}, not the live order ${live.order ?? 'none'}`;
+    }
+  }
+
+  const projected = JSON.parse(JSON.stringify(existing)) as BookEntry;
+  applyBookMetadata(projected, declared, group);
+  for (const field of ['title', 'author', 'description'] as const) {
+    if (projected[field] !== existing[field]) {
+      return `book ${field} differs (live: ${JSON.stringify(existing[field] ?? null)}; repo: ${JSON.stringify(projected[field] ?? null)})`;
+    }
+  }
+
+  if (declared?.record.cover) {
+    const ref = declared.record.cover as string;
+    const resolved = resolveRelative(declared.dir, ref) ?? ref;
+    const bytes = files.get(resolved) ?? files.get(ref);
+    if (!bytes) return `cover "${ref}" is not present in the repository archive`;
+    const ext = ref.slice(ref.lastIndexOf('.') + 1).toLowerCase();
+    if (!IMAGE_EXT[ext]) return `cover "${ref}" is not an accepted image type`;
+    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const expected = key.cover(existing.id, (await sha256Bytes(buf)).slice(0, 12), ext);
+    if (expected !== existing.cover) return `cover identity differs (live: ${existing.cover ?? 'none'}; repo: ${expected})`;
+  }
+
+  return null;
+}
+
 function emptyReport(trigger: SyncTrigger, dryRun: boolean, repo: RepoConnection | undefined): SyncReport {
   const now = new Date().toISOString();
   return {
@@ -136,6 +215,8 @@ function emptyReport(trigger: SyncTrigger, dryRun: boolean, repo: RepoConnection
     errors: [],
     imageProblems: [],
     missing: [],
+    adoptionCandidates: [],
+    adopted: [],
   };
 }
 
@@ -358,6 +439,7 @@ export async function runRepoSync(
       return !!theirs && theirs.owner.toLowerCase() === parsed.owner.toLowerCase() && theirs.repo.toLowerCase() === parsed.repo.toLowerCase();
     };
     const targets = new Set([...chapterGroups.keys(), ...declaredBooks.keys()]);
+    const adopting = new Set<string>();
     for (const bookId of [...targets]) {
       const existing = manifest ? findBook(manifest, bookId) : undefined;
       if (!existing) continue;
@@ -366,7 +448,23 @@ export async function runRepoSync(
       for (const c of chapterGroups.get(bookId) ?? []) involved.set(c.file, c);
       const declared = declaredBooks.get(bookId);
       if (declared) involved.set(declared.file, declared);
-      for (const c of involved.values()) report.errors.push(bookOwnedElsewhereError(bookId, existing, { file: c.file }));
+      const mismatch = repo.adoptMatchingExisting
+        ? await adoptionMismatch(store, existing, declared, chapterGroups.get(bookId) ?? [], files)
+        : 'matching-only adoption was not requested';
+      if (repo.adoptMatchingExisting && mismatch === null) {
+        adopting.add(bookId);
+        report.adoptionCandidates.push(bookId);
+        continue;
+      }
+      for (const c of involved.values()) {
+        const owned = bookOwnedElsewhereError(bookId, existing, { file: c.file });
+        report.errors.push({
+          ...owned,
+          message: repo.adoptMatchingExisting
+            ? `${owned.message} Matching-only adoption was requested, but ${mismatch}.`
+            : `${owned.message} To migrate this exact live book, explicitly enable matching-only adoption; StoryLark will still refuse unless every chapter and visible metadata matches.`,
+        });
+      }
       chapterGroups.delete(bookId);
       declaredBooks.delete(bookId);
       targets.delete(bookId);
@@ -427,6 +525,7 @@ export async function runRepoSync(
 
     // ── Write, through the one save path every transport shares ───────────
     const written: SyncReport['written'] = [];
+    let manifestChanged = false;
     let libraryVersion = manifest?.libraryVersion ?? 0;
     for (const [bookId, group] of accepted) {
       const before = await readManifest(store);
@@ -441,11 +540,16 @@ export async function runRepoSync(
           continue;
         }
         const markdown = await ingestImages(store, env, c, bookId, files, repo.path, report);
-        const existed = beforeBook ? (beforeBook.chapters ?? []).some((ch) => ch.id === chapterId) : false;
-        if (existed && (await getText(store, key.source(bookId, chapterId))) === markdown) {
-          report.chaptersUnchanged++;
-          continue;
+        const existingChapter = beforeBook ? (beforeBook.chapters ?? []).find((ch) => ch.id === chapterId) : undefined;
+        if (existingChapter) {
+          const exactSource = (await getText(store, key.source(bookId, chapterId))) === markdown;
+          const sameRenderedContent = exactSource ? true : (await candidateHash(store, c, existingChapter)) === existingChapter.contentHash;
+          if (sameRenderedContent) {
+            report.chaptersUnchanged++;
+            continue;
+          }
         }
+        const existed = !!existingChapter;
         try {
           const saved = await saveChapter({
             store,
@@ -480,6 +584,20 @@ export async function runRepoSync(
           const coverKey = await ingestCover(store, declared, bookId, files, repo.path, report);
           if (coverKey) entry.cover = coverKey;
         }
+        if (adopting.has(bookId)) {
+          for (const candidate of group) {
+            if (candidate.record.publish === false) continue;
+            const chapterId = candidate.record.chapter ?? 'full';
+            const chapter = (entry.chapters ?? []).find((item) => item.id === chapterId);
+            if (!chapter) continue; // adoptionMismatch proved it exists; fail closed if storage changed mid-run
+            chapter.origin = 'sync';
+            if (candidate.record.type === 'chapter' || candidate.record.type === 'story') {
+              chapter.declaredType = candidate.record.type;
+            }
+            if (candidate.record.declaredOrder !== undefined) chapter.order = candidate.record.declaredOrder;
+          }
+          report.adopted.push(bookId);
+        }
         entry.origin = 'sync';
         entry.syncSource = {
           kind: 'git',
@@ -498,6 +616,7 @@ export async function runRepoSync(
           written.some((w) => w.bookId === bookId) ||
           snapshot !== JSON.stringify({ ...entry, syncSource: { ...(entry.syncSource ?? {}), syncedAt: '' } });
         if (changed) {
+          manifestChanged = true;
           libraryVersion = (after.libraryVersion ?? 0) + 1;
           after.libraryVersion = libraryVersion;
           (after as { announceVersion?: number }).announceVersion = announceVersionOf(after);
@@ -515,10 +634,12 @@ export async function runRepoSync(
     report.ok = report.failure === undefined && report.errors.length === 0;
 
     const waitUntil = opts.waitUntil ?? ((p: Promise<unknown>) => void p.catch(() => {}));
-    if (written.length > 0) {
+    if (manifestChanged) {
       const final = await readManifest(store);
       const announce = final ? announceVersionOf(final) === final.libraryVersion : false;
       await recordPublish(env, waitUntil, libraryVersion, announce).catch(() => undefined);
+    }
+    if (written.length > 0) {
       // Any content arriving by any route enqueues narration (design §8).
       // Non-fatal, exactly as the portal's save treats it.
       try {

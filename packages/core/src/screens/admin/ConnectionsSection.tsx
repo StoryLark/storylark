@@ -43,6 +43,7 @@ interface RepoConnection {
   branch: string;
   path: string;
   intervalHours: number;
+  adoptMatchingExisting?: boolean;
 }
 
 interface SyncError {
@@ -68,6 +69,8 @@ interface SyncReport {
   errors: SyncError[];
   imageProblems: { file: string; reference: string; reason: string }[];
   missing: { bookId: string; chapterId: string; title?: string }[];
+  adoptionCandidates?: string[];
+  adopted?: string[];
   failure?: string;
 }
 
@@ -232,12 +235,21 @@ export function RepoPanel({ state, onChanged }: { state: SourceState; onChanged:
   const [path, setPath] = useState(repo?.path ?? '');
   const [intervalHours, setIntervalHours] = useState(repo?.intervalHours ?? 24);
   const [token, setToken] = useState('');
+  const [adoptMatchingExisting, setAdoptMatchingExisting] = useState(repo?.adoptMatchingExisting ?? false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [report, setReport] = useState<SyncReport | null>(state.sync?.lastReport ?? null);
   const [webhookSecret, setWebhookSecret] = useState<{ secret: string; url: string; message: string } | null>(null);
 
-  const connection = { provider, url: url.trim(), visibility, branch: branch.trim() || 'main', path: path.trim(), intervalHours };
+  const connection = {
+    provider,
+    url: url.trim(),
+    visibility,
+    branch: branch.trim() || 'main',
+    path: path.trim(),
+    intervalHours,
+    ...(adoptMatchingExisting ? { adoptMatchingExisting: true } : {}),
+  };
 
   async function save(): Promise<void> {
     setBusy(true);
@@ -377,6 +389,20 @@ export function RepoPanel({ state, onChanged }: { state: SourceState; onChanged:
             autocomplete="off"
           />
         </label>
+        <label class="settings-row">
+          <span>Adopt matching live books</span>
+          <input
+            type="checkbox"
+            checked={adoptMatchingExisting}
+            onChange={(e) => setAdoptMatchingExisting((e.target as HTMLInputElement).checked)}
+          />
+        </label>
+        <p class="settings-note">
+          Use adoption only when moving this deployment's existing library to repository management. StoryLark compares
+          the complete chapter set and rendered content hashes first. A changed word, missing chapter, different order, or
+          metadata mismatch blocks the connection and writes nothing; matching narration, timings, and voice variants stay
+          attached.
+        </p>
         <p class="settings-note">
           HTTPS with a read-only token is the only supported transport — <strong>SSH is not an option here</strong>: this
           deployment has no ssh client and no safe place for a private key, so if your repo access is SSH-only, create a
@@ -491,12 +517,23 @@ function SyncReportView({
         {report.imagesIngested > 0 ? `, ${report.imagesIngested} image(s) ingested` : ''} · {report.ignored} file(s) without a{' '}
         <code>storylark:</code> block ignored
       </p>
+      {(report.adopted?.length ?? 0) > 0 && (
+        <p class="settings-note admin-notice">
+          Adopted matching live book(s): {(report.adopted ?? []).join(', ')}. Existing content objects, narration, timings,
+          and voice variants were retained.
+        </p>
+      )}
+      {report.dryRun && (report.adoptionCandidates?.length ?? 0) > 0 && (
+        <p class="settings-note admin-notice">
+          Matching-only adoption can safely claim: {(report.adoptionCandidates ?? []).join(', ')}. This dry run wrote nothing.
+        </p>
+      )}
       {report.failure && <p class="settings-note admin-error">{report.failure}</p>}
       {report.errors.length > 0 && (
         <div class="settings-note admin-error">
           <p>
             <strong>
-              {report.errors.length} file(s) were skipped and reported — the rest of the sync proceeded.
+              {report.errors.length} file(s) failed validation. The sync is atomic, so nothing from this arrival was written.
             </strong>
           </p>
           <ul>
