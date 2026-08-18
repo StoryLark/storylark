@@ -201,22 +201,43 @@ admin.get('/update-status', async (c) => {
   }
 });
 
+/** The parsed subset of dist/outputs.json this worker cares about. */
+interface BuildOutputs {
+  coreVersion: string | null;
+  /** The overall release/build number (AB#7653) — absent in builds before it existed. */
+  releaseBuild: string | null;
+}
+
 /**
- * The core version the BUILD serves, from dist/outputs.json — written there by
- * the site build since AB#7418. Only reachable where an ASSETS binding exists
- * (Cloudflare); the Node entry serves dist off disk, where worker and dist
- * deploy as one unit anyway, so the worker version is an honest proxy there.
+ * dist/outputs.json, parsed — written by the site build since AB#7418
+ * (`coreVersion`) and AB#7653 (`releaseBuild`). Only reachable where an
+ * ASSETS binding exists (Cloudflare); the Node entry serves dist off disk,
+ * where worker and dist deploy as one unit anyway, so the worker version is
+ * an honest proxy there. A build predating either field simply lacks it —
+ * every caller of this treats both as optional.
  */
-async function buildCoreVersion(env: { ASSETS?: { fetch: (r: Request) => Promise<Response> } }): Promise<string | null> {
+async function readBuildOutputs(env: { ASSETS?: { fetch: (r: Request) => Promise<Response> } }): Promise<BuildOutputs | null> {
   if (!env.ASSETS) return null;
   try {
     const res = await env.ASSETS.fetch(new Request('https://assets.invalid/outputs.json', { headers: { accept: '*/*' } }));
     if (!res.ok || (res.headers.get('content-type') ?? '').includes('text/html')) return null;
-    const doc = (await res.json()) as { coreVersion?: unknown };
-    return typeof doc.coreVersion === 'string' && doc.coreVersion ? doc.coreVersion : null;
+    const doc = (await res.json()) as { coreVersion?: unknown; releaseBuild?: unknown };
+    return {
+      coreVersion: typeof doc.coreVersion === 'string' && doc.coreVersion ? doc.coreVersion : null,
+      releaseBuild: typeof doc.releaseBuild === 'string' && doc.releaseBuild ? doc.releaseBuild : null,
+    };
   } catch {
     return null;
   }
+}
+
+/**
+ * The core version the BUILD serves — the field /update-status has always
+ * asked readBuildOutputs for, kept as its own thin wrapper so that call site
+ * (line ~134) doesn't need to change shape for AB#7653's addition.
+ */
+async function buildCoreVersion(env: { ASSETS?: { fetch: (r: Request) => Promise<Response> } }): Promise<string | null> {
+  return (await readBuildOutputs(env))?.coreVersion ?? null;
 }
 
 /** `available` means "there is a target AND it answers". Anything else carries a reason. */
@@ -552,12 +573,21 @@ admin.get('/status', async (c) => {
     // database unreachable — leave null rather than fail the whole status view
   }
 
+  // Additive since AB#7653: an older portal ignores this field entirely, and
+  // an older worker simply never sends it — Admin.tsx's StatusResponse type
+  // marks it optional for exactly that reason. `build`/`coreVersion` come
+  // from dist/outputs.json via readBuildOutputs() and stay null wherever that
+  // file is unreachable or predates the field (see its own doc comment).
+  const outputs = await readBuildOutputs(c.env);
+  const release = { build: outputs?.releaseBuild ?? null, coreVersion: outputs?.coreVersion ?? null, workerVersion: workerPkg.version };
+
   return c.json({
     brand: c.env.BRAND,
     engineVersion: workerPkg.version,
     bookCount,
     chapterCount,
     pushSubscriptions,
+    release,
   });
 });
 

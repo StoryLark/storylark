@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { BRAND } from '../brand';
+import { BUILD } from '../version';
 import { api, call, ApiError, type AuthUser } from '../lib/api';
 import { ConnectionsSection } from './admin/ConnectionsSection';
 import { ContentSection } from './admin/ContentSection';
@@ -39,6 +40,20 @@ interface StatusResponse {
   bookCount: number | null;
   chapterCount: number | null;
   pushSubscriptions: number | null;
+  /**
+   * The overall release/build number as the WORKER sees it (AB#7653),
+   * additive since this release — an older worker simply doesn't send it,
+   * and the portal must render fine without it (see StatusSection below).
+   * `build`/`coreVersion` come from the deployed dist/outputs.json and are
+   * null on a build made before AB#7418/AB#7653 wrote that file, or where
+   * the worker has no way to read it (no ASSETS binding — see
+   * buildCoreVersion in routes/admin.ts).
+   */
+  release?: {
+    build: string | null;
+    coreVersion: string | null;
+    workerVersion: string;
+  };
 }
 
 interface UpdateStatusResponse {
@@ -604,6 +619,28 @@ function AdminNav({ page }: { page: AdminPage }): JSX.Element {
   );
 }
 
+/**
+ * The release docs link — same URL and same purpose as About.tsx's, kept as
+ * two separate constants (this bundle and the reader bundle are deliberately
+ * unshared, AB#7404) rather than one shared module.
+ */
+const RELEASE_DOCS_URL = 'https://storylark.org/releases/';
+
+/**
+ * Two release identities, shown honestly rather than collapsed into one
+ * (AB#7653 — owner call): the APP BUNDLE'S own BUILD (this admin bundle was
+ * built from the same commit as the reader bundle it sits beside) and the
+ * WORKER'S reported `status.release` (what's actually answering /api right
+ * now). They can differ when a deploy and a release interleave — an engine
+ * update landed but the worker script hasn't redeployed yet, or vice versa —
+ * and that visible mismatch is the point of this feature, not a bug to hide.
+ *
+ * `status.release` is optional (an older worker predating AB#7653 simply
+ * doesn't send it) and even when present its `build`/`coreVersion` can be
+ * null (a build made before dist/outputs.json carried them, or a worker with
+ * no way to read that file) — every read here has a fallback so an old
+ * worker + new portal combination still renders cleanly.
+ */
 function StatusSection({ status }: { status: StatusResponse | null }): JSX.Element {
   return (
     <section class="settings-section">
@@ -611,13 +648,45 @@ function StatusSection({ status }: { status: StatusResponse | null }): JSX.Eleme
       {!status ? (
         <p class="settings-note">Loading…</p>
       ) : (
-        <ul class="admin-status-list">
-          <li>Brand: {status.brand}</li>
-          <li>Engine version: {status.engineVersion}</li>
-          <li>Books: {status.bookCount ?? '—'}</li>
-          <li>Chapters: {status.chapterCount ?? '—'}</li>
-          <li>Push subscribers: {status.pushSubscriptions ?? '—'}</li>
-        </ul>
+        <>
+          <ul class="admin-status-list">
+            <li>Brand: {status.brand}</li>
+            <li>Engine version: {status.engineVersion}</li>
+            <li>Books: {status.bookCount ?? '—'}</li>
+            <li>Chapters: {status.chapterCount ?? '—'}</li>
+            <li>Push subscribers: {status.pushSubscriptions ?? '—'}</li>
+          </ul>
+          <p class="about-release admin-release">
+            <strong>App bundle: Release {BUILD.releaseBuild}</strong> (storylark-core v{BUILD.coreVersion}, commit{' '}
+            <code>{BUILD.commit}</code>)
+            <br />
+            <strong>Worker: Release {status.release?.build ?? '—'}</strong> (
+            {status.release ? (
+              <>
+                storylark-core v{status.release.coreVersion ?? '—'}, storylark-worker v{status.release.workerVersion}
+              </>
+            ) : (
+              'this worker predates release reporting'
+            )}
+            )
+            {status.release?.build && status.release.build !== BUILD.releaseBuild && (
+              <span class="admin-release-mismatch"> — differs from the app bundle above</span>
+            )}
+            <br />
+            <a href={RELEASE_DOCS_URL} target="_blank" rel="noopener">
+              Release docs ↗
+            </a>
+          </p>
+          {Object.keys(BUILD.versions).length > 0 && (
+            <ul class="about-list admin-status-list">
+              {Object.entries(BUILD.versions).map(([pkg, ver]) => (
+                <li key={pkg}>
+                  <strong>{pkg}.</strong> v{ver}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </section>
   );

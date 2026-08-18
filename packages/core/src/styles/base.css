@@ -487,6 +487,16 @@ select:focus-visible {
   gap: 0.35rem;
 }
 
+.admin-release {
+  margin-top: 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.admin-release-mismatch {
+  color: var(--accent-strong);
+}
+
 /* The update command in the admin portal's Platform update card — a command to
    copy, so it wraps rather than scrolls sideways on a phone. */
 .admin-command {

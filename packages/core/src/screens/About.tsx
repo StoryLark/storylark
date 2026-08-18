@@ -16,6 +16,14 @@ import roadmapMd from '../../ROADMAP.md?raw';
  */
 const INSTALL_PAGE_URL = `${DEPLOYMENT.appOrigin.replace('://app.', '://')}/app`;
 
+/**
+ * The release-notes/changelog docs for the overall build number (AB#7653),
+ * distinct from RELEASE-NOTES.md above (which is storylark-core's own
+ * package changelog, rendered inline under "What's new"). storylark.org's
+ * build serves the changelog at /releases/ — confirmed live (200).
+ */
+const RELEASE_DOCS_URL = 'https://storylark.org/releases/';
+
 export function About(): JSX.Element {
   const m = manifest.value;
   const units = m ? m.books.reduce((n, b) => n + b.chapters.length, 0) : 0;
@@ -38,7 +46,7 @@ export function About(): JSX.Element {
           {BRAND.name} · by {BRAND.author}
         </p>
         <p class="about-version">
-          Version {BUILD.coreVersion} · build {BUILD.commit}
+          Version {BUILD.coreVersion} · build {BUILD.commit} · Release {BUILD.releaseBuild}
         </p>
         {units > 0 && <p class="about-count">{countUnits(units)} in the library</p>}
       </div>
@@ -103,6 +111,13 @@ export function About(): JSX.Element {
 
       <section class="settings-section">
         <h2>Version &amp; build</h2>
+        <p class="about-release">
+          <strong>Release {BUILD.releaseBuild}</strong> — the overall build number for this deployment, on top of
+          each component's own version below.{' '}
+          <a href={RELEASE_DOCS_URL} target="_blank" rel="noopener">
+            Release docs ↗
+          </a>
+        </p>
         <ul class="about-list">
           {Object.entries(BUILD.versions).map(([pkg, ver]) => (
             <li key={pkg}>

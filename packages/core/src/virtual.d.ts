@@ -43,6 +43,16 @@ declare module 'virtual:storylark-build' {
     builtAt: string;
     /** Brand the build was made for. */
     brandId: string;
+    /**
+     * The overall release/build number, `YYMM.BUILD.PATCH` — separate from
+     * each package's own independently-versioned semver (AB#7653). See
+     * computeReleaseBuild in ../vite/index.mjs for how it's derived. Always
+     * present (an ordinal of 1 rather than absent, outside a git checkout),
+     * so this is not optional — but a build made by an OLDER core still
+     * lacks it in dist/outputs.json, so every reader of THAT file must treat
+     * it as optional.
+     */
+    releaseBuild: string;
   }
   const build: BuildInfo;
   export default build;

@@ -129,6 +129,13 @@ export function defineStorylarkConfig(options = {}) {
       ? neutralConfig()
       : loadStorylarkConfig(siteRoot, brandId, brandDir, options);
     const themeFile = resolve(brandDir, 'theme.css');
+    // Computed once and shared: buildInfoPlugin serves it as
+    // virtual:storylark-build, outputManifestPlugin writes its coreVersion
+    // and releaseBuild into dist/outputs.json. Two separate reads of "now"
+    // (were STORYLARK_BUILD_TIME unset) could in principle straddle a month
+    // boundary and disagree on releaseBuild's YYMM — sharing one object rules
+    // that out rather than relying on it being astronomically unlikely.
+    const buildInfo = resolveBuildInfo(siteRoot, brandId);
 
     /** @type {import('vite').UserConfig} */
     const config = {
@@ -142,10 +149,10 @@ export function defineStorylarkConfig(options = {}) {
         ...(engineBuild ? [] : [presentationAssetPlugin(presentation), themePlugin(themeFile, identity), brandAssetsPlugin(brandDir, identity)]),
         ...(engineBuild ? [engineDocumentPlugin()] : []),
         deploymentModulePlugin(deployment),
-        buildInfoPlugin(resolveBuildInfo(siteRoot, brandId)),
+        buildInfoPlugin(buildInfo),
         fontsModulePlugin(),
         adminPagePlugin(brand, siteRoot),
-        outputManifestPlugin(),
+        outputManifestPlugin(buildInfo),
         VitePWA({
           strategies: 'injectManifest',
           // The service worker ships inside storylark-core and compiles in
@@ -478,6 +485,7 @@ function resolveBuildInfo(siteRoot, brandId) {
       // not installed for this site — leave it out rather than guess
     }
   }
+  const builtAt = process.env.STORYLARK_BUILD_TIME || new Date().toISOString();
   return {
     coreVersion: corePkg.version,
     versions,
@@ -488,9 +496,49 @@ function resolveBuildInfo(siteRoot, brandId) {
     // only because the bundle carries a build timestamp") and which would make
     // "is this prebuilt engine artifact free of brand data?" unanswerable by
     // comparison. CI sets it once per release; nothing else needs to.
-    builtAt: process.env.STORYLARK_BUILD_TIME || new Date().toISOString(),
+    builtAt,
     brandId,
+    releaseBuild: computeReleaseBuild(siteRoot, builtAt),
   };
+}
+
+/**
+ * The overall release/build number, separate from each package's own
+ * independently-versioned semver (owner request, 2026-08-17 — per-component
+ * versions were confusing on their own after a release and a manual deploy
+ * landed one commit apart with different core/worker version stamps).
+ *
+ * `YYMM.BUILD.PATCH`:
+ *   - YYMM: the build's own year+month (from builtAt, so STORYLARK_BUILD_TIME
+ *     still makes two identical builds produce the identical number).
+ *   - BUILD: an ordinal, reproducible from git history alone — the count of
+ *     commits reachable from HEAD since the 1st of that month. No stored
+ *     counter to keep in sync, no manual bump step; two checkouts of the same
+ *     commit always compute the same number.
+ *   - PATCH: 0 unless STORYLARK_RELEASE_PATCH is set — reserved for a hotfix
+ *     redeploy of the same commit that needs to be told apart from the
+ *     original build (a config-only or dependency-only rebuild, say).
+ * Not a git checkout (a tarball build, an npm-copied site with no .git) still
+ * produces a number — BUILD degrades to 1 rather than guessing.
+ */
+function computeReleaseBuild(siteRoot, builtAtIso) {
+  const patch = process.env.STORYLARK_RELEASE_PATCH || '0';
+  const d = new Date(builtAtIso);
+  const yymm = `${String(d.getUTCFullYear()).slice(2)}${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  let ordinal = '1';
+  try {
+    const monthStart = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString();
+    const count = execSync(`git rev-list --count --since="${monthStart}" HEAD`, {
+      cwd: siteRoot,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .toString()
+      .trim();
+    if (count) ordinal = count;
+  } catch {
+    // not a git checkout — the ordinal degrades to 1 rather than guessing
+  }
+  return `${yymm}.${ordinal}.${patch}`;
 }
 
 /** Serves the build identity as `virtual:storylark-build`. */
@@ -924,7 +972,7 @@ function engineDocumentPlugin() {
  * brandAssetsPlugin copies in ITS closeBundle. It therefore cannot list itself,
  * which is stated in the file so nobody reads the omission as a bug.
  */
-function outputManifestPlugin() {
+function outputManifestPlugin(buildInfo) {
   let outDir = 'dist';
   let root = process.cwd();
   return {
@@ -962,6 +1010,11 @@ function outputManifestPlugin() {
         // with nothing installed yet. Older builds simply lack the field and
         // fall back to the worker-version comparison.
         coreVersion: corePkg.version,
+        // The overall release/build number (AB#7653) — see computeReleaseBuild
+        // above. Read by the worker's /api/admin/status so the portal can show
+        // it next to engineVersion; older builds lack this field and readers
+        // must treat it as optional.
+        releaseBuild: buildInfo.releaseBuild,
         note: 'Every file this build wrote, except this one. `brandOwned` marks the files that belong to the deployment rather than to the engine; an engine update replaces the others and leaves these alone.',
         files: Object.fromEntries(
           Object.entries(files).map(([path, meta]) => [path, isBrandOwnedOutput(path) ? { ...meta, brandOwned: true } : meta])

@@ -9,9 +9,13 @@
 // Postgres-shaped) seeded with equivalent data, and asserts the two
 // responses are field-for-field, type-for-type identical — not just the
 // pushSubscriptions count, the WHOLE shape (brand, engineVersion, bookCount,
-// chapterCount, pushSubscriptions). Note appName was removed from this
-// response earlier in this session (Admin.tsx now reads BRAND.appName
-// directly) — this test does not expect it back.
+// chapterCount, pushSubscriptions, release). Note appName was removed from
+// this response earlier in this session (Admin.tsx now reads BRAND.appName
+// directly) — this test does not expect it back. `release` (AB#7653) is
+// additive and, with no ASSETS binding in this test's fake env, comes back
+// with build/coreVersion null on both drivers alike — still asserted
+// byte-identical between them, which is the property this file exists to
+// guard.
 //
 // ── Why PGlite instead of a real standalone Postgres server ─────────────────
 //
@@ -229,12 +233,27 @@ test('GET /api/admin/status returns a byte-identical shape on D1 and on Postgres
   // Pin down the actual shape too, so a future change that alters BOTH
   // drivers identically (and would therefore still pass the deepEqual above)
   // still has to updated this test deliberately, not by accident.
-  assert.deepEqual(Object.keys(d1Json).sort(), ['bookCount', 'brand', 'chapterCount', 'engineVersion', 'pushSubscriptions']);
+  assert.deepEqual(Object.keys(d1Json).sort(), [
+    'bookCount',
+    'brand',
+    'chapterCount',
+    'engineVersion',
+    'pushSubscriptions',
+    'release',
+  ]);
   assert.equal(d1Json.brand, brand);
   assert.equal(typeof d1Json.engineVersion, 'string');
   assert.equal(d1Json.bookCount, 2);
   assert.equal(d1Json.chapterCount, 3);
   assert.equal(d1Json.pushSubscriptions, 3);
+
+  // release (AB#7653): no ASSETS binding in this fake env, so build/coreVersion
+  // stay null on both drivers — workerVersion always answers from the package.
+  assert.deepEqual(Object.keys(d1Json.release).sort(), ['build', 'coreVersion', 'workerVersion']);
+  assert.equal(d1Json.release.build, null);
+  assert.equal(d1Json.release.coreVersion, null);
+  assert.equal(typeof d1Json.release.workerVersion, 'string');
+  assert.equal(d1Json.release.workerVersion, d1Json.engineVersion);
 
   // Explicit type-for-type checks — the exact regression class this guards
   // against is a value coming back as the right number but the wrong JS
