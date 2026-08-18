@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { user, settings, saveSettings, manifest, pullPreferences } from '../lib/state';
-import type { ConsumptionMode, DownloadRecord } from '../lib/types';
+import type { ConsumptionMode, DownloadRecord, VoiceManifestEntry } from '../lib/types';
 import { api, ApiError, type AuthUser, type PasskeySummary } from '../lib/api';
-import { BRAND } from '../brand';
+import { BRAND, contentUrl } from '../brand';
 import { NOUNS, PRESENTATION } from '../presentation';
 import { BUILD } from '../version';
 import { navigate } from '../router';
@@ -57,25 +57,81 @@ export function Settings(): JSX.Element {
  * is the brand's choice about its own UI, the voice count is a fact about the
  * content, and neither implies the other.
  */
+/**
+ * Normalizes one `LibraryManifest.voices` entry to `{ name, sampleUrl? }`.
+ *
+ * A manifest published before AB#7389 carries a plain display-name string
+ * there; one published since carries the richer object. Both are live at
+ * once (older manifests are never rewritten), so every reader of the map
+ * goes through this rather than assuming either shape.
+ */
+function voiceEntry(entry: string | VoiceManifestEntry | undefined): VoiceManifestEntry {
+  if (typeof entry === 'string') return { name: entry };
+  return entry ?? { name: '' };
+}
+
+/**
+ * The in-flight preview `<audio>`, module-scoped rather than component state:
+ * a preview started from one render of `VoicePreviewButton` has to be
+ * stoppable by a later render of the SAME button (a different voice
+ * selected, which unmounts/remounts it) without either holding a stale
+ * closure over the other's element. Never touches `settings.narratorVoice`
+ * or the main player (`packages/core/src/lib/player.ts`) — this is a
+ * throwaway element the saved setting and now-playing state never see.
+ */
+let activeVoicePreview: HTMLAudioElement | null = null;
+
+function VoicePreviewButton({ sampleUrl }: { sampleUrl: string }): JSX.Element {
+  return (
+    <button
+      type="button"
+      class="btn-ghost settings-voice-preview"
+      aria-label="Preview voice"
+      onClick={() => {
+        activeVoicePreview?.pause();
+        const audio = new Audio(contentUrl(sampleUrl));
+        activeVoicePreview = audio;
+        void audio.play().catch(() => {});
+      }}
+    >
+      ▶
+    </button>
+  );
+}
+
+/**
+ * Narrator voice choice — only rendered when the deployment offers it AND the
+ * library publishes 2+ voices. Both conditions, not either: `settings.narrator`
+ * is the brand's choice about its own UI, the voice count is a fact about the
+ * content, and neither implies the other.
+ */
 function NarratorPicker(): JSX.Element | null {
   if (!PRESENTATION.settings.narrator) return null;
   const voices = manifest.value?.voices;
   if (!voices || Object.keys(voices).length < 2) return null;
+  const selectedId = settings.value.narratorVoice;
+  // '' ("Default") has no entry of its own in `voices` — the library doesn't
+  // say which published voice a listener with no preference ends up hearing,
+  // so there is nothing here to preview until a specific voice is chosen.
+  const selectedSampleUrl = selectedId ? voiceEntry(voices[selectedId]).sampleUrl : undefined;
   return (
     <>
       <label class="settings-row">
         <span>Narrator</span>
-        <select
-          value={settings.value.narratorVoice}
-          onChange={(e) => void saveSettings({ narratorVoice: (e.target as HTMLSelectElement).value })}
-        >
-          <option value="">Default</option>
-          {Object.entries(voices).map(([id, name]) => (
-            <option key={id} value={id}>
-              {name}
-            </option>
-          ))}
-        </select>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <select
+            value={selectedId}
+            onChange={(e) => void saveSettings({ narratorVoice: (e.target as HTMLSelectElement).value })}
+          >
+            <option value="">Default</option>
+            {Object.entries(voices).map(([id, entry]) => (
+              <option key={id} value={id}>
+                {voiceEntry(entry).name}
+              </option>
+            ))}
+          </select>
+          {selectedSampleUrl && <VoicePreviewButton sampleUrl={selectedSampleUrl} />}
+        </span>
       </label>
       <p class="settings-note">
         Who reads to you. Takes effect the next time a {NOUNS.unit} starts playing; downloads

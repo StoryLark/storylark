@@ -215,9 +215,33 @@ export interface LibraryManifest {
   announceVersion?: number;
   generatedAt: string;
   books: BookEntry[];
-  /** Narrator voices available across the library: voice id → display name.
-   *  Absent/single-entry = no in-app voice choice (pre-voices manifests stay valid). */
-  voices?: Record<string, string>;
+  /**
+   * Narrator voices available across the library: voice id → display name
+   * (a manifest published before AB#7389), or voice id → { name, sampleUrl? }
+   * once the pipeline started publishing preview samples. Both shapes are
+   * valid at once — an older manifest's plain strings are never rewritten —
+   * so any reader of this map must handle either (see `voiceEntry()` in
+   * Settings.tsx). Absent/single-entry = no in-app voice choice (pre-voices
+   * manifests stay valid either way).
+   */
+  voices?: Record<string, string | VoiceManifestEntry>;
+}
+
+/**
+ * One voice's entry in `LibraryManifest.voices`, once a manifest carries more
+ * than a bare display name (AB#7389 — narrator voice preview samples).
+ */
+export interface VoiceManifestEntry {
+  name: string;
+  /**
+   * Relative content-root path (resolve with `contentUrl()`) to a short
+   * preview clip of this voice reading one fixed, brand-flavoured sentence —
+   * `samples/<voiceId>.mp3`. ADDITIVE (hard rule 6): absent when the pipeline
+   * hasn't (yet) synthesized a sample for this voice, in which case the
+   * NarratorPicker renders with no preview control for it, exactly as before
+   * this field existed.
+   */
+  sampleUrl?: string;
 }
 
 /** One narrator voice's audio + word timings for a chapter. */

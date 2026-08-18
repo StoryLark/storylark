@@ -76,6 +76,7 @@ import { resolveProvider } from './storage.mjs';
 import { contentHash } from './lib/md.mjs';
 import { describeChapterAudio, planChapterAudio, synthesizeChapterIncremental } from './lib/block-audio.mjs';
 import { reconstructPreviousFromLive, findLiveChapterEntry } from './lib/publish-core.mjs';
+import { sampleSentence, ensureVoiceSamples } from './lib/voice-samples.mjs';
 
 // The pipeline is site-agnostic: it runs from a site repo's root (cwd), which
 // owns brands/, content, and publish state. Nothing resolves relative to this
@@ -535,6 +536,34 @@ async function main() {
     }
   }
 
+  // ---- Voice preview samples: one short sample per published voice (AB#7389) ----
+  //
+  // Independent of chapter narration and of --manifest-only — a sample, once
+  // synthesized, never needs re-publishing chapters to stay valid, and
+  // ensureVoiceSamples() is itself state-driven (skips a voice whose sentence
+  // hash is unchanged), so a manifest-only run after samples already exist
+  // just re-reads the same paths at effectively no cost. Gated on whether
+  // there is a narrator choice to preview at all (EXTRA_VOICES.length > 0,
+  // the same condition that puts `voices` on the manifest below) and on
+  // whether this run does TTS at all (--no-audio skips every kind of
+  // narration, samples included) and isn't a dry run (which synthesizes
+  // nothing).
+  let sampleUrls = {};
+  if (!args['no-audio'] && !args['dry-run'] && EXTRA_VOICES.length > 0) {
+    const presentationFile = join(ROOT, 'presentation', brandId, 'presentation.json');
+    const nouns = existsSync(presentationFile) ? JSON.parse(await readFile(presentationFile, 'utf8')).nouns : undefined;
+    const sentence = sampleSentence(nouns);
+    sampleUrls = await ensureVoiceSamples({
+      voices: ALL_VOICES,
+      sentence,
+      workDir: join(workRoot, 'samples'),
+      state,
+      upload: (localFile, path) => putAudio(bucket, path, localFile),
+      onProgress: (voice) => console.log(`Voice sample (${voice}): "${sentence}"`),
+    });
+    await writeFile(stateFile, JSON.stringify(state, null, 2));
+  }
+
   // ---- 4b. Source markdown: the deployment stores what it was built from ----
   //
   // This is the change that unblocks portal editing (plan §3 / AB#7420). Until
@@ -925,10 +954,14 @@ async function main() {
     // this, while libraryVersion above only governs re-fetching.
     announceVersion: newVersion,
     generatedAt: new Date().toISOString(),
-    // Narrator choices the app's Settings picker offers (id → display name).
+    // Narrator choices the app's Settings picker offers (id → { name,
+    // sampleUrl? } — AB#7389). `sampleUrls[v]` is absent when this run didn't
+    // (re)synthesize samples at all (e.g. --no-audio, or --dry-run never
+    // reaches here) — the entry still carries its name, so the picker itself
+    // still works, just without a preview button for that voice.
     voices:
       EXTRA_VOICES.length > 0
-        ? Object.fromEntries(ALL_VOICES.map((v) => [v, voiceDisplayName(v)]))
+        ? Object.fromEntries(ALL_VOICES.map((v) => [v, { name: voiceDisplayName(v), sampleUrl: sampleUrls[v] }]))
         : undefined,
     books: books.map(({ book, chapters }) => ({
       id: book.id,
