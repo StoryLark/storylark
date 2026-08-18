@@ -6,7 +6,10 @@ per brand, from the same codebase. This guide provisions a branded site on
 
 Full detail (env vars, publishing content, how the Azure path differs
 internally) lives in [`platforms/azure/README.md`](../platforms/azure/README.md)
-— this page is the quick path.
+— this page is the quick path. For the exhaustive reference — every binding,
+environment variable and secret the worker reads on either platform,
+migrations, cron triggers, and custom domains — see
+[`deploy-worker.md`](deploy-worker.md).
 
 ## What gets created
 

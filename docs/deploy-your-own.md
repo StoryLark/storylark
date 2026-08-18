@@ -4,6 +4,11 @@ StoryLark is built to be deployed **once per brand from the same codebase**: one
 Cloudflare Worker, one D1 database, one R2 bucket per brand. This guide stands up
 a new branded site end to end.
 
+> For the exhaustive reference — every binding, environment variable and secret
+> the worker reads on either platform, migrations, cron triggers, and custom
+> domains — see [`deploy-worker.md`](deploy-worker.md). This page is the
+> step-by-step walkthrough; that page is what to check when something's missing.
+
 > Everything below uses **placeholders** — `<your-...>`, `example.com`,
 > `00000000-...`. Never commit real account IDs, database IDs, domains, or
 > secrets. The base brand's `wrangler.jsonc` env ships with placeholder IDs on

@@ -22,6 +22,10 @@ the same codebase.
   deploy, and publish.
 - **[Deploy to Azure](deploy-azure.md)** — the same, on Azure App Service +
   PostgreSQL + Blob Storage, with a Bicep infrastructure template.
+- **[Deploy Worker Reference](deploy-worker.md)** — the exhaustive reference
+  behind the two walkthroughs above: every binding, environment variable and
+  secret the worker reads on either platform, migrations (both dialects),
+  cron triggers, and custom domains.
 
 ## Customize
 
@@ -65,6 +69,10 @@ the same codebase.
 - **[Updating](updating.md)** — how you take a new engine release, from the
   operator's chair: how you find out, the one command that does it, and what
   never changes.
+- **[Upgrading](upgrading.md)** — the deployer's side: how the packages
+  version (Changesets, linked vs. independent), what each release doc
+  covers, how a clone or `npm create storylark` site takes a release,
+  breaking-change policy, and how releases actually get published.
 
 ## Reference (design docs)
 

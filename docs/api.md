@@ -13,9 +13,11 @@ All mutating requests must send `X-Requested-With: storylark` (CSRF guard).
 |---|---|---|
 | `POST /api/auth/register` `{email, username, password}` | — | Primary sign-up path. Validates email format, username (3-20 chars `[a-z0-9_]`, case-insensitive unique), password (>= 8 chars). PBKDF2-SHA256 hash, 100,000 iterations, random salt. `400` on invalid input (`invalid_email`/`invalid_username`/`invalid_password`); `409` on a taken username/email (`username_taken`/`email_taken`); else creates the user (or attaches to an existing passwordless row with that email), session cookie, `201 {user}`. |
 | `POST /api/auth/login` `{identifier, password}` | — | Primary sign-in path. `identifier` matches email or username, case-insensitive. Any failure (bad input, unknown identifier, no password set, wrong password) returns the same `401 {error:'invalid_credentials'}` and never reveals which; a dummy PBKDF2 derive normalizes timing on the no-real-hash paths. Success: session cookie, `{ok:true, user}`. |
-| `POST /api/auth/magic/request` `{email}` | — | Dormant (no UI entry point). Rate-limited 3 per 15 min per email. Stores SHA-256 of a 32-byte token, emails the link via Resend. Always returns `{ok:true}` (no account enumeration). |
+| `POST /api/auth/password/forgot` `{email}` | — | Rate-limited 5 per 15 min per IP **and** 5 per 15 min per target email (an IP-rotating attacker can't bypass the limit by flooding one inbox from many IPs). Always returns `{ok:true}` — never reveals whether the email has an account, or whether that account has a password (a passwordless magic-link/Google/passkey-only account is a silent no-op, since there's nothing to reset). Caps outstanding resets at 4 live requests per user. Emails both a link token and a 6-digit code via Resend, sharing one `password_resets` row shape. |
+| `POST /api/auth/password/reset` `{token, password}` **or** `{email, code, password}` | — | Rate-limited 10 per 15 min per IP — a successful guess here hands over the account outright. Either credential works: the emailed link's `token`, or `email` + the 6-digit `code` from the same email. `400 {error:'invalid_password'}` under 8 chars; one generic `400 {error:'invalid_or_expired'}` for a bad/expired/already-used token or code (never says which). Success burns every outstanding reset for that user, sets the new password, session cookie, `{ok:true, user}`. |
+| `POST /api/auth/magic/request` `{email}` | — | Dormant (no UI entry point). Rate-limited 5 per 15 min per IP **and** 5 per 15 min per target email. Stores SHA-256 of a 32-byte token, emails the link via Resend. Always returns `{ok:true}` (no account enumeration). |
 | `GET /api/auth/magic/verify?token=` | — | Dormant. One-time redeem within 15 min → upsert user by email → session cookie → `302 /?auth=ok` (`expired`/`failed` otherwise). |
-| `POST /api/auth/code/verify` `{email, code}` | — | Dormant. Verifies the 6-digit code from the same email, in-page (sets the cookie in the calling context). `401 {error:'invalid_code'}` otherwise. |
+| `POST /api/auth/code/verify` `{email, code}` | — | Dormant. Rate-limited 10 per 15 min per IP — a successful guess signs the attacker in as that email outright. Verifies the 6-digit code from the same email, in-page (sets the cookie in the calling context). `401 {error:'invalid_code'}` otherwise. |
 | `GET /api/auth/google` | — | Dormant (no UI entry point yet). 302 to Google (code flow + PKCE, signed 10-min state). |
 | `GET /api/auth/google/callback` | — | Server-side code exchange; verifies `aud` + verified email; links by email; cookie; `302 /?auth=ok`. |
 | `POST /api/auth/logout` | cookie | Deletes the session row, clears the cookie. |
@@ -37,7 +39,7 @@ place, so it's unauthenticated by definition.
 | `GET /api/auth/passkey/list` | cookie | `{passkeys:[{id,label,createdAt,lastUsedAt}]}` for the signed-in user. |
 | `DELETE /api/auth/passkey/:credentialId` | cookie | Owner-scoped delete. |
 
-## Progress & bookmarks
+## Progress, bookmarks & preferences
 
 | Method & path | Auth | Behavior |
 |---|---|---|
@@ -46,6 +48,8 @@ place, so it's unauthenticated by definition.
 | `GET /api/bookmarks?bookId=` | cookie | List (optionally filtered). |
 | `POST /api/bookmarks` | cookie | `{bookId, chapterId, blockId, charOffset?, note?}` → `{id}`. |
 | `DELETE /api/bookmarks/:id` | cookie | Owner-scoped delete. |
+| `GET /api/preferences` | cookie | `{prefs, updatedAt}` — the account-synced JSON blob (default playback mode, read-along, theme, font scale, line height). `prefs: {}` and `updatedAt: null` when nothing has been saved yet. |
+| `PUT /api/preferences` | cookie | Body `{prefs, updatedAt?}` → `{ok:true}`. Same **last-writer-wins** shape as progress (`WHERE excluded.updated_at > user_preferences.updated_at`), so offline edits and races across devices converge on the newest state. `updatedAt` defaults to the server's own clock if omitted. Requires the CSRF header. |
 
 ## Push & library
 
@@ -66,7 +70,10 @@ where no browser can be involved. See [`admin-guide.md`](admin-guide.md).
 | Method & path | Auth | Behavior |
 |---|---|---|
 | `GET /api/admin/status` | admin session | Brand, engine version, book/chapter counts (from the public manifest), push subscriber count. |
-| `GET /api/admin/update-status` | admin session | `{current, latest, hasUpdate, releaseNotesUrl, platform, updateCommand, updateDocsUrl}`. `current` is the deployment's own installed `storylark-worker` version; `latest` is an unauthenticated read of the npm registry. `updateCommand` is the installer command the *operator* runs on their own machine — there is no install endpoint, by design (see [`updating.md`](updating.md)). |
+| `GET /api/admin/update-status` | admin session | `{current, latest, hasUpdate, releaseNotesUrl, platform, updateCommand, updateDocsUrl, release:{coreLatest,coreCurrent,workerLatest,workerCurrent,serverChanged}, updateNow:{available,mechanism?,reason?}, engine:{storeAvailable,active,versions,versionLimit}, oneClick}`. `current`/`latest` compare `storylark-worker` versions; `release` also compares `storylark-core` (the engine), since the two version independently under Changesets. `updateNow.mechanism` is `"engine-store"` (no credential, every platform) or `"platform-deploy"` (needs the self-deploy permission the installer provisions); `available:false` only when the worker itself changed and no self-deploy permission exists. `updateCommand` is the installer command the *operator* runs on their own machine — the floor that always works (see [`upgrading.md`](upgrading.md) and [`updating.md`](updating.md)). |
+| `POST /api/admin/update-install` | admin session **only** — deliberately not `X-Admin-Key` | `{version?}` (defaults to the latest `storylark-core` release) → downloads and checksum-verifies the prebuilt engine artifact, rejects one carrying any brand file, migrates the database, then installs through the engine store (no redeploy) or the platform deployer (if the release changed `storylark-worker` itself). `{ok, installed, workerVersion, mechanism:"engine-store"\|"platform-deploy", sha256, releaseUrl, log[]}`. `501 self_update_off` when the mechanism needed is unavailable; `502 deploy_failed`/`check_failed`; `502` (or `404 no_release`) `EngineReleaseError`; `502 invalid_package` for a package that fails its own checksums or carries a brand file. Every failure before the migrate/install step is a pure no-op. Full mechanism: [`upgrading.md`](upgrading.md) and [`design/update-flow.md`](design/update-flow.md). |
+| `POST /api/admin/engine/versions/:versionId/activate` | admin session | One-click engine rollback — re-points the site at a version already in the installed-engine history (last 5 kept). `{ok, version, active:{versionId,coreVersion,workerVersion}}`. `404 no_such_version` once one has aged out. |
+| `DELETE /api/admin/engine/active` | admin session | Stops overriding the build; serves whatever engine the deployment was built with. `{ok:true, active:null}`. History is untouched. |
 | `POST /api/admin/publish-story` | admin session | Commits `content/books/<id>.md` via the GitHub Contents API, then dispatches `publish.yml`. |
 | `POST /api/admin/publish` | `X-Admin-Key` **or** admin session | `{version}` → updates `library_state`, fans out **payload-less** VAPID pushes in batches of 50 (`ctx.waitUntil`). 404/410 endpoints deleted; 5 consecutive failures deletes. Called by `packages/pipeline/publish.mjs` as its final step — headless CI, hence the key door. |
 | `POST /api/admin/setup` | `X-Admin-Key` header | One-shot schema bootstrap. Key-gated because it runs before any user can exist. |
@@ -90,6 +97,7 @@ explanation. Design: [`design/admin-content-editing.md`](design/admin-content-ed
 | `PUT /api/admin/content/books/:bookId/chapters/:chapterId` | `{markdown, correction?}` → writes the source, re-parses, writes a new content-hashed chapter JSON, appends a revision, rewrites the manifest, records the publish. `correction` defaults to `true` for an existing chapter and `false` for a new one. Returns `{ok,created,contentHash,wordCount,readingTime,blocks,audioStale,libraryVersion,announceVersion,correction,revision,revisionCount,notified:{version,announced,subscriptions}}`. `422` when the content gate rejects it — before anything is written. `error` is the gate's stable code, `message` its prose, and `errors[]` the full structured list; the same input rejected through the public content API returns the identical codes and messages. |
 | `DELETE /api/admin/content/books/:bookId/chapters/:chapterId` | Removes the manifest entry. The content-hashed objects, the source and the history stay, so this is recoverable. |
 | `PUT /api/admin/content/books/:bookId` | `{title?, author?, description?}` → book-level metadata. Never announces. |
+| `PUT /api/admin/content/books/:bookId/chapter-order` | `{order}` — an array of every chapter id in the book, in the desired order → `{ok, order, libraryVersion}`. `409 order_mismatch` if `order` doesn't name exactly the book's current chapters. Never announces (rearranging the table of contents isn't new writing); `libraryVersion` still moves so readers re-fetch. |
 | `POST /api/admin/content/preview` | `{markdown}` → `{title,label,blocks,wordCount,charLength,readingTime,problem}`. The editor's live preview, parsed by the same code that publishes rather than by a second markdown implementation in the browser. Writes nothing. |
 | `GET /api/admin/content/books/:bookId/chapters/:chapterId/download` | The current markdown as `text/markdown` with a `Content-Disposition` attachment — the mirror of upload. |
 | `GET /api/admin/content/books/:bookId/chapters/:chapterId/revisions` | `{revisions:[{id,savedAt,savedBy,bytes,live,correction,revertedFrom?}], revisionLimit}`, newest first. |
@@ -155,6 +163,7 @@ editing needs; without one every route answers `501 {"error":"no_content_store"}
 | `GET /api/admin/themes/versions/:versionId/package` | That version, rebuilt as a downloadable `.storylark-theme.zip` — including a version the portal FORM produced, which never had an archive. |
 | `DELETE /api/admin/themes/active` | Stop overriding; wear the build's brand again. The version history is untouched. |
 | `PUT /api/admin/themes/brand` | The portal's brand form. A whole `brand.json` body, validated against the schema in **strict** mode, saved as a new version that inherits the live stylesheet, icons and presentation. |
+| `PUT /api/admin/themes/presentation` | `{presentation, brand?}` — the portal's presentation form, saved as a new theme version. `brand` is optional and used only when nothing is installed yet (writing an active theme with no brand would otherwise blank the live identity, since serving takes the installed brand *instead of* `dist/brand.json` rather than merging). `400 invalid_presentation` with `errors[]`/`warnings[]` on a bad shape. |
 
 **Rejection is `422 invalid_package`**, not 400: the request is a well-formed
 upload of a real file, and what failed is that file's contents against the
@@ -191,6 +200,33 @@ platform's own reason and the command that does.
 
 Narration is never an announcement: a completion moves `libraryVersion` (so
 readers re-fetch and hear it) and never `announceVersion`.
+
+## Admin — connections (content source & scoped tokens)
+
+The portal's **Connections** section (content-management rework wave 2). Every
+route is admin-session gated (no `X-Admin-Key` door — configuring where content
+comes from is an operator at a browser, never a headless process). `501
+{"error":"unavailable", ...}` on every route when the database predates
+migration 0009. Design and the three-way choice of content source:
+[`content-sync.md`](content-sync.md).
+
+| Method & path | Behavior |
+|---|---|
+| `GET /api/admin/content-source` | `{available, mode, repo, providers[], credential, webhook:{configured,url}, sync:{running,lastSyncAt,lastReport,schedule}}`. `mode` is `portal`, `repo` or `api`. `credential` is `"platform-secret"` (the `CONTENT_SYNC_TOKEN` secret), `"stored"` (entered in the form) or `null` — never the token's value. |
+| `PUT /api/admin/content-source` | `{mode, repo?, token?}`. Switching to `portal`/`api` only changes what the create buttons do (the repo connection, token and webhook are kept). Switching to `repo` **dry-runs the connection first** (fetch, unpack, validate every candidate) and refuses to save if anything fails: `422 repo_invalid` (with the full `report`), `422 repo_empty` (nothing under the path carries a `storylark:` block), `422 credential_required` (a private repo with no token available). `409 sync_running` if a sync is already in flight. Success → `{ok, mode, repo, report}`. The token, if sent, is stored separately and never echoed — `repo.token`/`.password`/`.secret`/`.accessToken` inline are rejected outright. |
+| `POST /api/admin/content-source/dry-run` | `{repo?, token?}` → judges a connection (or the currently saved one) without saving or writing anything. `{ok, report}`. |
+| `POST /api/admin/content-source/sync` | Sync now — the same job the daily cron (`0 13 * * *`) runs. A sync already running is attached to rather than duplicated: `{ok:true, attached:true, message, runningSince}`. Otherwise `{ok, report}`. |
+| `POST /api/admin/content-source/remove-missing` | `{chapters:[{bookId,chapterId}]}` → the ordinary recoverable delete (manifest entry only; source, objects and history stay), restricted to chapters the **last sync report** actually flagged `missing`. `409 not_flagged` for anything else — this route cannot be used as a general-purpose delete. `{ok, removed[], libraryVersion}`. |
+| `POST /api/admin/content-source/webhook-secret` | Generates (or rotates) the webhook signing secret → `{ok, secret, url, message}`. The plaintext `secret` is shown **once**, in this response. Rotating immediately invalidates the previous secret. |
+| `DELETE /api/admin/content-source/webhook-secret` | Clears the webhook secret. `{ok:true}`. |
+| `GET /api/admin/content-tokens` | `{available, tokens:[{id,name,createdAt,createdBy,lastUsedAt,revoked}]}` — never the token values, only their metadata. |
+| `POST /api/admin/content-tokens` | `{name}` → mints a scoped content-API-only token (`sct_…`) → `{ok, id, name, token, message}`. `token` is shown **once**. This is the credential to hand a third-party CMS — never `ADMIN_KEY`, which also mints admin setup links; a scoped token authenticates the content API only (`Authorization: Bearer sct_…`) and nothing else. |
+| `DELETE /api/admin/content-tokens/:id` | Revokes a token immediately (takes effect on its next request). `404 not_found` for an id that's already revoked or doesn't exist. |
+
+`POST /api/content/v1/sync/webhook` (the actual push trigger a repo host calls)
+is on the content API's own prefix and authenticated by the provider's payload
+signature, not a session or key — see the content API section below and
+[`content-sync.md`](content-sync.md).
 
 ## The content API — the public push contract
 
