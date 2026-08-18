@@ -31,14 +31,20 @@
  * of the current file, an insert-image action so nobody types a URL by hand,
  * and a revision history with one-click revert.
  *
- * ── Starting a book has two doors, one entry point (AB#7474 — plan item 11) ──
+ * ── Starting a book has three doors, one entry point (AB#7474 — plan item 11) ──
  * "New book/story" offers a choice: upload markdown (this screen, unchanged),
- * or connect a repo. The second option is the exact `RepoPanel` from
- * `ConnectionsSection` rendered here rather than copied — a git-connected
- * source is a library-wide setting, not a per-book one, so it goes through the
- * same `/content-source` routes and the same dry-run/sync/webhook flow
- * wherever it is opened from. Connections itself is unchanged and stays the
- * place to manage a repo that's already connected.
+ * connect a repo, or publish a single chapter via GitHub CI for narration.
+ * The repo option is the exact `RepoPanel` from `ConnectionsSection` rendered
+ * here rather than copied — a git-connected source is a library-wide setting,
+ * not a per-book one, so it goes through the same `/content-source` routes
+ * and the same dry-run/sync/webhook flow wherever it is opened from.
+ * Connections itself is unchanged and stays the place to manage a repo
+ * that's already connected. The narration option is the old top-level
+ * `PublishSection` from `Admin.tsx`, folded in here (not rebuilt) once it
+ * became a confusing second "GitHub" entry point sitting outside this flow —
+ * it is the ONLY way this deployment can generate narration on Cloudflare
+ * (a Worker can't run the TTS model), so it stays available, just through
+ * this one door instead of its own.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
@@ -377,7 +383,7 @@ function LibraryView({
   /** Which door the create panel is showing (plan item 11). `choose` is the
    *  picker itself; `upload` is today's form, unchanged; `repo` is the reused
    *  `RepoPanel`. */
-  const [createMode, setCreateMode] = useState<'choose' | 'upload' | 'repo'>('choose');
+  const [createMode, setCreateMode] = useState<'choose' | 'upload' | 'repo' | 'narrate'>('choose');
   const [newId, setNewId] = useState('');
   const [idTouched, setIdTouched] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -498,6 +504,9 @@ function LibraryView({
           <button class="btn-ghost" onClick={() => setCreateMode('repo')}>
             Connect a repo
           </button>
+          <button class="btn-ghost" onClick={() => setCreateMode('narrate')}>
+            Publish with narration (GitHub)
+          </button>
           <button type="button" class="btn-ghost" onClick={() => setCreating(false)}>
             Cancel
           </button>
@@ -505,6 +514,16 @@ function LibraryView({
       )}
       {creating && createMode === 'repo' && (
         <CreateFromRepo
+          onBack={() => setCreateMode('choose')}
+          onDone={() => {
+            setCreating(false);
+            setCreateMode('choose');
+            onChanged();
+          }}
+        />
+      )}
+      {creating && createMode === 'narrate' && (
+        <CreateWithNarration
           onBack={() => setCreateMode('choose')}
           onDone={() => {
             setCreating(false);
@@ -621,6 +640,83 @@ function CreateFromRepo({ onBack, onDone }: { onBack: () => void; onDone: () => 
         </button>
         <button type="button" class="btn" onClick={onDone}>
           Done — back to the library
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * "Publish with narration (GitHub)" — the third door into content creation.
+ * The only mechanism this deployment has for CI-generated narration: Workers
+ * can't run the TTS model, so this commits a single chapter straight to the
+ * site's own repo via `POST /publish-story`, which dispatches the real
+ * `publish.mjs` pipeline in GitHub Actions. Folded in here (2026-08-17) rather
+ * than left as its own top-level section — same "one way in" the repo-connect
+ * door already follows, just a third named door instead of a second.
+ */
+function CreateWithNarration({ onBack, onDone }: { onBack: () => void; onDone: () => void }): JSX.Element {
+  const [bookId, setBookId] = useState('');
+  const [title, setTitle] = useState('');
+  const [author, setAuthor] = useState('');
+  const [markdown, setMarkdown] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+
+  async function publish() {
+    setBusy(true);
+    setMessage('');
+    try {
+      const res = await adminFetch<{ message: string }>('/publish-story', {
+        method: 'POST',
+        body: JSON.stringify({ bookId, title, author, markdown }),
+      });
+      setMessage(res.message);
+      setBookId('');
+      setTitle('');
+      setAuthor('');
+      setMarkdown('');
+      onDone();
+    } catch (e) {
+      setMessage(errorText(e, 'Could not publish that story.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div class="admin-create-narrate">
+      <p class="settings-note">
+        This commits straight to your site's repo and publishes through CI — the only place this deployment can generate
+        narration. Text publishes right away; narration depends on whether this deployment has TTS credentials configured
+        in CI, reported honestly in the message below once it runs.
+      </p>
+      <label class="settings-row">
+        <span>Book id</span>
+        <input placeholder="my-story" value={bookId} onInput={(e) => setBookId((e.target as HTMLInputElement).value)} />
+      </label>
+      <label class="settings-row">
+        <span>Title</span>
+        <input value={title} onInput={(e) => setTitle((e.target as HTMLInputElement).value)} />
+      </label>
+      <label class="settings-row">
+        <span>Author</span>
+        <input value={author} onInput={(e) => setAuthor((e.target as HTMLInputElement).value)} />
+      </label>
+      <textarea
+        class="admin-markdown-input"
+        placeholder="Once upon a time..."
+        rows={10}
+        value={markdown}
+        onInput={(e) => setMarkdown((e.target as HTMLTextAreaElement).value)}
+      />
+      {message && <p class="settings-note">{message}</p>}
+      <div class="admin-editor-actions">
+        <button type="button" class="btn-ghost" onClick={onBack}>
+          ← Choose a different way
+        </button>
+        <button class="btn" onClick={() => void publish()} disabled={busy || !bookId || !title || !markdown}>
+          {busy ? 'Publishing…' : 'Publish'}
         </button>
       </div>
     </div>
