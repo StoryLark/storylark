@@ -111,10 +111,16 @@ console.log(`Staged ${staged.books} book(s), ${staged.chapters} chapter(s) → $
 
 if (flags['dry-run']) {
   console.log('--dry-run: staged only, nothing published.');
-  process.exit(0);
+  // Not process.exit(0): staging just did real async work (a git-clone child
+  // process, or an undici fetch for the feed connector), and exiting hard
+  // right after that crashes on Windows — "Assertion failed:
+  // !(handle->flags & UV_HANDLE_CLOSING), src\win\async.c:94" — turning a
+  // green dry-run into a reported failure in CI. Setting exitCode and letting
+  // the script fall off the end lets those handles drain instead.
+  process.exitCode = 0;
+} else {
+  await publish(staged.source, config);
 }
-
-await publish(staged.source, config);
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Configuration
