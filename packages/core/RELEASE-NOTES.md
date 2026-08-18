@@ -14,6 +14,135 @@
 
 # Release notes
 
+## 0.18.0 (preview)
+
+Bring your own repo, and updates that never ask you to redeploy.
+
+- **Sync your content from a git repo** — connect a GitHub repository under Connections and
+  StoryLark keeps a read-only copy: a webhook syncs new commits automatically, a daily pull
+  catches anything missed, and Sync now runs it on demand. A chapter missing from the repo is
+  flagged, never silently deleted
+- **One content gate for every way content arrives** — the admin portal, the public content API,
+  and a repo sync all validate the same markdown rules now, so a chapter is either good
+  everywhere or rejected everywhere with the same clear error
+- **Scoped tokens for the content API** — issue a token that can only push content, see when it
+  was last used, and revoke it without touching anyone else's access
+- **Per-book layout, automatically** — a single-chapter book now opens straight into its text;
+  a multi-chapter book keeps its chapter list, no configuration needed
+- **"Update now" works the same on every platform** — a release that only changes the engine
+  installs itself in place with an automatic rollback list, no build running anywhere; Cloudflare
+  deployments can now set this up from a plain `wrangler login`, with no token to paste by hand
+- New Cloudflare deployments no longer need a custom domain or DNS work before content loads
+
+## 0.17.0 (preview)
+
+Pick a look, or pin one for everyone.
+
+- **Reader-choosable themes** — Settings now offers a choice among the gallery's sample themes as
+  a visual look, on top of your library's own brand. Switch anytime; light and dark still work
+  inside whichever look you pick
+- **Force a theme for every reader** — from the admin portal's **Brand & themes** card, pin one
+  look for the whole library if you'd rather everyone see the theme you designed. It overrides
+  any reader's own choice until you turn it off
+- Narration job cards now show real processing time, not just the finished audio's length
+
+## 0.16.0 (preview)
+
+Push content in from your own system, and let a worker handle the narrating.
+
+- **A public content API** (`/api/content/v1`) — a documented, versioned HTTP contract for
+  connecting your own CMS or publishing system to StoryLark directly, without going through the
+  admin portal or the CLI: push a single chapter, a whole book, or import a zip/batch of many
+  books at once for onboarding a whole catalogue in one go
+- **A bulk narration queue** — text pushed through the admin portal, the content API, or a bulk
+  import is queued for narration and picked up by a worker you run wherever you already publish
+  from, with real per-job progress and a time estimate once anything has completed
+- **Re-narration is per block, not per chapter** — editing one paragraph re-synthesizes just that
+  paragraph; the rest of a chapter's audio is reused unchanged, and costs nothing against a
+  metered voice's character budget
+- **Reorder chapters from the admin portal**, and a real safety net between it and the CLI: a
+  publish or a portal save that would overwrite someone else's more recent edit is refused
+  instead of silently applied
+
+## 0.15.0 (preview)
+
+An optional button that installs updates for you.
+
+- **One-click updates, opt-in** — turn it on and `/admin` gets an **Install update** button:
+  download a checksum-verified prebuilt engine, apply migrations, and redeploy, with no build
+  running anywhere. Off by default, per deployment, and one command turns it back off
+- Every release now publishes a build artifact containing the whole engine and none of anyone's
+  brand, so the same download is correct for every StoryLark deployment on a given version
+
+## 0.14.0 (preview)
+
+Install a whole look with one file.
+
+- **Theme packages** — a theme now travels as a single `.storylark-theme.zip`. Install one from
+  the admin portal's new **Brand & themes** card or from the CLI, with full validation before
+  anything changes on your live site, five-version history, and one-click rollback
+- The same card lets you edit your brand's own details — name, tagline, colors, fonts — with no
+  package involved at all, and download any version you've installed as a package to move it
+  somewhere else
+
+## 0.13.0 (preview)
+
+Bring your own source of truth.
+
+- **Sync a library in** from a git repository of markdown, or your own system's small JSON feed,
+  instead of publishing by hand. StoryLark keeps a read-only copy and always defers edits to
+  wherever the content actually lives
+- Every book and chapter now records where it came from, so the CLI, the admin portal, and a
+  sync can no longer quietly fight over who owns an edit
+
+## 0.12.0 (preview)
+
+Edit a published story from your phone.
+
+- **The admin portal can now open and edit any already-published chapter** — a plain markdown
+  editor with a live preview, upload or download the `.md` directly, insert an image at your
+  cursor, and five-version history with one-click revert
+- **Corrections vs. publications** — flag an edit as a correction and readers get the fixed text
+  without a notification; leave it unflagged for genuinely new writing and it announces as
+  before
+
+## 0.11.0 (preview)
+
+Rearrange your app without a rebuild.
+
+- How your library is arranged — the tab bar, Home's sections, library sorting, the reader's
+  default mode, and more — is now a file your deployment serves and re-reads on every request,
+  the same way your brand already does. Change it and the next page load reflects it, no rebuild
+
+## 0.10.0 (preview)
+
+Your brand goes live the moment you change it.
+
+- **`brand.json` and `theme.css` now ship as real files your deployment reads on every
+  request**, not compiled into the JavaScript. Swap either one on a live site and the next page
+  load has the new name, colors, or fonts — no rebuild, no redeploy of the app itself
+- A curated set of fonts ships with every build, so switching typeface is a one-line edit instead
+  of a rebuild
+
+## 0.9.0 (preview)
+
+Three files instead of one.
+
+- **`brand.json` used to carry your identity, your library's shape, and your server addresses
+  all in one place.** They're now three separate files — `brand.json` (identity), a
+  presentation file (shape), and a deployment file (addresses and keys) — so a brand can move
+  between deployments without dragging one install's server addresses along with it.
+  `npm run migrate-brand` converts an older single-file brand automatically, and an unmigrated
+  one keeps working with a warning
+
+## 0.8.0 (preview)
+
+Real accounts for the people running a site.
+
+- **The admin portal now signs operators in with a normal email and password** instead of a
+  shared key typed into the browser. A one-time setup link and ten printed recovery codes at
+  deploy time mean you're never locked out with no way back in
+
 ## 0.7.0 (preview)
 
 Runs anywhere, updates itself, and you can manage it from your phone.
