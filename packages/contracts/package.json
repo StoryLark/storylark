@@ -1,6 +1,6 @@
 {
   "name": "storylark-contracts",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "StoryLark's file contracts — the brand/presentation/deployment JSON Schemas, their validator, the theme-package format and a dependency-free zip codec. Shared by the build, the packaging CLI and the deployment's import endpoint so all three agree.",
   "license": "MIT",
   "type": "module",

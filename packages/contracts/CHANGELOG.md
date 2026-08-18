@@ -1,5 +1,26 @@
 # storylark-contracts
 
+## 0.5.1
+
+### Patch Changes
+
+- [#12](https://github.com/StoryLark/storylark/pull/12) [`b8f2754`](https://github.com/StoryLark/storylark/commit/b8f27549307a784727349196c76e10e66d2f54b8) Thanks [@hcs-platform-app](https://github.com/apps/hcs-platform-app)! - Make npm-create the safe publisher default: install and lock all three
+  StoryLark packages, record project provenance, verify before deployment, and
+  ship read-only local/live diagnostics. Support existing Cloudflare resource
+  names without changing brand identity.
+
+  Treat repository validation as an atomic gate, report duplicate book
+  declarations, and preserve narration/timing/voice metadata on no-op syncs.
+  Add explicit matching-only adoption for existing live libraries: complete
+  chapter, rendered-content, metadata, order, and cover parity is required before
+  ownership can move to repo sync, while narration and content objects remain
+  untouched. Read GitHub repositories path-first, batch authenticated Markdown
+  reads to stay within the Workers Free subrequest budget, preserve legacy
+  single-story chapter ids, and keep root-relative artwork hash-compatible with
+  the publish pipeline.
+  Update demo content and deployment documentation for both standalone stories
+  and multi-chapter books, and move Sharp to its patched release.
+
 ## 0.5.0
 
 ### Minor Changes
