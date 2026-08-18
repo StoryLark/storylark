@@ -503,9 +503,10 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
       <StatusSection status={status} />
       {/* Content management (AB#7420/AB#7421 — plan §3): list → open → edit →
           save → republish, against the source markdown the deployment now
-          stores for itself. The GitHub-backed PublishSection below it is a
-          different, narrower path and stays — see the note on its own
-          component. */}
+          stores for itself. Book creation offers both an upload path and a
+          repo-connect path from here (AB#7474) — this is the one entry
+          point for getting content in, replacing the old separate
+          GitHub-publish form. */}
       <ContentSection />
       {/* Connections (wave 2 — AB#7420): the content-source choice, the repo
           connection with its dry-run gate, sync status + report, the push
@@ -524,7 +525,6 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }): JSX.Element {
       <NarrationSection />
       <ThemeSection />
       <UpdateSection updateStatus={updateStatus} onCheck={refresh} />
-      <PublishSection onPublished={refresh} />
     </div>
   );
 }
@@ -807,76 +807,3 @@ function UpdateSection({
   );
 }
 
-/**
- * Publish a new single-chapter story through the site's GitHub repo
- * (docs/design/admin-publish.md). Kept alongside the content manager above
- * rather than replaced by it, because it does one thing that path cannot: CI
- * can run the TTS model, so a story published here comes back narrated. The
- * content manager edits any chapter of any book instantly and needs no GitHub
- * at all, but a Worker can't generate speech — see plan §3's honest constraint.
- */
-function PublishSection({ onPublished }: { onPublished: () => void }): JSX.Element {
-  const [bookId, setBookId] = useState('');
-  const [title, setTitle] = useState('');
-  const [author, setAuthor] = useState('');
-  const [markdown, setMarkdown] = useState('');
-  const [publishing, setPublishing] = useState(false);
-  const [message, setMessage] = useState('');
-
-  async function publish() {
-    setPublishing(true);
-    setMessage('');
-    try {
-      const res = await adminFetch<{ message: string }>('/publish-story', {
-        method: 'POST',
-        body: JSON.stringify({ bookId, title, author, markdown }),
-      });
-      setMessage(res.message);
-      setBookId('');
-      setTitle('');
-      setAuthor('');
-      setMarkdown('');
-      onPublished();
-    } catch (e) {
-      setMessage(errorText(e, 'Could not publish that story.'));
-    } finally {
-      setPublishing(false);
-    }
-  }
-
-  return (
-    <section class="settings-section">
-      <h2>Publish a story via GitHub</h2>
-      <p class="settings-note">
-        A second way in, separate from the <strong>{'Stories'}</strong> list above: this commits straight to your site's repo
-        and publishes through CI, which is the only place this deployment can generate narration. Use the list above to edit
-        instantly with no GitHub round trip — text publishes right away either way, but a story started there has no audio
-        until something narrates it. Text publishes immediately here too; narration depends on whether this deployment has TTS
-        credentials configured in CI — check the message after publishing.
-      </p>
-      <label class="settings-row">
-        <span>Book id</span>
-        <input placeholder="my-story" value={bookId} onInput={(e) => setBookId((e.target as HTMLInputElement).value)} />
-      </label>
-      <label class="settings-row">
-        <span>Title</span>
-        <input value={title} onInput={(e) => setTitle((e.target as HTMLInputElement).value)} />
-      </label>
-      <label class="settings-row">
-        <span>Author</span>
-        <input value={author} onInput={(e) => setAuthor((e.target as HTMLInputElement).value)} />
-      </label>
-      <textarea
-        class="admin-markdown-input"
-        placeholder="Once upon a time..."
-        rows={10}
-        value={markdown}
-        onInput={(e) => setMarkdown((e.target as HTMLTextAreaElement).value)}
-      />
-      <button class="btn" onClick={publish} disabled={publishing || !bookId || !title || !markdown}>
-        {publishing ? 'Publishing…' : 'Publish'}
-      </button>
-      {message && <p class="settings-note">{message}</p>}
-    </section>
-  );
-}
