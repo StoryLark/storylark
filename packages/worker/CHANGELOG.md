@@ -1,5 +1,15 @@
 # storylark-worker
 
+## 0.19.0
+
+### Minor Changes
+
+- [`9f666b0`](https://github.com/StoryLark/storylark/commit/9f666b02b59e8e2f0a017d754306bac5a194922f) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - Add an overall release build number (`YYMM.BUILD.PATCH`, derived from git history at build time) alongside each package's own semver, shown on both the reader About screen and the admin portal's System page. The admin view shows the app bundle's release and the worker's reported release independently, so a deploy that lands ahead of or behind a release is visible instead of silently confusing (AB#7653).
+
+### Patch Changes
+
+- [`9f666b0`](https://github.com/StoryLark/storylark/commit/9f666b02b59e8e2f0a017d754306bac5a194922f) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - Close two authentication endpoints that had no rate limiting on a guessable 6-digit code (`/api/auth/password/reset`, `/api/auth/code/verify`) — either could previously be brute-forced with no throttle. Also add per-email-address rate limits to `/password/forgot` and `/magic/request`, on top of the existing per-IP limits, to stop an IP-rotating caller from mail-bombing one address (AB#7391).
+
 ## 0.18.0
 
 ### Minor Changes

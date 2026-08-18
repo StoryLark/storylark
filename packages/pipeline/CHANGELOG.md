@@ -1,5 +1,19 @@
 # storylark-pipeline
 
+## 0.19.0
+
+### Minor Changes
+
+- [`9f666b0`](https://github.com/StoryLark/storylark/commit/9f666b02b59e8e2f0a017d754306bac5a194922f) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - Add per-voice preview samples to the narrator picker in Settings: publish now synthesizes a short sample sentence per curated voice (skipped when it already exists, like chapter audio) and the picker gets a preview button that plays it — so choosing a narrator is no longer a blind pick. Additive: manifests without samples render the picker exactly as before, with no button and no errors (AB#7389).
+
+### Patch Changes
+
+- [`9f666b0`](https://github.com/StoryLark/storylark/commit/9f666b02b59e8e2f0a017d754306bac5a194922f) Thanks [@kristopherjturner](https://github.com/kristopherjturner)! - Fix three real bugs in the CLI publish path found via production CI failures (AB#7654):
+
+  - A fresh runner with no local publish state no longer reports already-published chapters as false conflicts — the baseline is now reconstructed from the live manifest and chapter content when local state is missing.
+  - `--no-audio` no longer strips existing narration metadata (audio/timings/voices/hasAudio) from already-narrated chapters on a stateless run; it now means "upload no new audio," never "delete existing narration."
+  - Fixed a Windows-only crash (`UV_HANDLE_CLOSING` assertion) that could make a clean `--dry-run` report a CI failure.
+
 ## 0.16.0
 
 ### Minor Changes
