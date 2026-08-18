@@ -31,13 +31,15 @@
  * of the current file, an insert-image action so nobody types a URL by hand,
  * and a revision history with one-click revert.
  *
- * ── Starting a book has three doors, one entry point (AB#7474 — plan item 11) ──
+ * ── Starting a book has four doors, one entry point (AB#7474 — plan item 11) ──
  * "New book/story" offers a choice: upload markdown (this screen, unchanged),
- * connect a repo, or publish a single chapter via GitHub CI for narration.
- * The repo option is the exact `RepoPanel` from `ConnectionsSection` rendered
- * here rather than copied — a git-connected source is a library-wide setting,
- * not a per-book one, so it goes through the same `/content-source` routes
- * and the same dry-run/sync/webhook flow wherever it is opened from.
+ * connect a repo, hand a CMS/API a scoped token, or publish a single chapter
+ * via GitHub CI for narration. The repo option is the exact `RepoPanel` from
+ * `ConnectionsSection` rendered here rather than copied — a git-connected
+ * source is a library-wide setting, not a per-book one, so it goes through the
+ * same `/content-source` routes and the same dry-run/sync/webhook flow
+ * wherever it is opened from. The CMS/API option reuses `TokensPanel` from the
+ * same file for the same reason.
  * Connections itself is unchanged and stays the place to manage a repo
  * that's already connected. The narration option is the old top-level
  * `PublishSection` from `Admin.tsx`, folded in here (not rebuilt) once it
@@ -53,7 +55,7 @@ import { call, ApiError } from '../../lib/api';
 import type { Block, ContentOrigin, SyncSource } from '../../lib/types';
 import { BlockRenderer } from '../../reader/BlockRenderer';
 import { PRESENTATION } from '../../presentation';
-import { RepoPanel, type SourceState } from './ConnectionsSection';
+import { RepoPanel, TokensPanel, type SourceState } from './ConnectionsSection';
 
 function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return call<T>(`/admin${path}`, init);
@@ -383,7 +385,7 @@ function LibraryView({
   /** Which door the create panel is showing (plan item 11). `choose` is the
    *  picker itself; `upload` is today's form, unchanged; `repo` is the reused
    *  `RepoPanel`. */
-  const [createMode, setCreateMode] = useState<'choose' | 'upload' | 'repo' | 'narrate'>('choose');
+  const [createMode, setCreateMode] = useState<'choose' | 'upload' | 'repo' | 'api' | 'narrate'>('choose');
   const [newId, setNewId] = useState('');
   const [idTouched, setIdTouched] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -497,23 +499,41 @@ function LibraryView({
       </ul>
 
       {creating && createMode === 'choose' && (
-        <div class="admin-editor-actions" role="radiogroup" aria-label={`Start this ${noun} from`}>
-          <button class="btn" onClick={() => setCreateMode('upload')}>
-            Upload markdown
-          </button>
-          <button class="btn-ghost" onClick={() => setCreateMode('repo')}>
-            Connect a repo
-          </button>
-          <button class="btn-ghost" onClick={() => setCreateMode('narrate')}>
-            Publish with narration (GitHub)
-          </button>
+        <>
+          {/* The four doors into content — portal upload, connected repo,
+              CMS/API push, and CI narration publish (AB#7474). Cancel is
+              chrome, not a door. */}
+          <div class="admin-editor-actions" role="radiogroup" aria-label={`Start this ${noun} from`}>
+            <button class="btn" onClick={() => setCreateMode('upload')}>
+              Upload markdown
+            </button>
+            <button class="btn-ghost" onClick={() => setCreateMode('repo')}>
+              Connect a repo
+            </button>
+            <button class="btn-ghost" onClick={() => setCreateMode('api')}>
+              CMS / API
+            </button>
+            <button class="btn-ghost" onClick={() => setCreateMode('narrate')}>
+              Publish with narration (GitHub)
+            </button>
+          </div>
           <button type="button" class="btn-ghost" onClick={() => setCreating(false)}>
             Cancel
           </button>
-        </div>
+        </>
       )}
       {creating && createMode === 'repo' && (
         <CreateFromRepo
+          onBack={() => setCreateMode('choose')}
+          onDone={() => {
+            setCreating(false);
+            setCreateMode('choose');
+            onChanged();
+          }}
+        />
+      )}
+      {creating && createMode === 'api' && (
+        <CreateFromApi
           onBack={() => setCreateMode('choose')}
           onDone={() => {
             setCreating(false);
@@ -647,7 +667,36 @@ function CreateFromRepo({ onBack, onDone }: { onBack: () => void; onDone: () => 
 }
 
 /**
- * "Publish with narration (GitHub)" — the third door into content creation.
+ * "CMS / API" — the third door into content creation (AB#7474). A book that
+ * arrives this way is PUSHED by the operator's own system — a CMS, a release
+ * pipeline, a script — over the public content API. There is nothing to fill
+ * in here beyond credentials: the door's whole job is handing that system a
+ * scoped token (reusing the exact `TokensPanel` from Connections rather than
+ * a copy) and pointing at the API docs. The pushing system does the rest.
+ */
+function CreateFromApi({ onBack, onDone }: { onBack: () => void; onDone: () => void }): JSX.Element {
+  return (
+    <div class="admin-create-api">
+      <p class="settings-note">
+        Your own system — a CMS, a release pipeline, a script — pushes content in over the content API
+        (<code>/api/content/v1</code>). Mint it a scoped token below (never the admin key), point it at the API, and the
+        {' '}next push creates the book here. Endpoint reference: <code>docs/content-api.md</code> in the source repo.
+      </p>
+      <TokensPanel />
+      <div class="admin-editor-actions">
+        <button type="button" class="btn-ghost" onClick={onBack}>
+          ← Choose a different way
+        </button>
+        <button type="button" class="btn" onClick={onDone}>
+          Done — back to the library
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * "Publish with narration (GitHub)" — the fourth door into content creation.
  * The only mechanism this deployment has for CI-generated narration: Workers
  * can't run the TTS model, so this commits a single chapter straight to the
  * site's own repo via `POST /publish-story`, which dispatches the real

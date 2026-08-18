@@ -549,7 +549,7 @@ function SyncReportView({
   );
 }
 
-function TokensPanel(): JSX.Element {
+export function TokensPanel(): JSX.Element {
   const [tokens, setTokens] = useState<TokenRow[] | null>(null);
   const [available, setAvailable] = useState(true);
   const [name, setName] = useState('');
