@@ -13,8 +13,20 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { cp, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
+import { createRequire } from 'node:module';
 
 const run = promisify(execFile);
+const require = createRequire(import.meta.url);
+
+export function resolveWranglerCli() {
+  try {
+    return require.resolve('wrangler');
+  } catch {
+    throw new Error(
+      'The R2 publisher requires the local `wrangler` package. Run `npm install` in the publisher project before publishing or narrating.'
+    );
+  }
+}
 
 export async function putObject(bucket, key, file, contentType, cacheControl) {
   const localDir = process.env.STORYLARK_LOCAL_R2;
@@ -24,20 +36,19 @@ export async function putObject(bucket, key, file, contentType, cacheControl) {
     await cp(file, dest); // MIME/caching come from the serving layer by extension
     return;
   }
-  const win = process.platform === 'win32';
-  // With shell:true (required for wrangler.cmd on Windows), args containing
-  // spaces must be quoted by hand or the shell splits them.
-  const q = (s) => (win && /[\s,]/.test(s) ? `"${s}"` : s);
+  // Resolve the publisher project's installed Wrangler module instead of
+  // assuming node_modules/.bin happens to be on PATH. Direct `node ...`
+  // invocations in CI do not receive npm's temporary PATH augmentation.
   await run(
-    'wrangler',
+    process.execPath,
     [
-      'r2', 'object', 'put', q(`${bucket}/${key}`),
-      '--file', q(file),
-      '--content-type', q(contentType),
-      '--cache-control', q(cacheControl),
+      resolveWranglerCli(),
+      'r2', 'object', 'put', `${bucket}/${key}`,
+      '--file', file,
+      '--content-type', contentType,
+      '--cache-control', cacheControl,
       '--remote',
-    ],
-    { shell: win }
+    ]
   );
 }
 
