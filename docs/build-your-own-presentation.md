@@ -185,6 +185,21 @@ existed, so adding this file changes nothing until you change a value.
 | `about.links` | `[]` | extra `{ label, href }` links on the About screen |
 | `features.<name>` | `{}` | where each new engine feature appears |
 
+### Personal library order
+
+`library.defaultSort` remains the publisher's baseline. When `library.groupBy`
+is `"none"` and `library.sortOptions` offers at least two choices, Settings also
+shows **Default library order**. A reader can follow **Site default** or save one
+of the offered sorts; signed-in readers carry that preference across devices.
+Changing the Library picker's current value is temporary, while changing the
+Settings value controls how the shelf opens on future visits.
+
+This setting sorts only the top-level entries on the shelf: whole standalone
+stories or whole books. It never rearranges chapters inside a book. Chapter
+order remains the order published in that book's manifest. A grouped or
+series-style library does not show the personal-order setting because its
+publisher-defined grouping remains authoritative.
+
 ### Reader themes
 
 `readerTheme` is the one key whose default is not "what the app did before it
