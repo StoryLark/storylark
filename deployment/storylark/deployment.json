@@ -1,7 +1,7 @@
 {
   "contractVersion": 1,
   "appOrigin": "https://storylark.dev",
-  "contentOrigin": "https://content.storylark.dev",
+  "contentOrigin": "",
   "vapidPublicKey": "",
   "tts": {
     "voice": "af_heart",
