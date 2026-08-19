@@ -36,6 +36,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSy
 import { join, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildEnginePackage, engineAssetName, engineChecksumName, sha256Hex, EnginePackageError } from 'storylark-contracts/engine-package';
+import { findBrandLeaks } from './brand-leak-check.mjs';
 
 const ROOT = process.cwd();
 const CORE_DIR = resolve(fileURLToPath(import.meta.url), '..', '..');
@@ -73,7 +74,7 @@ if (!worker) {
 }
 
 if (verifyBrands) {
-  const leaks = brandLeaks(distDir);
+  const leaks = findBrandLeaks({ root: ROOT, coreDir: CORE_DIR, distDir });
   if (leaks.length) {
     console.error(`\n✗ The build carries brand data — it is not an engine build.\n`);
     for (const leak of leaks.slice(0, 20)) console.error(`  ${leak}`);
@@ -157,53 +158,6 @@ function readWorkerVersion() {
     if (existsSync(candidate)) return JSON.parse(readFileSync(candidate, 'utf8')).version;
   }
   return '0.0.0';
-}
-
-/**
- * Every occurrence, in any output byte, of a string that only a brand file
- * could have contributed.
- *
- * The filter is what makes this precise rather than noisy: a string found in
- * a brand file is discarded as a needle if it ALSO occurs in storylark-core's
- * own source, because then it is engine vocabulary — a default noun, a section
- * key, a curated font family, the product's own name — and finding it in a
- * build proves nothing. What survives can only be there because a brand put it
- * there.
- */
-function brandLeaks(dir) {
-  const coreText = ['src', 'vite', 'schemas']
-    .map((d) => join(CORE_DIR, d))
-    .flatMap(allFiles)
-    .concat(existsSync(join(ROOT, 'app/index.html')) ? [join(ROOT, 'app/index.html')] : [])
-    .map((f) => readFileSync(f, 'latin1'))
-    .join('\n');
-
-  const needles = new Map();
-  const collect = (file, source) => {
-    if (!existsSync(file)) return;
-    const push = (v) => {
-      if (typeof v === 'string') {
-        if (v.length > 4 && !coreText.includes(v)) needles.set(v, source);
-      } else if (Array.isArray(v)) v.forEach(push);
-      else if (v && typeof v === 'object') Object.values(v).forEach(push);
-    };
-    push(JSON.parse(readFileSync(file, 'utf8')));
-  };
-  for (const id of readdirSync(join(ROOT, 'brands'))) {
-    collect(join(ROOT, 'brands', id, 'brand.json'), `brands/${id}/brand.json`);
-    collect(join(ROOT, 'presentation', id, 'presentation.json'), `presentation/${id}/presentation.json`);
-  }
-
-  const leaks = [];
-  for (const file of allFiles(dir)) {
-    const body = readFileSync(file, 'latin1');
-    for (const [needle, source] of needles) {
-      if (body.includes(needle)) {
-        leaks.push(`${relative(dir, file).split(sep).join('/')}  <- ${JSON.stringify(needle)} (${source})`);
-      }
-    }
-  }
-  return leaks;
 }
 
 function allFiles(p) {
