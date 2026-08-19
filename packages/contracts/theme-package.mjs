@@ -367,7 +367,10 @@ export async function buildThemePackage(parts) {
   const entries = [
     { name: MANIFEST_ENTRY, data: `${JSON.stringify(manifest, null, 2)}\n` },
     { name: BRAND_ENTRY, data: `${JSON.stringify(parts.brand, null, 2)}\n` },
-    { name: THEME_CSS_ENTRY, data: parts.themeCss },
+    // Git normally checks text files out with the platform's native line
+    // endings. Canonicalise archive text so the same theme produces the same
+    // bytes on Windows, macOS and Linux.
+    { name: THEME_CSS_ENTRY, data: canonicalText(parts.themeCss) },
   ];
   if (parts.presentation !== undefined) {
     entries.push({ name: PRESENTATION_ENTRY, data: `${JSON.stringify(parts.presentation, null, 2)}\n` });
@@ -375,7 +378,12 @@ export async function buildThemePackage(parts) {
   for (const name of [...parts.icons.keys()].sort()) {
     // PNGs are already deflate-compressed internally; re-compressing them makes
     // the entry bigger for no gain, so they are stored.
-    entries.push({ name: ICONS_PREFIX + name, data: parts.icons.get(name), store: name.endsWith('.png') });
+    const data = parts.icons.get(name);
+    entries.push({
+      name: ICONS_PREFIX + name,
+      data: name.endsWith('.svg') ? canonicalTextBytes(data) : data,
+      store: name.endsWith('.png'),
+    });
   }
 
   return { bytes: await zip(entries, { date: parts.createdAt }), manifest, warnings };
@@ -501,6 +509,14 @@ function stripCommonPrefix(files) {
 
 function text(bytes) {
   return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+}
+
+function canonicalText(value) {
+  return value.replace(/\r\n?/g, '\n');
+}
+
+function canonicalTextBytes(bytes) {
+  return new TextEncoder().encode(canonicalText(new TextDecoder().decode(bytes)));
 }
 
 function parseJson(raw, label, errors) {
