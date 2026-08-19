@@ -69,7 +69,7 @@
       "vars": {
         "BRAND": "storylark",
         "APP_ORIGIN": "https://storylark.dev",
-        "CONTENT_ORIGIN": "https://content.storylark.dev",
+        "CONTENT_ORIGIN": "",
         "MAIL_FROM": "StoryLark <noreply@storylark.dev>",
         "APP_NAME": "StoryLark"
       },
