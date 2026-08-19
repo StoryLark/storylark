@@ -14,6 +14,17 @@
 
 # Release notes
 
+## 0.20.0 (preview)
+
+Let each reader choose how an ungrouped library opens without changing the publisher's structure.
+
+- **Personal default library order** — Settings can remember Story order, Chronological, or
+  another order the publisher offers; choosing Site default follows the presentation again
+- The preference appears only for an ungrouped shelf with at least two sort options, so grouped
+  and series-style libraries keep their intended organization
+- Sorting moves whole stories or books only. Chapters inside a book always stay in the author's
+  published reading order
+
 ## 0.19.2 (preview)
 
 Clearer Admin language for every kind of library.

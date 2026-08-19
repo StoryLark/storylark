@@ -83,7 +83,7 @@ auto). Retune these values; keep the names.
 | `--highlight-block` | Read-along **block/paragraph** highlight fill (paragraph-level read-along and the active-block wash). |
 
 The four `--font-*` tokens are the ones your `brand.json` can take over: name a
-[curated family](#fonts--pick-from-the-curated-set) for a role and that role's
+[curated family](#fonts-pick-from-the-curated-set) for a role and that role's
 token is set from the brand when the stylesheet is served, overriding the value
 below. Leave a role out of `brand.json` and your theme's value stands.
 
@@ -216,7 +216,7 @@ A build writes these into `app/dist`:
 
 > **You usually want a package instead.** Everything in this section is the
 > file-swapping mechanism underneath; installing a
-> [theme package](#theme-packages--building-installing-rolling-back) does all of
+> [theme package](#theme-packages-building-installing-rolling-back) does all of
 > it for you, in one request, with validation, version history and one-click
 > rollback — and it works on Cloudflare, where there is no filesystem to swap
 > files on. Read on if you want to know what is actually happening.
@@ -270,7 +270,7 @@ build will put the old brand back.
 ## Swapping icons
 
 On a **live** deployment, icons travel in a theme package — see
-[Theme packages](#theme-packages--building-installing-rolling-back). In the repo:
+[Theme packages](#theme-packages-building-installing-rolling-back). In the repo:
 
 Replace the three PNGs in `brands/<your-id>/assets/icons/` (`icon-192.png`,
 `icon-512.png`, `icon-maskable-512.png` — the manifest references exactly these).
