@@ -1,5 +1,11 @@
 # storylark-worker
 
+## 0.19.4
+
+### Patch Changes
+
+- [#19](https://github.com/StoryLark/storylark/pull/19) [`8f9e514`](https://github.com/StoryLark/storylark/commit/8f9e514819b4c1df6a3a02403c663f7e849c0b64) Thanks [@hcs-platform-app](https://github.com/apps/hcs-platform-app)! - Let the supported Cloudflare installer choose Portal, Repository, or CMS/API content during setup. Repository setup provisions the read credential as a platform secret, runs the same fail-closed validation gate as Admin, saves the connection, and performs the initial sync. Generated narration jobs now install FFmpeg, while the advanced clone-based sync workflow stays skipped until explicitly configured.
+
 ## 0.19.3
 
 ### Patch Changes
