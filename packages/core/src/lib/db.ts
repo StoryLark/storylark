@@ -1,7 +1,8 @@
-// Thin promise wrapper over IndexedDB — four object stores, no library.
+// Thin promise wrapper over IndexedDB. Publisher content remains outside this
+// database; the personalLibrary store is the reader's explicitly local shelf.
 
 const DB_NAME = 'storylark';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -15,6 +16,7 @@ function open(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('progress')) db.createObjectStore('progress'); // key: bookId/chapterId
       if (!db.objectStoreNames.contains('outbox')) db.createObjectStore('outbox', { autoIncrement: true });
       if (!db.objectStoreNames.contains('downloads')) db.createObjectStore('downloads'); // key: bookId/chapterId
+      if (!db.objectStoreNames.contains('personalLibrary')) db.createObjectStore('personalLibrary', { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);

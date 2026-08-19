@@ -18,6 +18,7 @@ import { manifest } from '../lib/state';
 import { navigate } from '../router';
 import { contentUrl } from '../brand';
 import { NOUNS, PRESENTATION, fillCopy } from '../presentation';
+import { isPersonalBook, personalDocuments } from '../lib/personal-library';
 
 /**
  * Skip distance, from presentation `player.skipSeconds` (AB#7416).
@@ -132,6 +133,14 @@ export function NowPlaying(): JSX.Element {
 }
 
 function ChapterPicker({ currentBookId, currentChapterId }: { currentBookId: string; currentChapterId: string }): JSX.Element | null {
+  if (isPersonalBook(currentBookId)) {
+    const options = personalDocuments.value.flatMap((doc) => {
+      const chapter = doc.book.chapters[0];
+      return chapter ? [{ value: `${doc.book.id}/${chapter.id}`, label: doc.title }] : [];
+    });
+    if (options.length < 2) return null;
+    return <ItemPicker options={options} currentBookId={currentBookId} currentChapterId={currentChapterId} label="My Library item" />;
+  }
   const m = manifest.value;
   if (!m) return null;
 
@@ -151,9 +160,23 @@ function ChapterPicker({ currentBookId, currentChapterId }: { currentBookId: str
   }
   if (options.length < 2) return null;
 
+  return <ItemPicker options={options} currentBookId={currentBookId} currentChapterId={currentChapterId} label={NOUNS.Unit} />;
+}
+
+function ItemPicker({
+  options,
+  currentBookId,
+  currentChapterId,
+  label,
+}: {
+  options: { value: string; label: string }[];
+  currentBookId: string;
+  currentChapterId: string;
+  label: string;
+}): JSX.Element {
   return (
     <label class="np-picker">
-      <span class="np-picker-label">{NOUNS.Unit}</span>
+      <span class="np-picker-label">{label}</span>
       <select
         value={`${currentBookId}/${currentChapterId}`}
         onChange={(e) => {

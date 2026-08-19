@@ -221,6 +221,11 @@
   overflow: hidden;
 }
 
+.player-track:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 4px;
+}
+
 .player-fill {
   height: 100%;
   background: var(--accent);

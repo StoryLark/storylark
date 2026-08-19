@@ -22,7 +22,7 @@
   --bg-sunken: #EDDFE1;
   --text: #2E2028;        /* plum-black ink */
   --text-muted: #6D5761;
-  --text-faint: #A28E97;
+  --text-faint: #6D5761;
   --accent: #A83250;      /* sealing wax */
   --accent-strong: #7F1F39;
   --rule: #E4D1D5;
@@ -45,7 +45,7 @@
   --bg-sunken: #150E11;
   --text: #F3E5E8;
   --text-muted: #C0A8B0;
-  --text-faint: #8D747D;
+  --text-faint: #C0A8B0;
   --accent: #E8768F;      /* the wax, lit */
   --accent-strong: #F49AAC;
   --rule: #3A2830;

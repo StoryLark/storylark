@@ -24,7 +24,7 @@
   --bg-sunken: #0D1015;
   --text: #E9E6DF;        /* bone, the colour of the catalogue card */
   --text-muted: #A2A5B1;
-  --text-faint: #6E7280;
+  --text-faint: #A2A5B1;
   --accent: #86A8DE;      /* reflection blue */
   --accent-strong: #A9C4EF;
   --rule: #2B313D;
@@ -50,7 +50,7 @@
   --bg-sunken: #DFE1E9;
   --text: #171A21;
   --text-muted: #565B69;
-  --text-faint: #8E93A2;
+  --text-faint: #565B69;
   --accent: #33528F;
   --accent-strong: #223C6E;
   --rule: #D3D7E1;

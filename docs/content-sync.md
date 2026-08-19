@@ -36,15 +36,15 @@ Every book and chapter in `manifest.json` carries an `origin`:
 | `portal` | Written in the admin portal | Yes |
 | `cli` | Published by `packages/pipeline/publish.mjs` from your markdown | Yes |
 | `sync` | Pulled from an external source of truth | **No** |
-| `personal` | A reader's own device-local import (PDF/EPUB) | n/a — never on a deployment |
+| `personal` | A reader's own device-local import | n/a — never on a deployment |
 
 **Absent means `cli`.** Every manifest written before this field existed came
 from the pipeline, so an older library keeps working exactly as it did and stays
 fully editable. Nothing becomes read-only by omission.
 
-`personal` is a seam, not a feature: device-local imports aren't built yet, and
-when they are, they arrive through this discriminator instead of needing a
-schema change.
+`personal` is used by the optional **My Library** shelf. Those documents live in
+the reader's IndexedDB, never enter `manifest.json`, and never reach the
+deployment, its content API, or an account. See [My Library](personal-library.md).
 
 ## Repo mode inside the deployment — the Connections section
 

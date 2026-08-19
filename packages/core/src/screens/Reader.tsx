@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { ChapterContent, ChapterTimings, ConsumptionMode, Progress } from '../lib/types';
-import { manifest, progressMap, progressKey, modeFor, setItemMode } from '../lib/state';
+import { progressMap, progressKey, modeFor, setItemMode } from '../lib/state';
 import { saveProgress } from '../lib/progress-sync';
-import { contentUrl } from '../brand';
 import { NOUNS, PRESENTATION } from '../presentation';
 import { navigate } from '../router';
 import { BlockRenderer } from '../reader/BlockRenderer';
@@ -21,7 +20,10 @@ import {
   blockAtCharOffset,
   isStoryBrand,
   fmtTime,
+  findEntry,
 } from '../lib/player';
+import { isPersonalBook } from '../lib/personal-library';
+import { loadChapterContent, loadChapterTimings } from '../lib/content-loader';
 
 const SAVE_INTERVAL_MS = 30_000;
 
@@ -43,8 +45,9 @@ export function Reader({ bookId, chapterId, mode: routeMode }: { bookId: string;
   // pagehide, when the container may already be detached (rects read as 0).
   const lastPosRef = useRef<{ charOffset: number; percent: number } | null>(null);
 
-  const book = manifest.value?.books.find((b) => b.id === bookId);
-  const chapter = book?.chapters.find((c) => c.id === chapterId);
+  const found = findEntry(bookId, chapterId);
+  const book = found?.book;
+  const chapter = found?.chapter;
   const chapterIndex = book?.chapters.findIndex((c) => c.id === chapterId) ?? -1;
   const prevChapter = chapterIndex > 0 ? book?.chapters[chapterIndex - 1] : undefined;
   const nextChapter = chapterIndex >= 0 ? book?.chapters[chapterIndex + 1] : undefined;
@@ -57,14 +60,12 @@ export function Reader({ bookId, chapterId, mode: routeMode }: { bookId: string;
     setError(null);
     (async () => {
       try {
-        const res = await fetch(contentUrl(chapter.content));
-        if (!res.ok) throw new Error(`content ${res.status}`);
-        const c = (await res.json()) as ChapterContent;
+        const c = await loadChapterContent(chapter);
         if (cancelled) return;
         setContent(c);
         if (chapter.timings) {
-          const tRes = await fetch(contentUrl(chapter.timings)).catch(() => null);
-          if (!cancelled && tRes?.ok) setTimings((await tRes.json()) as ChapterTimings);
+          const loadedTimings = await loadChapterTimings(chapter.timings).catch(() => null);
+          if (!cancelled) setTimings(loadedTimings);
         }
       } catch {
         if (!cancelled) setError(`This ${NOUNS.unit} is not available offline yet. Connect and try again.`);
@@ -189,7 +190,11 @@ export function Reader({ bookId, chapterId, mode: routeMode }: { bookId: string;
     );
   }
 
-  const backTarget = isStoryBrand() ? '/library' : `/library/${encodeURIComponent(bookId)}`;
+  const backTarget = isPersonalBook(bookId)
+    ? '/library?view=personal'
+    : isStoryBrand()
+      ? '/library'
+      : `/library/${encodeURIComponent(bookId)}`;
   const playingThis = nowPlaying.value?.bookId === bookId && nowPlaying.value?.chapterId === chapterId;
 
   return (
@@ -210,13 +215,13 @@ export function Reader({ bookId, chapterId, mode: routeMode }: { bookId: string;
           <span class="reader-title">{chapter.title}</span>
         </div>
         <div class="mode-seg" role="group" aria-label="Reading mode">
-          <button class={`mode-seg-btn${mode === 'read' ? ' active' : ''}`} onClick={() => switchMode('read')} title="Read">
+          <button class={`mode-seg-btn${mode === 'read' ? ' active' : ''}`} onClick={() => switchMode('read')} aria-label="Read" aria-pressed={mode === 'read'} title="Read">
             ☰
           </button>
-          <button class={`mode-seg-btn${mode === 'both' ? ' active' : ''}`} onClick={() => switchMode('both')} title="Read + Listen">
+          <button class={`mode-seg-btn${mode === 'both' ? ' active' : ''}`} onClick={() => switchMode('both')} aria-label="Read and listen" aria-pressed={mode === 'both'} title="Read + Listen">
             ☰♪
           </button>
-          <button class="mode-seg-btn" onClick={() => switchMode('listen')} title="Listen">
+          <button class="mode-seg-btn" onClick={() => switchMode('listen')} aria-label="Listen" aria-pressed={false} title="Listen">
             ♪
           </button>
         </div>
@@ -264,7 +269,27 @@ export function Reader({ bookId, chapterId, mode: routeMode }: { bookId: string;
           <button class="icon-btn" onClick={() => skip(SKIP)} aria-label={`Forward ${SKIP} seconds`}>
             {SKIP}↻
           </button>
-          <div class="player-track" onClick={(e) => scrubTo(e, playerDurationMs.value)}>
+          <div
+            class="player-track"
+            role="slider"
+            tabIndex={0}
+            aria-label="Playback position"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(playerDurationMs.value / 1000)}
+            aria-valuenow={Math.round(playerPositionMs.value / 1000)}
+            aria-valuetext={`${fmtTime(playerPositionMs.value)} of ${fmtTime(playerDurationMs.value)}`}
+            onClick={(e) => scrubTo(e, playerDurationMs.value)}
+            onKeyDown={(event) => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              const next = event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? playerDurationMs.value
+                  : playerPositionMs.value + (event.key === 'ArrowRight' ? SKIP : -SKIP) * 1000;
+              seekTo(Math.max(0, Math.min(playerDurationMs.value, next)));
+            }}
+          >
             <div
               class="player-fill"
               style={{ width: playerDurationMs.value ? `${(playerPositionMs.value / playerDurationMs.value) * 100}%` : '0%' }}

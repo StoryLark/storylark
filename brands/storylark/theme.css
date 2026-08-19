@@ -18,7 +18,7 @@
   --bg-sunken: #F1EADD;
   --text: #232020;        /* warm ink */
   --text-muted: #635C54;
-  --text-faint: #A69D8F;
+  --text-faint: #635C54;
   --accent: #0E7C7B;      /* dawn teal — interactive */
   --accent-strong: #0A5F5E;
   --rule: #E6DFD2;
@@ -42,7 +42,7 @@
   --bg-sunken: #0E1113;
   --text: #F1ECE3;        /* warm off-white */
   --text-muted: #B8B0A4;
-  --text-faint: #837C71;
+  --text-faint: #B8B0A4;
   --accent: #35B7B4;      /* dusk teal, brighter for contrast */
   --accent-strong: #57C9C6;
   --rule: #2C3237;

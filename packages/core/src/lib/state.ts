@@ -5,6 +5,7 @@ import { PRESENTATION, readerDefaultMode } from '../presentation';
 import { BRAND_LOOK, applyReaderTheme, resolveReaderTheme, resolveVariant } from './reader-themes';
 import { idb } from './db';
 import { api, type AuthUser } from './api';
+import { loadPersonalLibrary } from './personal-library';
 
 export const user = signal<AuthUser | null>(null);
 /**
@@ -126,7 +127,7 @@ export async function bootstrap(): Promise<void> {
   const local = await idb.getAll<Progress>('progress');
   progressMap.value = new Map(local.map((p) => [progressKey(p.bookId, p.chapterId), p]));
 
-  await Promise.all([loadManifest(), loadUser()]);
+  await Promise.all([loadManifest(), loadUser(), loadPersonalLibrary()]);
 }
 
 const SYNCED_PREF_KEYS = [

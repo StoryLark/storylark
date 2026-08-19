@@ -8,5 +8,11 @@
     "UnitPlural": "Stories",
     "collection": null,
     "Collection": null
+  },
+  "features": {
+    "personalImports": {
+      "enabled": true,
+      "placement": "library"
+    }
   }
 }

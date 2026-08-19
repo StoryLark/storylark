@@ -8,10 +8,10 @@ with synced narration, offline downloads, and cross-device progress, and it runs
 as a single [Cloudflare Worker](https://developers.cloudflare.com/workers/) backed
 by D1 and R2.
 
-> **Status: preview (0.x).** The engine boots and builds today under a neutral
-> StoryLark base brand, but ships without bundled content (bring your own stories
-> through the pipeline). APIs and structure will change before 1.0. See
-> [`packages/core/ROADMAP.md`](packages/core/ROADMAP.md) for the roadmap.
+> **Status: 1.0 release candidate.** The public contracts are frozen for 1.0.0;
+> see the [stability policy](docs/stability.md) for the supported surface and
+> compatibility promise. The base brand ships without publisher content, so a
+> publisher still brings its own stories through the pipeline.
 
 ## Features
 
@@ -19,6 +19,8 @@ by D1 and R2.
 - **Listen mode** — pre-generated neural TTS narration with word-synced read-along
   highlighting (Web Speech API fallback).
 - **Offline** — download chapters (text + audio) for airplane mode.
+- **My Library** — optionally add a PDF, Word or text document, pasted text, or
+  an accessible web page. Personal items stay in that browser's local storage.
 - **Sync** — sign in (email + password, magic link, passkeys, or Google) and continue
   on any device.
 - **Push** — get notified when new chapters publish.

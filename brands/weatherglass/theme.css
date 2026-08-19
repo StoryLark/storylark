@@ -19,7 +19,7 @@
   --bg-sunken: #DBDED5;
   --text: #1B2327;        /* cold ink, never black */
   --text-muted: #566065;
-  --text-faint: #8C9691;
+  --text-faint: #566065;
   --accent: #21506E;      /* admiralty chart blue */
   --accent-strong: #163D56;
   --rule: #C7CDC2;        /* the ruled column line */
@@ -43,7 +43,7 @@
   --bg-sunken: #090E11;
   --text: #DCE4E2;
   --text-muted: #98A5A6;
-  --text-faint: #6B7779;
+  --text-faint: #98A5A6;
   --accent: #6FA6C6;      /* chart blue, lit from behind */
   --accent-strong: #92C1DC;
   --rule: #232E33;

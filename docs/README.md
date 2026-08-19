@@ -6,10 +6,10 @@ read-along, offline downloads, and cross-device progress. Runs on Cloudflare
 (Workers + D1 + R2) or Azure (App Service + PostgreSQL + Blob Storage) from
 the same codebase.
 
-> **Status: preview (0.x).** The engine boots and builds today under a neutral
-> StoryLark base brand, but ships without bundled content — bring your own
-> stories through the [content pipeline](content-pipeline.md). APIs and structure
-> will change before 1.0.
+> **Status: 1.0 release candidate.** The public contracts are frozen for 1.0.0.
+> Read the [stability policy](stability.md) for the supported surface and
+> compatibility promise. The base brand ships without publisher content — bring
+> your own stories through the [content pipeline](content-pipeline.md).
 
 ## Install & Deploy
 
@@ -39,6 +39,8 @@ the same codebase.
 
 ## Content
 
+- **[My Library](personal-library.md)** — reader-owned PDF, DOCX, text, paste,
+  and web-page imports that remain on one device, plus backup and restore.
 - **[Authoring Stories](authoring-stories.md)** — the blessed markdown format:
   folder-per-book, chapter files, `book.json`.
 - **[Publishing Stories](publishing-stories.md)** — the operator's guide: CLI
@@ -76,6 +78,10 @@ the same codebase.
 
 ## Reference (design docs)
 
+- **[1.0 Stability](stability.md)** — the frozen public contracts, compatibility
+  rules, and what remains internal.
+- **[1.0 Verification](ga-verification.md)** — automated release evidence,
+  device/browser smoke matrix, and accessibility audit.
 - **[Architecture](architecture.md)** — the one-Worker-per-brand model, content
   storage, and the free-tier budget.
 - **[Infrastructure](design/infrastructure.md)** — deployment architecture,

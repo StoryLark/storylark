@@ -67,6 +67,6 @@ Each book and chapter in `manifest.json` also records **where it came from**:
 | `syncSource` | book | `{kind: "git"\|"feed", url, ref?, path?, syncedAt?}` when `origin` is `sync`. Never carries a credential; the manifest is public. |
 
 `origin: "sync"` is the only value that makes content read-only in the admin
-portal — whoever owns the content owns the edit button. `personal` is the seam
-for a reader's own device-local imports, which never reach a deployment. See
-[`content-sync.md`](content-sync.md).
+portal — whoever owns the content owns the edit button. `personal` identifies a
+reader's device-local import inside the client; it never reaches a deployment.
+See [My Library](personal-library.md).

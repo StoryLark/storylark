@@ -14,12 +14,15 @@ import { authChecked, user } from './lib/state';
 import { BRAND } from './brand';
 
 export function App(): JSX.Element {
-  if (PRESENTATION.auth.required && !user.value) return <AuthGate />;
+  const gated = PRESENTATION.auth.required && !user.value;
   return (
     <>
+      <a class="skip-link" href="#main-content">Skip to content</a>
       <UpdateBanner />
-      <Screen />
-      <TabBar />
+      <main id="main-content" tabIndex={-1}>
+        {gated ? <AuthGate /> : <Screen />}
+      </main>
+      {!gated && <TabBar />}
     </>
   );
 }

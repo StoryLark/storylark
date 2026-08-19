@@ -15,7 +15,7 @@
     "publish": "node packages/pipeline/publish.mjs --brand storylark",
     "migrate-brand": "node packages/core/bin/migrate-brand.mjs",
     "typecheck": "tsc -p app/tsconfig.json --noEmit && tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/worker/tsconfig.json --noEmit",
-    "test": "node --import tsx/esm --test create-storylark/test/*.test.mjs packages/worker/test/*.test.mjs packages/contracts/test/*.test.mjs packages/pipeline/test/*.test.mjs",
+    "test": "node --import tsx/esm --test create-storylark/test/*.test.mjs packages/core/test/*.test.mjs packages/worker/test/*.test.mjs packages/contracts/test/*.test.mjs packages/pipeline/test/*.test.mjs",
     "build-engine": "npm run build -w app -- --mode engine && wrangler deploy --env storylark --dry-run --outdir=.engine-worker",
     "version-packages": "changeset version && npm run package-theme -- storylark",
     "package-engine": "node packages/core/bin/package-engine.mjs",
@@ -25,6 +25,7 @@
   "devDependencies": {
     "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.31.0",
+    "fake-indexeddb": "^6.2.5",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "wrangler": "^4.0.0"
