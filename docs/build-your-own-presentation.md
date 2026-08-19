@@ -165,7 +165,7 @@ existed, so adding this file changes nothing until you change a value.
 | `nav.items` | `["home","library","nowPlaying","settings"]` | which entries, in what order. `about` is also available |
 | `nav.labels` | `{}` | per-item label override, e.g. `{ "library": "Shelf" }` |
 | `home.sections` | `["continue","newReleases"]` | which sections, in what order. `allUnits` adds a full cover shelf |
-| `library.defaultSort` | `"order"` | `order` · `title` · `author` · `recent` · `timeframe` |
+| `library.defaultSort` | `"order"` | Site default: `order` · `title` · `author` · `recent` · `timeframe`. On an ungrouped shelf with multiple offered sorts, a reader can save a personal default in Settings. |
 | `library.sortOptions` | `["order","timeframe","recent"]` | what the picker offers. `[]` removes it |
 | `library.groupBy` | flat `"none"` / series `"collection"` | `none` · `collection` · `group` · `timeframe` |
 | `library.groupOptions` | flat `["group"]` / series `[]` | groupings offered alongside the sorts |

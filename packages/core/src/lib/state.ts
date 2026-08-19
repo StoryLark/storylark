@@ -36,6 +36,10 @@ export const settings = signal<Settings>({
   // the account wins over it in bootstrap() below, so a reader who has already
   // chosen a mode keeps their choice when the deployment changes its default.
   defaultMode: readerDefaultMode(),
+  // '' follows presentation `library.defaultSort`. A reader may choose one of
+  // this deployment's offered sorts in Settings; Library resolves stale or
+  // unavailable choices back to the deployment default.
+  librarySort: '',
   autoSync: true,
   autoDownload: false,
   narratorVoice: '',
@@ -127,6 +131,7 @@ export async function bootstrap(): Promise<void> {
 
 const SYNCED_PREF_KEYS = [
   'defaultMode',
+  'librarySort',
   'readAlong',
   'theme',
   // The chosen LOOK syncs for the same reason light/dark does: it is how this
@@ -158,6 +163,7 @@ export async function pushPreferences(): Promise<void> {
     await api.putPreferences(
       {
         defaultMode: settings.value.defaultMode,
+        librarySort: settings.value.librarySort,
         readAlong: settings.value.readAlong,
         theme: settings.value.theme,
         readerTheme: settings.value.readerTheme,
