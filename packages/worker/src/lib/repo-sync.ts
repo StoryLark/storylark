@@ -606,8 +606,7 @@ export async function runRepoSync(
     let manifestChanged = false;
     let libraryVersion = manifest?.libraryVersion ?? 0;
     for (const [bookId, group] of accepted) {
-      const before = await readManifest(store);
-      const beforeBook = before ? findBook(before, bookId) : undefined;
+      const beforeBook = manifest ? findBook(manifest, bookId) : undefined;
       // Declared order decides the save sequence — the manifest array IS the
       // order, and ties were already rejected, so this sort is total.
       const ordered = [...group].sort((a, b) => (a.record.declaredOrder ?? 0) - (b.record.declaredOrder ?? 0));
@@ -648,19 +647,28 @@ export async function runRepoSync(
         }
       }
 
-      // Book-level metadata + the ownership stamp, once per book. Written only
-      // when something actually moved: a daily sync of an unchanged repo must
-      // not bump `libraryVersion` and make every reader re-fetch a manifest
-      // that says nothing new.
-      const after = await readManifest(store);
-      const entry = after ? findBook(after, bookId) : undefined;
-      if (after && entry) {
+    }
+
+    // saveChapter owns chapter writes and may have advanced the manifest. Read
+    // that result ONCE, then apply every book-level metadata/ownership change
+    // in memory and persist the complete set once. The former per-book
+    // read/write cycle exhausted a Worker's execution budget on a library of
+    // 42 standalone stories and left the sync claim stranded after book 32.
+    // One manifest transaction makes a large story library the same operation
+    // shape as one multi-chapter book.
+    const after = written.length > 0 ? await readManifest(store) : manifest;
+    const writtenBookIds = new Set(written.map((item) => item.bookId));
+    let metadataChanged = false;
+    if (after) {
+      for (const [bookId, group] of accepted) {
+        const entry = findBook(after, bookId);
+        if (!entry) continue;
         const priorSyncedAt = entry.syncSource?.syncedAt;
         const snapshot = JSON.stringify({ ...entry, syncSource: { ...(entry.syncSource ?? {}), syncedAt: '' } });
         applyBookMetadata(entry, declaredBooks.get(bookId), group);
         const declared = declaredBooks.get(bookId);
         if (declared?.record.cover) {
-          const coverKey = await ingestCover(store, declared, bookId, files, repo.path, report);
+          const coverKey = await ingestCover(store, declared, bookId, files, repo.path, report, entry.cover);
           if (coverKey) entry.cover = coverKey;
         }
         if (adopting.has(bookId)) {
@@ -694,20 +702,29 @@ export async function runRepoSync(
         }
         refreshSingle(entry);
         const changed =
-          written.some((w) => w.bookId === bookId) ||
+          writtenBookIds.has(bookId) ||
           snapshot !== JSON.stringify({ ...entry, syncSource: { ...(entry.syncSource ?? {}), syncedAt: '' } });
         if (changed) {
-          manifestChanged = true;
-          libraryVersion = (after.libraryVersion ?? 0) + 1;
-          after.libraryVersion = libraryVersion;
-          (after as { announceVersion?: number }).announceVersion = announceVersionOf(after);
-          after.generatedAt = new Date().toISOString();
-          await writeManifest(store, after);
+          metadataChanged = true;
         } else if (priorSyncedAt !== undefined) {
           entry.syncSource.syncedAt = priorSyncedAt; // nothing moved — say so honestly
         }
       }
+
+      if (metadataChanged) {
+        // Chapter writes already advanced the version through saveChapter.
+        // Metadata-only/adoption runs need one version bump for the whole set.
+        if (written.length === 0) after.libraryVersion = (after.libraryVersion ?? 0) + 1;
+        libraryVersion = after.libraryVersion ?? libraryVersion;
+        (after as { announceVersion?: number }).announceVersion = announceVersionOf(after);
+        after.generatedAt = new Date().toISOString();
+        await writeManifest(store, after);
+      } else {
+        libraryVersion = after.libraryVersion ?? libraryVersion;
+      }
     }
+
+    manifestChanged = written.length > 0 || metadataChanged;
 
     report.written = written;
     report.chaptersWritten = written.length;
@@ -878,7 +895,8 @@ async function ingestCover(
   bookId: string,
   files: SyncProviderFiles,
   _path: string,
-  report: SyncReport
+  report: SyncReport,
+  currentKey?: string
 ): Promise<string | null> {
   const ref = declared.record.cover as string;
   const resolved = resolveRelative(declared.dir, ref) ?? ref;
@@ -896,8 +914,10 @@ async function ingestCover(
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   const hash = (await sha256Bytes(buf)).slice(0, 12);
   const storageKey = key.cover(bookId, hash, ext);
-  await store.put(storageKey, buf, { contentType: type, cacheControl: IMMUTABLE });
-  report.imagesIngested++;
+  if (currentKey !== storageKey) {
+    await store.put(storageKey, buf, { contentType: type, cacheControl: IMMUTABLE });
+    report.imagesIngested++;
+  }
   return storageKey;
 }
 
