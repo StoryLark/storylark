@@ -375,7 +375,7 @@ function VersionHistory({
   if (!state || state.versions.length === 0) return null;
   return (
     <div class="admin-revisions">
-      <h3>Version history</h3>
+      <h3>Theme version history</h3>
       <p class="settings-note">
         The last {state.versionLimit} are kept, and whichever one is live is never aged out. Rolling back restores exactly the
         bytes that were installed.
@@ -384,7 +384,7 @@ function VersionHistory({
         {state.versions.map((v) => (
           <li key={v.id}>
             {v.live ? '● ' : '○ '}
-            <strong>{v.name}</strong> v{v.version} — {new Date(v.importedAt).toLocaleString()} by {v.importedBy}{' '}
+            Theme: <strong>{v.name}</strong> v{v.version} — {new Date(v.importedAt).toLocaleString()} by {v.importedBy}{' '}
             <span class="settings-note">
               ({v.source === 'form' ? 'edited here' : v.source === 'cli' ? 'command line' : 'uploaded here'})
             </span>{' '}

@@ -57,6 +57,8 @@ import { BlockRenderer } from '../../reader/BlockRenderer';
 import { PRESENTATION } from '../../presentation';
 import { RepoPanel, TokensPanel, type SourceState } from './ConnectionsSection';
 
+const CONTENT_SECTION_TITLE = 'Stories & Books';
+
 function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return call<T>(`/admin${path}`, init);
 }
@@ -282,7 +284,7 @@ export function ContentSection(): JSX.Element {
   if (error) {
     return (
       <section class="settings-section">
-        <h2>{flat ? 'Stories' : 'Books'}</h2>
+        <h2>{CONTENT_SECTION_TITLE}</h2>
         <p class="settings-note admin-error">{error}</p>
       </section>
     );
@@ -290,7 +292,7 @@ export function ContentSection(): JSX.Element {
   if (!library) {
     return (
       <section class="settings-section">
-        <h2>{flat ? 'Stories' : 'Books'}</h2>
+        <h2>{CONTENT_SECTION_TITLE}</h2>
         <p class="settings-note">Loading…</p>
       </section>
     );
@@ -298,7 +300,7 @@ export function ContentSection(): JSX.Element {
   if (!library.storeAvailable) {
     return (
       <section class="settings-section">
-        <h2>{flat ? 'Stories' : 'Books'}</h2>
+        <h2>{CONTENT_SECTION_TITLE}</h2>
         <p class="settings-note">
           This deployment has no writable content storage bound, so its content can't be edited from here. On Cloudflare that
           means no R2 bucket is declared in <code>wrangler.jsonc</code>; on a Node host it means neither{' '}
@@ -398,9 +400,9 @@ function LibraryView({
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const noun = flat ? 'story' : 'book';
-  // A library holding both shapes at once (design §3) says "Library" and labels
-  // each row, instead of calling everything by one noun that is wrong for half
-  // of it. Entries without the flag count as whatever the layout says.
+  // A library holding both shapes at once (design §3) labels each row instead
+  // of calling everything by one noun that is wrong for half of it. Entries
+  // without the flag count as whatever the layout says.
   const singles = library.books.filter((b) => b.single ?? flat).length;
   const mixed = singles > 0 && singles < library.books.length;
 
@@ -438,7 +440,7 @@ function LibraryView({
   }
   return (
     <section class="settings-section">
-      <h2>{mixed ? 'Library' : flat ? 'Stories' : 'Books'}</h2>
+      <h2>{CONTENT_SECTION_TITLE}</h2>
       <p class="settings-note">
         {library.books.length} {library.books.length === 1 ? noun : `${noun}s`} · library version {library.libraryVersion}
         {library.announceVersion !== library.libraryVersion ? ` (announced ${library.announceVersion})` : ''} ·{' '}
