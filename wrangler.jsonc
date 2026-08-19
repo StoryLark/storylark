@@ -54,7 +54,7 @@
       // carries the project and the environment in its name — the account's
       // existing convention, matched rather than replaced.
       "account_id": "513fcac25bb11fbe8c772ab242433445",
-      "routes": [{ "pattern": "app.storylark.dev", "custom_domain": true }],
+      "routes": [{ "pattern": "storylark.dev", "custom_domain": true }],
       "d1_databases": [
         {
           "binding": "DB",
@@ -68,7 +68,7 @@
       ],
       "vars": {
         "BRAND": "storylark",
-        "APP_ORIGIN": "https://app.storylark.dev",
+        "APP_ORIGIN": "https://storylark.dev",
         "CONTENT_ORIGIN": "https://content.storylark.dev",
         "MAIL_FROM": "StoryLark <noreply@storylark.dev>",
         "APP_NAME": "StoryLark"
