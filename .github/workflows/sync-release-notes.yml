@@ -11,15 +11,13 @@ name: Sync release notes to storylark-org
 # version banner (build.mjs parses the first `## x.y.z` heading), so keeping
 # it in lock-step with the engine's file keeps that banner honest too.
 #
-# ── Manual setup required (one-time, repo owner) ─────────────────────────
-# This job pushes to a DIFFERENT repository (StoryLark/storylark-org), so
-# the default GITHUB_TOKEN (scoped to this repo only) cannot be used. Create
-# a fine-grained personal access token scoped to StoryLark/storylark-org
-# with "Contents: Read and write" permission, then add it as the
-# ORG_SITE_SYNC_TOKEN secret on THIS repo (storylark/storylark ->
-# Settings -> Secrets and variables -> Actions). Until that secret exists,
-# this workflow will fail at the checkout-storylark-org step; it does not
-# block or affect the release pipeline in release.yml.
+# This job pushes to a DIFFERENT repository (StoryLark/storylark-org), so the
+# default GITHUB_TOKEN (scoped to this repo only) cannot be used. It mints a
+# short-lived hcs-platform GitHub App installation token for storylark-org on
+# every run. The App client id is stored as the
+# HCS_PLATFORM_GITHUB_APP_CLIENT_ID repository variable and its private key as
+# the HCS_PLATFORM_GITHUB_APP_PRIVATE_KEY repository secret; no personal token
+# is stored or rotated here.
 
 on:
   push:
@@ -45,11 +43,21 @@ jobs:
           sparse-checkout-cone-mode: false
           path: storylark
 
+      - name: Mint repository-scoped GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.HCS_PLATFORM_GITHUB_APP_CLIENT_ID }}
+          private-key: ${{ secrets.HCS_PLATFORM_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: storylark-org
+          permission-contents: write
+
       - name: Checkout storylark-org (generated copy)
         uses: actions/checkout@v4
         with:
           repository: StoryLark/storylark-org
-          token: ${{ secrets.ORG_SITE_SYNC_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           path: storylark-org
 
       - name: Copy RELEASE-NOTES.md over changelog.md
