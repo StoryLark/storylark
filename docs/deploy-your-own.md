@@ -1,230 +1,158 @@
-# Deploy Your Own
+# Deploy your own site on Cloudflare
 
-StoryLark is built to be deployed **once per brand from the same codebase**: one
-Cloudflare Worker, one D1 database, one R2 bucket per brand. This guide stands up
-a new branded site end to end.
+The supported Cloudflare deployment is a thin publisher project created from
+npm. It pins the StoryLark engine, Worker, and pipeline as dependencies and owns
+only your brand, presentation, deployment settings, workflows, and content.
+Cloning the engine is not part of this path.
 
-> For the exhaustive reference — every binding, environment variable and secret
-> the worker reads on either platform, migrations, cron triggers, and custom
-> domains — see [`deploy-worker.md`](deploy-worker.md). This page is the
-> step-by-step walkthrough; that page is what to check when something's missing.
+## Prerequisites
 
-> Everything below uses **placeholders** — `<your-...>`, `example.com`,
-> `00000000-...`. Never commit real account IDs, database IDs, domains, or
-> secrets. The base brand's `wrangler.jsonc` env ships with placeholder IDs on
-> purpose; fill in your own only in your deployment, and keep secrets out of the
-> repo (`wrangler secret put`, below).
+- Node.js 20 or newer
+- A Cloudflare account with Workers, D1, and R2 available
+- Wrangler authenticated with `npx wrangler login`
+- `ffmpeg` and `ffprobe` only when the machine running the publisher will
+  generate narration
 
-## 1. Create your brand
+## Create the publisher project
 
-Copy the base brand and give it a new id:
+For one guided flow from an empty folder to a deployment:
 
-```
-cp -r brands/storylark brands/<your-id>
+```text
+npm create storylark my-site -- --deploy
 ```
 
-Edit `brands/<your-id>/brand.json` (identity), `presentation/<your-id>/presentation.json`
-(layout, nouns), `deployment/<your-id>/deployment.json` (origins, TTS, VAPID public key) and
-`brands/<your-id>/theme.css` (colors + fonts). The full field-by-field reference
-is in [`build-your-own-theme.md`](build-your-own-theme.md). At minimum, set:
+To review and brand the project before provisioning anything:
 
-- `id` — must match the folder name and the `--mode` you build with.
-- `appName`, `name`, `shortName`, `tagline`, `author`.
-- `appOrigin` — where the app is served (e.g. `https://app.example.com`).
-- `contentOrigin` — **optional.** Leave it `""` (same-origin, the default for a
-  new deployment) and the Worker serves content out of the R2 bucket itself at
-  `/manifest.json` and `/books/*` — no content domain, no DNS setup. Set a URL
-  (e.g. `https://content.example.com`) only to serve content from its own
-  domain — see step 3 for when that's worth it.
-- `themeColor` / `backgroundColor` — must match your theme's paper color.
-- `layout` and `nouns` — see [`build-your-own-presentation.md`](build-your-own-presentation.md).
-
-### Icons
-
-The manifest references three PNGs under `brands/<your-id>/assets/icons/`:
-
-| File | Size | Purpose |
-|---|---|---|
-| `icon-192.png` | 192×192 | Standard |
-| `icon-512.png` | 512×512 | Standard |
-| `icon-maskable-512.png` | 512×512 | Maskable (safe-zone padded) |
-
-Drop in your own artwork, or generate neutral placeholder icons in your brand
-colors:
-
-```
-node packages/pipeline/gen-icons.mjs --brand <your-id>
+```text
+npm create storylark my-site
+cd my-site
+npm run doctor
+npm run setup
 ```
 
-(The base brand also carries `favicon.svg`, `favicon-32.png`, `favicon-180.png`,
-and a `logo.svg` — supply your own equivalents if your HTML references them.)
+The create command runs `npm install`, writes a package lock, pins compatible
+versions of `storylark-core`, `storylark-worker`, and
+`storylark-pipeline`, and records non-secret provenance in
+`.storylark/project.json`. `--no-install` is an advanced escape hatch and
+cannot be combined with `--deploy`.
 
-## 2. Add a Wrangler env for the brand
+A cloned engine workspace is not an installed publisher site. If you
+intentionally clone the engine to develop or fork StoryLark, run `npm install`
+at its root before using any workspace command.
 
-`wrangler.jsonc` defines **one env per brand**, selected with `--env`. Copy the
-`storylark` block, rename it to `<your-id>`, and fill in your own resources:
+## Brand the generated site
 
-```jsonc
-"env": {
-  "<your-id>": {
-    "name": "<your-id>",
-    "routes": [{ "pattern": "app.example.com", "custom_domain": true }],
-    "d1_databases": [
-      {
-        "binding": "DB",
-        "database_name": "<your-id>",
-        "database_id": "<your-d1-database-id>",
-        "migrations_dir": "packages/worker/migrations"
-      }
-    ],
-    "r2_buckets": [
-      { "binding": "CONTENT", "bucket_name": "<your-id>-content" }
-    ],
-    "vars": {
-      "BRAND": "<your-id>",
-      "APP_ORIGIN": "https://app.example.com",
-      // "" = same-origin (no content domain needed). Or e.g. "https://content.example.com".
-      "CONTENT_ORIGIN": "",
-      "MAIL_FROM": "Your App <noreply@example.com>",
-      "APP_NAME": "Your App"
-    }
-  }
-}
+The generated project separates three contracts:
+
+```text
+brands/<id>/brand.json                identity
+brands/<id>/theme.css                 visual tokens
+presentation/<id>/presentation.json  layout and vocabulary
+deployment/<id>/deployment.json      origins and narration settings
 ```
 
-The Worker serves `app/dist` as static assets, with SPA fallback for anything
-that isn't a file. `run_worker_first` sends `/api/*`, navigations, `/admin`,
-`/sw.js`, `/theme.css`, `manifest.webmanifest` and `/icons/*` through the
-Worker — so it can stamp this deployment's live origins, VAPID key, brand and
-presentation into them on the way out (see below), and so an installed theme
-package can replace the icons — while `/assets/*`, the hashed JS, CSS and fonts
-that are the bulk of the site, is served straight off the asset router with no
-Worker invocation.
+Edit the brand and presentation before or after the first deployment. Runtime
+theme packages and brand edits are stored separately from engine versions, so
+an engine update does not overwrite them. See
+[Build your own theme](build-your-own-theme.md) and
+[Build your own presentation](build-your-own-presentation.md).
 
-### Changing config after deploy
+## Run the setup wizard
 
-`APP_ORIGIN`, `CONTENT_ORIGIN`, `VAPID_PUBLIC_KEY` and the optional `TTS_*`
-vars are read from the environment on every request and injected into the
-document, so changing them in `wrangler.jsonc` (or the dashboard) and
-redeploying the Worker is enough — **no site rebuild required**. The values in
-`deployment/<id>/deployment.json` are the fallback a build carries for contexts
-that have no server to inject: `vite dev`, `vite preview`, plain static
-hosting.
+`npm run setup` asks for the brand id, app URL, optional content URL, sender
+identity, and app name. It writes the gitignored
+`platforms/cloudflare/install.env`, verifies the values and Wrangler session,
+and asks before creating resources.
 
-### Changing your brand after deploy
+The installer creates or configures:
 
-Same idea, different source. `dist/brand.json` and `dist/theme.css` are read
-from the deployed assets on every request, so replacing those two files and
-uploading the assets changes the site's name, colours, fonts and PWA manifest —
-again **no site rebuild**, no new JavaScript, no hashed asset touched. See
-[Changing your brand without rebuilding](build-your-own-theme.md#changing-your-brand-without-rebuilding)
-for the full list of what does and doesn't follow, and
-[the design note](design/runtime-brand.md) for how it works.
+- one Cloudflare Worker for the app and API;
+- one D1 database and its migrations;
+- one R2 bucket for content, runtime themes, and installed engine versions;
+- the scheduled trigger used for update checks and saved repo connections;
+- the first Admin setup link and recovery codes;
+- self-update permission for API-server releases, unless you explicitly opt
+  out.
 
-### Rearranging the app after deploy
+Keep the setup link and recovery codes in a password manager. Do not commit
+`install.env`, tokens, account identifiers, database identifiers, or secrets.
 
-Same again, third source. `dist/presentation.json` is read from the deployed
-assets on every request, so replacing that one file changes the tab bar, the
-Home sections, the shelf's sorting and grouping, cover shape, the reader and
-player defaults, which settings readers are offered and the empty-state copy —
-**no site rebuild**, and on the Azure node server not even a restart. Anything
-the file does not state takes a core default, permanently, so the file only ever
-has to contain the parts you actually want to change. See
-[Build your own presentation](build-your-own-presentation.md) for every key and
-[the design note](design/presentation-contract.md) for how it works.
+### Same-origin content is the default
 
-## 3. Provision Cloudflare resources
+Leave `CONTENT_ORIGIN` empty for the simplest deployment. The Worker serves
+`/manifest.json` and `/books/*` from the R2 binding, so no second domain or
+DNS setup is required.
 
-Authenticate once (`npx wrangler login`), then create the per-brand resources.
+Set a separate content origin only when you intentionally attach an R2 custom
+domain. Audio and large content then bypass the Worker while R2 continues to
+provide zero-egress delivery.
 
-**D1 database** — create it, copy the returned `database_id` into your env's
-`database_id`, then apply the migrations in `packages/worker/migrations/`:
+### Existing Cloudflare resources
 
-```
-npx wrangler d1 create <your-id>
-npx wrangler d1 migrations apply <your-id> --env <your-id> --remote
-```
+The installer can adopt explicitly named existing Worker, D1, and R2 resources.
+Resource names are deployment details; they do not rename your brand. Run
+`npm run doctor` first and review the plan before confirmation. Adoption must
+not replace content, theme, presentation, or identity merely to match a default
+name.
 
-**R2 bucket** — the content bucket is named `<your-id>-content` (the publish
-pipeline derives this name from the brand id):
+## Verify before publishing
 
-```
-npx wrangler r2 bucket create <your-id>-content
+Run the read-only diagnostics locally:
+
+```text
+npm run doctor
+npm run doctor -- --json
 ```
 
-**No custom domain is needed.** With `contentOrigin`/`CONTENT_ORIGIN` left
-empty (the default), the Worker serves the bucket's content itself, same-origin:
-`contentUrl()` builds root-relative URLs and `GET /manifest.json` and
-`GET /books/*` answer straight out of the `CONTENT` binding, with the same
-cache-control the pipeline wrote each object with. A fresh deployment loads
-content the moment `publish.mjs` finishes — nothing to configure.
+After deployment, verify the live origin, Admin sign-in, engine and Worker
+versions, update preflight, and content manifest. Follow
+[Deployment safety](deployment-safety.md) before changing an existing
+production library.
 
-**Optionally**, serve content from its own domain instead: set
-`contentOrigin`/`CONTENT_ORIGIN` to e.g. `https://content.example.com` and
-attach an R2 **custom domain** to the bucket. The pipeline uploads objects at
-the bucket root, and an R2 custom domain serves the bucket root at the domain
-root — so `content.example.com/manifest.json` maps to the `manifest.json`
-object. Why bother: content requests then bypass the Worker entirely — zero
-Worker invocations for chapter JSON, audio and art, which matters for
-free-tier headroom on a high-traffic site, and it lets you put a different CDN
-or caching policy in front of content than in front of the app. (See
-[`architecture.md`](architecture.md).) The trade-off is real DNS work: R2
-custom domains require the domain to be in your Cloudflare zone. Same-origin
-costs one Worker invocation per content fetch — mostly absorbed in practice by
-the service worker's aggressive content caching and the year-long
-`Cache-Control` on hashed objects.
+## Publish a story or book
 
-## 4. Set secrets
+The generated project uses `content/` as its default Markdown source:
 
-These are **Worker secrets**, never committed. Set the ones you need per env:
-
-```
-npx wrangler secret put VAPID_PUBLIC_KEY   --env <your-id>
-npx wrangler secret put VAPID_PRIVATE_KEY  --env <your-id>
-npx wrangler secret put ADMIN_KEY          --env <your-id>
-npx wrangler secret put RESEND_API_KEY     --env <your-id>
-npx wrangler secret put GOOGLE_CLIENT_ID   --env <your-id>
-npx wrangler secret put GOOGLE_CLIENT_SECRET --env <your-id>
+```text
+npm run publish
 ```
 
-| Secret | Needed for | Notes |
-|---|---|---|
-| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Web push | Generate with `node packages/pipeline/gen-vapid.mjs`. Put the **public** key in `deployment/<id>/deployment.json` `vapidPublicKey` *and* the Worker secret; the **private** key is Worker-only. See [`push.md`](push.md). |
-| `ADMIN_KEY` | Minting admin setup links; `POST /api/admin/publish` | **Not** the admin login — `/admin` is gated by a normal email+password account (see [`admin-guide.md`](admin-guide.md)). This secret mints the first admin setup link and the printed recovery codes, and the publish pipeline sends it as `X-Admin-Key` to fire push notifications. Without it, publishing still works (it just skips the notify step) but you have no way to create the first operator account. |
-| `RESEND_API_KEY` | Magic-link email | Only if you enable the (currently dormant) magic-link path. See [`auth.md`](auth.md). |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in | Only if you enable the (currently dormant) Google path. |
-| `GITHUB_REPO` / `GITHUB_DEPLOY_TOKEN` | Admin-portal story upload only | `GITHUB_REPO` is `owner/repo` for your site's own repo; `GITHUB_DEPLOY_TOKEN` is a fine-grained PAT with Contents:write + Actions:write on just that repo. Without these, story upload from `/admin` is disabled and everything else is unaffected — see [`admin-guide.md`](admin-guide.md). **Engine updates do not use these**: they run from your machine with your own platform login, see [`updating.md`](updating.md). |
-| `ADMIN_EMAIL` | Proactive update emails | With `RESEND_API_KEY` also set, the daily scheduled check (Cron Trigger — already in `wrangler.jsonc`) emails this address when a new release exists, so you hear about it without opening `/admin`. Without it, the daily check still runs but stays silent; `/admin` always shows the current status regardless. |
+A single `type: story` file publishes a standalone story. A
+`type: book` declaration plus ordered `type: chapter` files publishes a
+multi-chapter book; both shapes can coexist. The bundled narrator is the free
+default on a local publisher machine. Use `--no-audio` only when you
+intentionally want text-only content.
 
-Password + passkey sign-in need **no** secrets.
+See [Authoring stories and books](authoring-stories.md),
+[Publishing stories and books](publishing-stories.md), and the
+[Content pipeline](content-pipeline.md).
 
-## 5. Build and deploy
+## Operate the deployment
 
-```
-npm run build -w app -- --mode <your-id>
-npx wrangler deploy --env <your-id>
-```
+Open `/admin` for:
 
-The root `npm run deploy` is hardcoded to the `storylark` brand/env; for your own
-brand, run the two commands above (or add a matching script to `package.json`).
+- **Stories & Books** — upload, edit, reorder, version, or delete
+  deployment-owned content;
+- narration status and retries;
+- brand and **Theme version history**;
+- **Connections** for repo connections saved through StoryLark;
+- **Check for updates**, **Update now**, engine history, and rollback.
 
-## 6. Publish content
+A GitHub Actions workflow that reads a repository and publishes through the
+content API does not create an Admin repo connection. Use **Connect a repo** if
+you want StoryLark to store and operate that connection. See the
+[Admin guide](admin-guide.md).
 
-Your site boots as an empty shelf until you publish. Point the pipeline at your
-content source and a parser you own:
+## Manual and advanced reference
 
-```
-node packages/pipeline/publish.mjs --brand <your-id> \
-  --source <path-to-your-content> \
-  --parser <path-to-your-parser.mjs>
-```
+The generated project includes `platforms/cloudflare/install.mjs` and an
+example `install.env` for scripted verification, deployment, update, repair,
+and explicit self-update opt-out. The exhaustive bindings, variables, secrets,
+and route behavior live in the
+[engine deployment reference](https://github.com/StoryLark/storylark/blob/main/docs/deploy-worker.md).
 
-Full pipeline reference, flags, and the parser contract:
-[`content-pipeline.md`](content-pipeline.md).
-
-## Free-tier note
-
-The default architecture is tuned to fit Cloudflare + Azure Speech free tiers
-(see the budget table in [`architecture.md`](architecture.md)). The publish
-pipeline enforces a monthly TTS character budget with a hard stop; heavier usage
-means moving off the free tiers.
+Cloudflare free limits are real limits, not an unlimited-hosting promise. App
+assets and API requests traverse the Worker so runtime engine updates can be
+selected; published content can use the R2 custom domain. Review the current
+[architecture and budget notes](architecture.md) before estimating production
+traffic.

@@ -3,7 +3,7 @@
 ```
                      ┌──────────────────────────────┐
    user ──────────── │  app.<brand>.com  (Worker)   │
-                     │  ├─ static assets (free)     │
+                     │  ├─ app assets / engine      │
                      │  └─ /api/* → Hono + D1       │
                      └──────────────┬───────────────┘
                                     │ cookies, JSON
@@ -14,7 +14,7 @@
    └────────────────────────────────────┘
 
    publish (dev box / Actions): packages/pipeline/publish.mjs
-     markdown → blocks → Azure TTS (F0) → ffmpeg stitch → R2 → POST /api/admin/publish → web push
+     markdown → blocks → bundled Kokoro or Azure TTS → ffmpeg stitch → R2 → manifest
 ```
 
 ## The three-layer package model
@@ -38,9 +38,17 @@ Changesets (see `.changeset/` and the Release workflow).
 
 ## Load-bearing decisions
 
-- **One Worker per brand, one repo.** A build selects the brand (`vite build --mode <brand>`), but identity and theme leave the build as files the deployment serves and re-reads per request, so swapping them needs no rebuild ([design note](design/runtime-brand.md)). Adding a brand = new `brands/<id>/` folder + wrangler env + bootstrap. No shared-code changes (Phase 9 acceptance test).
+- **One deployment per publisher brand.** A generated publisher site pins the
+  engine packages and owns its brand, presentation, deployment config, and
+  content. Runtime brand/theme/presentation overrides are stored separately
+  from engine assets, so an engine update cannot overwrite them.
 - **D1 per brand.** No cross-brand queries exist, so isolation beats a shared DB with a brand column.
-- **Content on R2 custom domain, not through the Worker.** Audio bytes and Range requests never spend Worker CPU/requests; Cloudflare edge caches them; egress is free.
+- **Content on an R2 custom domain, not through the Worker.** Audio bytes and
+  Range requests never spend Worker CPU/requests; Cloudflare edge caches them;
+  R2 egress is free. App assets are different: `run_worker_first: ["/*"]`
+  deliberately lets the Worker select an installed engine version before
+  falling back to the built-in static asset. This is what makes **Update now**
+  work without rebuilding a site.
 - **Cookie sessions (HttpOnly, SameSite=Lax).** App and API are same-origin, so cookies just work — including from the service worker. CSRF covered by the `X-Requested-With: storylark` header requirement on mutations.
 - **Payload-less web push.** The Worker only signs a VAPID JWT — no RFC 8291 encryption. The SW wakes, fetches the manifest, and composes the notification itself.
 - **Publish-time TTS, not on-demand.** F0 is free but slow (20 req/min); narration is generated once per chapter revision and stored forever.
@@ -49,11 +57,16 @@ Changesets (see `.changeset/` and the Release workflow).
 
 | Resource | Limit | Our usage |
 |---|---|---|
-| Workers requests | 100k/day | API-only (assets are free) — small |
-| Worker CPU | 10 ms | JSON + D1 queries only |
+| Workers requests | 100k/day | App assets and API requests both traverse the Worker; cache and monitor real traffic |
+| Worker CPU | 10 ms/request | Static fallback is light; API, Admin, and update routes do real work |
 | D1 | 5M reads / 100k writes /day | progress writes debounced 30 s |
-| R2 | 10 GB, zero egress | ~0.7 MB/min audio; monitor at scale |
+| R2 Standard | 10 GB-month, 1M Class A and 10M Class B operations/month; zero egress | Narration audio dominates storage; monitor reads and writes as the library grows |
 | Azure Speech F0 | 500K chars/month | ledger in .storylark/state, hard stop at 450K |
 | Resend | 100 emails/day | magic links only |
 
-Per-topic details live in the sibling docs.
+Limits are platform limits, not a guarantee that every deployment remains
+free. Check the current [Workers limits](https://developers.cloudflare.com/workers/platform/limits/),
+[D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/), and
+[R2 pricing](https://developers.cloudflare.com/r2/pricing/) before estimating a
+production audience; the numbers above were verified in August 2026. Per-topic
+StoryLark details live in the sibling docs.

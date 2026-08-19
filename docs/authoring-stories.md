@@ -1,4 +1,4 @@
-# Authoring Stories
+# Authoring Stories & Books
 
 StoryLark's default, built-in story format is plain markdown in a folder
 convention — no code, no custom parser. `packages/pipeline/publish.mjs` reads
@@ -149,14 +149,13 @@ for the full table (scene breaks, dialogue blocks, images, italics, etc.).
 ## Publishing
 
 ```
-node packages/pipeline/publish.mjs --brand <id> --source <path-to-your-source>
+npx storylark-publish --brand <id> --source <path-to-your-source>
 ```
 
 No `--parser` flag. Add `--no-audio` if you don't have TTS credentials set
 up yet, and `--local <dir>` to publish to a local folder instead of the
 cloud while you're getting the format right. See
 [`content-pipeline.md`](content-pipeline.md) for every flag.
-
 ## When this layout already lives in a repository
 
 If these files are in a git repository that is *your* source of truth — a

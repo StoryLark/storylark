@@ -83,35 +83,51 @@ chapters are published, and how many devices are subscribed to push
 notifications. Book/chapter counts come from the public manifest; if it's
 briefly unreachable, they show as `—` rather than breaking the page.
 
-**Platform update** — current version vs. latest, a link to release notes,
-and the command that performs the update, ready to copy. By default there is
-no install button: updates run from your own machine with the platform
-credentials you already have, so this deployment stores nothing that could
-deploy on your behalf.
+**Platform update** — the installed engine and Worker versions, the latest
+release, release notes, and a permanent **Check for updates** button. When an
+update is available, **Update now** downloads a checksum-verified prebuilt
+engine, applies additive migrations, and switches atomically without touching
+your brand, theme, presentation, or content. Releases that also change the API
+server use the deployment permission provisioned by the installer. A missing
+self-update permission is a fault (or an explicit `SELF_UPDATE=off` opt-out),
+not the normal state. The installer command remains the documented fallback.
+See [`updating.md`](updating.md).
 
-If you'd rather have the button, you can enable it per deployment
-(`install.mjs --enable-one-click --yes`) — it downloads a prebuilt,
-checksum-verified engine and redeploys through your own platform, without a
-build running anywhere and without touching your brand or content. It stays
-off until you turn it on, the command keeps working either way, and one
-command turns it back off. See [`updating.md`](updating.md) for the full
-flow and for exactly what the button can and cannot do.
-
-**Stories** (or **Books**, depending on how your library is arranged) — the
-content manager. Browse what's published, open any chapter, edit it as plain
-markdown with a live preview, and save. Covered in full below.
+**Stories & Books** — the content manager for standalone stories,
+multi-chapter books, and mixed libraries. Browse what's published, open a
+chapter, edit it as plain markdown with a live preview, or remove content with
+typed confirmation. The first-use screen offers four distinct doors: **Upload
+markdown**, **Connect a repo**, **CMS / API**, and **Publish with narration
+(GitHub)**. Covered in full below.
 
 **Narration** — the bulk narration queue: which chapters are waiting for
 audio, which are being narrated, which failed and why, and a real time
 estimate once anything has finished. Covered below.
 
 **Brand & themes** — what your site looks like and what it calls itself.
-Install a theme package, edit your brand's own details, see every version
-you've installed, and roll back. Covered below.
+Install a theme package, edit your brand's own details, see **Theme version
+history**, and roll back. A history entry such as `Theme: Holdfast Reader
+v1.0.0+1` identifies a theme package revision; it is not the StoryLark engine
+version. Engine versions live under Platform update / System. Covered below.
 
-**Publish a story** — book id, title, author, and markdown text. See
-[`publishing-stories.md`](publishing-stories.md) for the full picture,
-including why this is text-only today and how narration gets added.
+**Publish content** — upload Markdown directly, use the GitHub-backed publisher
+for narration, connect a repository, or push from a CMS through the content
+API. See [`publishing-stories.md`](publishing-stories.md).
+
+**Connections** — saved source connections owned by this deployment. The
+repository panel appears only after an administrator completes **Connect a
+repo** and StoryLark stores that validated connection. A GitHub Actions job or
+other publisher can read a repository and push the result through the content
+API, but that is an external publishing pipeline, not an Admin repo connection;
+it therefore does not create repository details on this screen.
+
+This distinction is visible in content ownership too: an Admin repo connection
+records repo mode and supports **Sync now**, scheduled sync, webhook status,
+and per-file results. Content pushed by Actions or a CMS records API/external
+ownership and is managed at that source. Do not create a fake connection row
+just to make the panel appear. For a private repo, configure a durable,
+repository-scoped read credential through the connection flow; a short-lived
+GitHub App installation token is not suitable as the saved sync credential.
 
 ## Editing your content
 
@@ -142,13 +158,16 @@ What you get on a chapter:
   that already exists. Readers get the new text either way; ticked, nobody is
   notified. Untick it only when this is genuinely new writing worth waking a
   phone for.
+- **Delete with typed confirmation** — available for content this deployment
+  owns. Synced or API-managed content stays read-only and must be removed at its
+  source, then published or synced again.
 
 **Narration doesn't happen here.** Text publishes immediately, but this
 deployment can't generate speech — that needs the publish pipeline. So after a
 text edit the chapter is marked *audio out of date* until you run:
 
 ```bash
-node packages/pipeline/publish.mjs --brand <id> --source <path> --pull
+npx storylark-publish --brand <id> --source <path> --pull
 ```
 
 `--pull` matters: it brings your portal edits back into your working copy
@@ -181,7 +200,7 @@ side. See [`content-sync.md`](content-sync.md).
 
 ## Narration
 
-**Stories** covers the text. Getting audio for it is a separate step, and the
+**Stories & Books** covers the text. Getting audio for it is a separate step, and the
 **Narration** card is where you watch it happen.
 
 Saving a chapter, reverting one, a push over the [content API](content-api.md),
@@ -215,7 +234,7 @@ is to hold the queue; draining it means running, wherever your publishing
 already runs (a laptop, a scheduled GitHub Actions job, a box in the corner):
 
 ```bash
-node packages/pipeline/narrate.mjs --brand <brand-id>
+npx storylark-narrate --brand <brand-id>
 ```
 
 The card shows this exact command, in the deployment's own words, rather than a
@@ -244,8 +263,10 @@ Two ways in, deliberately:
   Build one with `npm run package-theme`; see
   [`build-your-own-theme.md`](build-your-own-theme.md).
 
-Both write the same thing, so both appear in the same version history, roll back
-the same way, and can be **downloaded as a package**.
+Both write the same thing, so both appear in **Theme version history**, roll
+back the same way, and can be **downloaded as a package**. The displayed name,
+version, date, and actor describe the installed theme package or brand edit,
+not the StoryLark engine release.
 
 **A package is checked completely before anything changes.** Missing icons, an
 icon at the wrong size, missing design tokens, a `contractVersion` this engine
@@ -326,8 +347,16 @@ never a question of which one is "really" correct.
 
 - **"not_configured" errors** — the two GitHub secrets above aren't set on
   this deployment. They affect story upload only.
-- **Update card says you're up to date** — you are; it read the version out
-  of the running deployment and compared it against npm.
+- **Update card says you're up to date** — it read the running versions and
+  compared them against npm. Use **Check for updates** to refresh the result.
+- **Update now is unavailable or reports missing permission** — self-update
+  was explicitly disabled or the deployment was not provisioned correctly.
+  Run the platform installer update/repair path described in
+  [`updating.md`](updating.md); do not treat this as the expected configuration.
+- **Connections has no repository details** — no Admin repo connection is
+  stored. A GitHub Actions workflow that publishes repository content through
+  the API does not populate this panel; configure **Connect a repo** if you want
+  StoryLark itself to own and display the connection.
 - **Status shows `—` for book/chapter counts** — the manifest was
   unreachable when the page loaded; try refreshing.
 - **Story upload says "committed but publishing failed to start"** — the

@@ -14,7 +14,7 @@ your source (markdown by default)
 packages/pipeline/publish.mjs
    ├─ diff by content hash (only changed chapters proceed)
    ├─ chapter JSON                          books/<id>/chapters/<ch>.<hash>.json
-   ├─ Azure neural TTS per block → stitch   books/<id>/audio/<ch>.<hash>.mp3
+   ├─ bundled or Azure TTS per block → stitch books/<id>/audio/<ch>.<hash>.mp3
    │    + word timings                      books/<id>/timings/<ch>.<hash>.json
    ├─ covers (hashed)                       books/<id>/covers/cover.<hash>.<ext>
    ├─ manifest.json (uploaded LAST)         manifest.json
@@ -23,9 +23,21 @@ packages/pipeline/publish.mjs
 
 ## Command
 
+For a generated publisher site, the package script already supplies the brand
+and `content/` source:
+
+```text
+npm run publish -- [flags]
 ```
-node packages/pipeline/publish.mjs --brand <id> --source <path> [flags]
+
+For custom automation, use the installed binary:
+
+```text
+npx storylark-publish --brand <id> --source <path> [flags]
 ```
+
+Inside an engine checkout, the equivalent contributor command is
+`node packages/pipeline/publish.mjs`.
 
 The two required flags:
 
@@ -34,7 +46,7 @@ The two required flags:
 | `--brand <id>` | yes | Selects `brands/<id>/brand.json` + `deployment/<id>/deployment.json` and the content bucket `<id>-content`. |
 | `--source <path>` | yes | Path to your content source — a `books/` folder in the [markdown format](authoring-stories.md) by default. |
 
-> The root `npm run publish` script only passes `--brand storylark`, so it will
+> In the engine monorepo, the root `npm run publish` script only passes `--brand storylark`, so it will
 > exit with the usage message on its own. Append the rest after `--`, e.g.
 > `npm run publish -- --source examples/demo`.
 
@@ -43,7 +55,7 @@ The two required flags:
 | Flag | Effect |
 |---|---|
 | `--book <id>` | Publish only this book/unit. |
-| `--no-audio` | Skip TTS — text-only publish. Listen mode then uses the on-device Web Speech fallback. Required if you don't have Azure Speech credentials. |
+| `--no-audio` | Skip TTS — text-only publish. Listen mode then uses the on-device Web Speech fallback. Azure credentials are not required for the bundled narrator. |
 | `--local <dir>` | Mirror the storage layout into `<dir>` on disk instead of uploading to a remote bucket/container. **No cloud account needed.** Serve `<dir>` at the brand's `contentOrigin` (e.g. `--local app/dist` for same-origin dev). |
 | `--storage r2\|azure-blob` | Which storage driver to publish through (default `r2`). See [`deploy-azure.md`](deploy-azure.md) for the Azure path. |
 | `--parser <module>` | Use a site-owned parser instead of the built-in markdown importer — for content that isn't plain markdown. Contract below. |
@@ -84,7 +96,7 @@ See [`content-sync.md`](content-sync.md).
 
 | Var | For | Notes |
 |---|---|---|
-| `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` | TTS audio | Required unless `--no-audio`. The pipeline exits if audio is wanted but these are unset. |
+| `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` | Optional Azure TTS | Required only when the configured voice uses Azure. The bundled Kokoro narrator needs no account or API key. |
 | `ADMIN_KEY` | Push notify | Sent as `X-Admin-Key` to `POST /api/admin/publish` as the final step. If unset, notify is skipped (publish still succeeds). Always skipped in `--local` mode. |
 
 `ffmpeg` and `ffprobe` must be on `PATH` for the audio stitch step
@@ -181,9 +193,10 @@ provider:
 - **Bundled local voices (the default — free, no account).** Kokoro voice ids
   (`af_heart`, `bm_fable`, …) run the Apache-licensed **Kokoro-82M** model on
   your own machine via `packages/pipeline/tts-kokoro.mjs`. 28 English voices ship with it;
-  the model (~90 MB) downloads on first use and is cached. Word timings are
-  estimated: each sentence's duration is exact, and words inside it are
-  apportioned by length — accurate enough for read-along highlighting.
+  the model (~90 MB) downloads on first use and is cached. Per-word timing starts
+  as a length-based estimate and is then force-aligned against the actual audio
+  with Whisper timestamps. If alignment fails, publishing reports the fallback
+  and keeps the estimate; `STORYLARK_NO_ALIGN=1` deliberately skips alignment.
   `af_heart` is StoryLark's default narrator.
 - **Azure neural TTS (optional premium tier — bring your own key).**
   `packages/pipeline/tts.mjs` calls Azure one block at a time, using voices like
@@ -240,7 +253,7 @@ publish that silently rewrote your working tree would be worse than the problem
 it solves:
 
 ```bash
-node packages/pipeline/publish.mjs --brand <id> --source <path> --pull
+npx storylark-publish --brand <id> --source <path> --pull
 ```
 
 It reads the live manifest over the public content origin (no credential — the
