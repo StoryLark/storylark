@@ -65,6 +65,20 @@ async function collectValues(rl, platform) {
   for (const [key, prompt] of PLATFORMS[platform].fields) {
     values[key] = await rl.question(`${prompt}: `);
   }
+
+  const source = (await rl.question('\nContent source — portal, repo, or api [portal]: ')).trim().toLowerCase() || 'portal';
+  values.CONTENT_SOURCE = source;
+  if (source === 'repo') {
+    values.CONTENT_REPO_URL = await rl.question('GitHub repository URL (https://github.com/owner/repo): ');
+    values.CONTENT_REPO_VISIBILITY =
+      (await rl.question('Repository visibility — public or private [private]: ')).trim().toLowerCase() || 'private';
+    values.CONTENT_REPO_BRANCH = (await rl.question('Branch [main]: ')).trim() || 'main';
+    values.CONTENT_REPO_PATH = await rl.question('Content path inside the repository [(root)]: ');
+    if (values.CONTENT_REPO_VISIBILITY === 'private') {
+      console.log('Use a read-only credential limited to this repository. It is stored as a platform secret, never in deployment.json.');
+      values.CONTENT_SYNC_TOKEN = await rl.question('Read-only repository token: ');
+    }
+  }
   return values;
 }
 

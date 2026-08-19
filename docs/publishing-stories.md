@@ -1,9 +1,10 @@
 # Publishing Stories & Books
 
 StoryLark supports standalone stories, multi-chapter books, and a library that
-contains both. Content can arrive through Admin, the CLI pipeline, a saved repo
-connection, GitHub Actions, or the versioned content API. These paths share the
-same content gate, but they do not all create the same kind of connection.
+contains both. The supported setup starts with one of three content entry
+points: **Portal**, **Repository**, or **CMS / API**. The CLI and generated
+GitHub workflows remain useful publishing tools, but they are not extra
+connection types.
 
 ## Format first
 
@@ -16,19 +17,19 @@ story; a folder with book metadata and ordered chapter files is a book. See
 
 Pick one owner for each book or story:
 
-| Path | Source of truth | Narration | Shown as an Admin repo connection? |
+| Path | Source of truth | Narration | What Connections shows |
 |---|---|---|---|
-| Upload Markdown in Admin | The deployment | Queued after text is saved | No |
-| Publish with narration (GitHub) | The publisher site's repository | The GitHub workflow runs the pipeline | No |
-| Connect a repo in Admin | The connected repository | Queued/published by the configured pipeline | **Yes** |
-| Your GitHub Actions or CMS calling the content API | Your external system | Whatever that pipeline publishes or queues | No |
-| CLI publish | Your local source tree | The CLI can generate text, audio, and timings | No |
+| Portal / Upload Markdown | The deployment | Queued after text is saved | Portal mode |
+| Repository (wizard or Admin) | The connected repository | Changed text is queued for the narration worker | Saved repository details and sync status |
+| CMS / API | Your external system | Whatever that system publishes or queues | API mode and tokens |
+| Publish with narration (GitHub) | The publisher site's repository | The GitHub workflow runs the pipeline | Publishing tool; not a saved repo connection |
+| CLI publish | Your local source tree | The CLI can generate text, audio, and timings | Publishing tool; not a saved repo connection |
 
-The last column is important. **Connections displays only connections saved by
-StoryLark's own Connect a repo flow.** A workflow can read the same repository
-and publish perfectly valid content through `/api/content/v1`, but StoryLark
-correctly records that as API/external publishing. It does not invent a repo
-connection it cannot manage, sync, or authenticate.
+The last column is important. **Repository mode is saved by StoryLark's setup
+wizard or Connect a repo flow.** If Repository was selected during setup and
+Connections is blank, installation did not finish correctly. A deliberately
+configured advanced workflow can still clone a repository and publish through
+`/api/content/v1`, but that is a publishing tool rather than a saved connection.
 
 ## Admin: Upload Markdown
 
@@ -45,10 +46,11 @@ read-only: change or remove it in its source system, then publish or sync again.
 
 ## Admin: Connect a repo
 
-Choose **Connect a repo** when you want StoryLark itself to store and operate a
-read-only repository connection. The flow validates the repository before it
-writes anything and, once saved, Connections shows the URL, branch, path,
-credential presence, last/next sync, **Sync now**, and per-file results.
+Choose **Repository** in the setup wizard, or **Connect a repo** later, when you
+want StoryLark itself to store and operate a read-only repository connection.
+The flow validates the repository before it writes anything and, once saved,
+Connections shows the URL, branch, path, credential presence, last/next sync,
+**Sync now**, webhook state, and per-file results.
 
 Public repositories need no credential. Private repositories need a durable,
 read-only token scoped to that repository. Never commit it. A GitHub App

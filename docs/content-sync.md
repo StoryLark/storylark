@@ -54,6 +54,12 @@ The portal's **Connections** section is the whole setup: provider (GitHub at
 launch — other providers are additive drivers), repository URL, visibility,
 branch, path, a read-only token, and a pull interval.
 
+The supported setup wizard offers the same three-way choice before the first
+deploy. Selecting **Repository** stores a private credential as the platform's
+`CONTENT_SYNC_TOKEN` secret, dry-runs every candidate, saves the connection, and
+performs the initial sync. The resulting settings must be visible under
+Connections; a blank repository panel means setup did not complete.
+
 What to know before connecting:
 
 - **Strict contract, one gate.** Only files carrying a `storylark:` block are
@@ -122,9 +128,10 @@ keeps working):
 }
 ```
 
-## Exactly two connectors
+## Advanced pipeline pull connectors
 
-StoryLark ships **two** pull connectors and will not grow a third:
+Separately from the deployment-owned Repository connection above, the optional
+CI/local `sync.mjs` publisher ships two pull connectors:
 
 - **`git`** — a repository of markdown in StoryLark's own
   [folder-per-book layout](authoring-stories.md).
@@ -204,18 +211,20 @@ would end up in logs, in error messages and in the public manifest.
 
 ### Scheduling
 
-Run it wherever your publishes already run. Narration needs the TTS model, and a
-deployment can't run that — a Worker has no way to synthesise speech — so an
-in-deployment scheduled sync could only ever produce silent, permanently
-audio-stale content for a whole catalogue. Scheduling therefore lives with the
-pipeline:
+Run it wherever your publishes already run. This is the advanced clone-and-
+publish path, not the scheduler for a saved Admin connection. A saved
+connection pulls in the deployment on its daily cron (and on signed webhooks),
+then queues changed chapters; the generated `narrate.yml` drains that queue in
+an environment that has speech tooling and FFmpeg.
+
+For the optional pipeline path:
 
 - **GitHub Actions** — every site scaffolded by `npm create storylark` gets
   `.github/workflows/sync.yml` (from
   [`create-storylark/template/.github/workflows/sync.yml.tmpl`](../create-storylark/template/.github/workflows/sync.yml.tmpl)):
   a nightly cron plus a manual-run button, alongside the `publish.yml` it
-  already ships. Set the `SYNC_KIND`/`SYNC_URL` repository variables to turn it
-  on; with none set it stops and says so rather than doing anything surprising.
+  already ships. It remains skipped unless an experienced operator explicitly
+  sets the `SYNC_KIND`/`SYNC_URL` repository variables.
   Delete the file if your content lives in the site itself.
 - **Anything else** — cron, systemd timer, Task Scheduler, your own CI. It's one
   command and it exits non-zero on failure.

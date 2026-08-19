@@ -114,20 +114,20 @@ version. Engine versions live under Platform update / System. Covered below.
 for narration, connect a repository, or push from a CMS through the content
 API. See [`publishing-stories.md`](publishing-stories.md).
 
-**Connections** — saved source connections owned by this deployment. The
-repository panel appears only after an administrator completes **Connect a
-repo** and StoryLark stores that validated connection. A GitHub Actions job or
-other publisher can read a repository and push the result through the content
-API, but that is an external publishing pipeline, not an Admin repo connection;
-it therefore does not create repository details on this screen.
+**Connections** — the content-source control plane for this deployment:
+**Portal**, **Repository**, or **CMS / API**. A repository selected during the
+supported setup wizard is validated, saved, and initially synced here; the same
+flow is available later through **Connect a repo**. After either path,
+Connections shows the URL, visibility, branch, path, credential status, sync
+schedule, webhook state, and last result.
 
-This distinction is visible in content ownership too: an Admin repo connection
-records repo mode and supports **Sync now**, scheduled sync, webhook status,
-and per-file results. Content pushed by Actions or a CMS records API/external
-ownership and is managed at that source. Do not create a fake connection row
-just to make the panel appear. For a private repo, configure a durable,
-repository-scoped read credential through the connection flow; a short-lived
-GitHub App installation token is not suitable as the saved sync credential.
+A saved repo connection records repo mode and supports **Sync now**, scheduled
+sync, webhook status, and per-file results. Content pushed by a CMS records
+API/external ownership and is managed at that source. The optional generated
+`sync.yml` is a separate, advanced CI-clone publisher and does not populate this
+screen. For a private repo, configure a durable, repository-scoped read
+credential through the wizard or connection flow; a short-lived GitHub App
+installation token is not suitable as the saved scheduled-sync credential.
 
 ## Editing your content
 
@@ -353,10 +353,11 @@ never a question of which one is "really" correct.
   was explicitly disabled or the deployment was not provisioned correctly.
   Run the platform installer update/repair path described in
   [`updating.md`](updating.md); do not treat this as the expected configuration.
-- **Connections has no repository details** — no Admin repo connection is
-  stored. A GitHub Actions workflow that publishes repository content through
-  the API does not populate this panel; configure **Connect a repo** if you want
-  StoryLark itself to own and display the connection.
+- **Connections has no repository details after Repository was selected during
+  setup** — the deployment is not correctly provisioned. Re-run the supported
+  installer repair/update path or configure **Connect a repo** in Admin. A
+  successful save always shows the URL, branch, path, credential status, and
+  sync result here.
 - **Status shows `—` for book/chapter counts** — the manifest was
   unreachable when the page loaded; try refreshing.
 - **Story upload says "committed but publishing failed to start"** — the

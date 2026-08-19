@@ -60,9 +60,18 @@ an engine update does not overwrite them. See
 ## Run the setup wizard
 
 `npm run setup` asks for the brand id, app URL, optional content URL, sender
-identity, and app name. It writes the gitignored
+identity, app name, and the content entry point: **Portal**, **Repository**, or
+**CMS / API**. It writes the gitignored
 `platforms/cloudflare/install.env`, verifies the values and Wrangler session,
 and asks before creating resources.
+
+Choose **Repository** when Markdown and images already live in GitHub. The
+wizard asks for the URL, visibility, branch, optional path, and—only for a
+private repository—a durable read-only credential limited to that repository.
+The installer stores the credential as a Worker secret, dry-runs the complete
+repository through StoryLark's content gate, saves the connection, and performs
+the initial sync. It stops with file-specific validation errors instead of
+creating a half-configured connection.
 
 The installer creates or configures:
 
@@ -70,6 +79,8 @@ The installer creates or configures:
 - one D1 database and its migrations;
 - one R2 bucket for content, runtime themes, and installed engine versions;
 - the scheduled trigger used for update checks and saved repo connections;
+- the selected initial content source, including a validated and initially
+  synced repository connection when Repository was selected;
 - the first Admin setup link and recovery codes;
 - self-update permission for API-server releases, unless you explicitly opt
   out.
@@ -138,9 +149,10 @@ Open `/admin` for:
 - **Connections** for repo connections saved through StoryLark;
 - **Check for updates**, **Update now**, engine history, and rollback.
 
-A GitHub Actions workflow that reads a repository and publishes through the
-content API does not create an Admin repo connection. Use **Connect a repo** if
-you want StoryLark to store and operate that connection. See the
+For a repository-owned catalogue, use the wizard's **Repository** choice or
+**Connections → Connect a repo** in Admin. The generated `sync.yml` is an
+advanced CI-clone alternative and remains skipped unless an operator explicitly
+configures its `SYNC_URL`; it is not the normal repository setup path. See the
 [Admin guide](admin-guide.md).
 
 ## Manual and advanced reference
