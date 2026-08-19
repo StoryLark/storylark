@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+### Patch Changes
+
+- [#34](https://github.com/StoryLark/storylark/pull/34) [`38a1385`](https://github.com/StoryLark/storylark/commit/38a1385707453a8295ec1a115bcc5bb2281e5b1e) Thanks [@hcs-platform-app](https://github.com/apps/hcs-platform-app)! - Fix PDF text import on Safari and installed iPhone/iPad PWAs by consuming PDF.js text streams through the supported reader API.
+
 ## 1.0.0
 
 ### Major Changes
