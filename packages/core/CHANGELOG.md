@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.0
+
+### Minor Changes
+
+- [#25](https://github.com/StoryLark/storylark/pull/25) [`ed947a0`](https://github.com/StoryLark/storylark/commit/ed947a09bcb8c116ff303bf648f63b5617e14ed6) Thanks [@hcs-platform-app](https://github.com/apps/hcs-platform-app)! - Let readers save a personal default order for ungrouped library shelves while keeping chapter order publisher-controlled.
+
 ## 0.19.2
 
 ### Patch Changes
