@@ -1,5 +1,11 @@
 # storylark-worker
 
+## 0.19.3
+
+### Patch Changes
+
+- [#17](https://github.com/StoryLark/storylark/pull/17) [`8089a3b`](https://github.com/StoryLark/storylark/commit/8089a3b4023a3aeedced9c89ea633e2caead6029) Thanks [@hcs-platform-app](https://github.com/apps/hcs-platform-app)! - Batch repository-sync ownership and metadata updates into one manifest write so large standalone-story libraries complete within Worker execution limits. Unchanged cover assets are no longer rewritten during a no-op sync.
+
 ## 0.19.1
 
 ### Patch Changes
