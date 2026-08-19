@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.2
+
+### Patch Changes
+
+- [#14](https://github.com/StoryLark/storylark/pull/14) [`0fe4e63`](https://github.com/StoryLark/storylark/commit/0fe4e63c430b0d3deff6510506e1ec12837cd97c) Thanks [@hcs-platform-app](https://github.com/apps/hcs-platform-app)! - Rename the Admin content section to **Stories & Books** so the portal clearly welcomes both standalone stories and multi-chapter books. Clarify that the brand-version list is theme history rather than the StoryLark engine version.
+
 ## 0.19.1
 
 ### Patch Changes
