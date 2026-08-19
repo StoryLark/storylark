@@ -33,10 +33,9 @@ name: Narrate queued content
 
 on:
   schedule:
-    # Nightly, 58 minutes past the hour sync.yml runs on. Off the hour, and
-    # after sync, so a sync's freshly-queued chapters get picked up the same
-    # night rather than waiting for the following one.
-    - cron: '58 4 * * *'
+    # The deployment's saved repository pull runs at 13:00 UTC. Webhooks
+    # normally queue changes immediately; this daily drain is the recovery path.
+    - cron: '30 13 * * *'
   workflow_dispatch:
 
 concurrency: narrate-content
@@ -49,6 +48,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
       - run: npm ci
 
       - name: Drain the narration queue

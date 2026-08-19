@@ -1,9 +1,9 @@
 name: Sync content
 
-# Pull this site's library from an external source of truth on a schedule
-# (AB#7422). Delete this file if your stories live here rather than somewhere
-# else — with no SYNC_URL variable set it stops with an explanation and does
-# nothing.
+# Advanced alternative: clone an external source and publish it from CI
+# (AB#7422). The normal repository path is the saved connection configured by
+# the installer or Admin, which needs no clone job. This workflow stays skipped
+# unless an experienced operator deliberately sets SYNC_URL.
 #
 # Why this runs in CI rather than inside the deployment: narration needs the TTS
 # model, and neither a Worker nor an App Service request can run it. A scheduled
@@ -42,6 +42,7 @@ concurrency: publish-content
 
 jobs:
   sync:
+    if: ${{ vars.SYNC_URL != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,14 +50,6 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-
-      - name: Check a source is configured
-        run: |
-          if [ -z "${{ vars.SYNC_URL }}" ]; then
-            echo "::error::No SYNC_URL repository variable is set, so there is nothing to sync from."
-            echo "Set SYNC_KIND (git|feed) and SYNC_URL, or delete .github/workflows/sync.yml."
-            exit 1
-          fi
 
       - name: Sync and publish
         env:

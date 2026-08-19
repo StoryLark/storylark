@@ -188,6 +188,26 @@ async function connect(session) {
   return res.json;
 }
 
+test('the installer key can save the initial source through the dry-run gate but cannot operate the connection later', async (t) => {
+  const box = await syncDeployment();
+  t.after(() => box.close());
+
+  const connected = await box.dep.call('PUT', '/api/admin/content-source', {
+    mode: 'repo',
+    repo: CONNECTION,
+    syncNow: true,
+  });
+  assert.equal(connected.status, 200, connected.text);
+  assert.equal(connected.json.report.dryRun, true, 'the installer cannot bypass connection validation');
+  assert.equal(connected.json.initialSync.ok, true, connected.text);
+  assert.equal(connected.json.initialSync.chaptersWritten, 3);
+
+  const laterSync = await box.dep.call('POST', '/api/admin/content-source/sync');
+  assert.ok([401, 403].includes(laterSync.status), 'the shared deployment key is not an ongoing connection operator');
+  const readState = await box.dep.call('GET', '/api/admin/content-source');
+  assert.ok([401, 403].includes(readState.status), 'the deployment key cannot read connection details');
+});
+
 /* ────────────────────────────────────────────────────────────────────────────
  * The acceptance test: three transports, one gate, identical rejections
  * ──────────────────────────────────────────────────────────────────────────── */

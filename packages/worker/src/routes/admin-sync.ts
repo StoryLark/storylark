@@ -2,11 +2,11 @@
  * The Connections surface (content-management rework wave 2, AB#7420 —
  * design §4, §6, §7 / build steps 4, 5, 7, 10).
  *
- * Everything here is portal-only and session-gated, like adminContent: an
- * operator configuring where their content comes from is a person at a
- * browser, never a headless process. What headless callers get instead is the
- * webhook (signature-authenticated, in routes/content-api.ts) and the scoped
- * content-API tokens minted here.
+ * Everything here is session-gated except one deliberately narrow installer
+ * seam: PUT /content-source also accepts the deployment's ADMIN_KEY. That lets
+ * the supported installer run the SAME dry-run gate and save the initial
+ * source after provisioning. The key cannot read connection state, invoke
+ * later syncs, rotate webhooks, remove content, or mint content-API tokens.
  *
  * ── The three routes that matter, and their rules ───────────────────────────
  *   PUT  /content-source        the three-way choice (§4) + repo connection
@@ -25,7 +25,7 @@
  */
 
 import { Hono } from 'hono';
-import type { Context } from 'hono';
+import type { Context, Next } from 'hono';
 import type { AppContext } from '../types';
 import { requireAdmin } from '../lib/session';
 import { announceVersionOf, findBook, readManifest, refreshSingle, storeOf, writeManifest } from '../lib/content';
@@ -45,14 +45,22 @@ import { runRepoSync, type SyncReport } from '../lib/repo-sync';
 
 export const adminSync = new Hono<AppContext>();
 
-adminSync.use('/content-source', requireAdmin());
-adminSync.use('/content-source/*', requireAdmin());
+function requireAdminSessionOrInstallerKey() {
+  return async (c: Context<AppContext>, next: Next) => {
+    const installerSave = c.req.method === 'PUT' && c.req.path.endsWith('/api/admin/content-source');
+    if (installerSave && !!c.env.ADMIN_KEY && c.req.header('x-admin-key') === c.env.ADMIN_KEY) return next();
+    return requireAdmin()(c, next);
+  };
+}
+
+adminSync.use('/content-source', requireAdminSessionOrInstallerKey());
+adminSync.use('/content-source/*', requireAdminSessionOrInstallerKey());
 adminSync.use('/content-tokens', requireAdmin());
 adminSync.use('/content-tokens/*', requireAdmin());
 
 function actor(c: Context<AppContext>): string {
   const user = c.get('user');
-  return user?.username || user?.email || 'operator';
+  return user?.username || user?.email || (c.req.header('x-admin-key') === c.env.ADMIN_KEY ? 'installer' : 'operator');
 }
 
 /**
@@ -204,7 +212,19 @@ adminSync.put('/content-source', async (c) => {
 
   if (token !== undefined) await writeRepoToken(c.env, token);
   await writeSyncConfig(c.env, { mode: 'repo', repo });
-  return c.json({ ok: true, mode: 'repo', repo, report });
+  let initialSync: SyncReport | undefined;
+  if (body.syncNow === true) {
+    const synced = await runRepoSync(c.env, {
+      trigger: 'manual',
+      actor: actor(c),
+      waitUntil: (p) => c.executionCtx.waitUntil(p),
+    });
+    if ('alreadyRunning' in synced) {
+      return c.json({ error: 'sync_running', message: 'The connection was saved, but another sync is already running.' }, 409);
+    }
+    initialSync = synced.report;
+  }
+  return c.json({ ok: true, mode: 'repo', repo, report, ...(initialSync ? { initialSync } : {}) });
 });
 
 /** POST /api/admin/content-source/dry-run — judge without saving or writing. */

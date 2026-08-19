@@ -83,6 +83,7 @@ function loadEnvFile(path) {
 
 const envPath = join(__dirname, 'install.env');
 const env = { ...loadEnvFile(envPath), ...process.env };
+const contentSource = () => (env.CONTENT_SOURCE || 'portal').trim().toLowerCase();
 
 // CONTENT_ORIGIN is deliberately NOT here (AB#7395). Unset means same-origin:
 // the Worker serves the R2 bucket's content itself at /manifest.json and
@@ -179,6 +180,49 @@ async function printAdminSetup(origin, adminKey) {
 }
 
 /**
+ * Save the deployment's initial content source through the Worker's real
+ * connection gate. A repository is dry-run first and only then saved/synced;
+ * this is intentionally the same route the Admin Connections screen uses.
+ */
+async function configureContentSource(origin, adminKey) {
+  if (!(await waitForSite(origin))) throw new Error('the deployed site did not become reachable in time to save its content source');
+  const mode = contentSource();
+  const body = { mode };
+  if (mode === 'repo') {
+    body.repo = {
+      provider: 'github',
+      url: env.CONTENT_REPO_URL.trim(),
+      visibility: (env.CONTENT_REPO_VISIBILITY || 'private').trim().toLowerCase(),
+      branch: (env.CONTENT_REPO_BRANCH || 'main').trim(),
+      path: (env.CONTENT_REPO_PATH || '').trim(),
+      intervalHours: Number(env.CONTENT_REPO_INTERVAL_HOURS || 24),
+      ...(String(env.CONTENT_REPO_ADOPT_MATCHING || '').toLowerCase() === 'true' ? { adoptMatchingExisting: true } : {}),
+    };
+    body.syncNow = true;
+  }
+
+  const res = await fetch(`${origin.replace(/\/+$/, '')}/api/admin/content-source`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-admin-key': adminKey },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.message || `the deployment answered HTTP ${res.status}`);
+  }
+  if (mode === 'repo') {
+    const report = data.initialSync;
+    if (!report?.ok) throw new Error(report?.failure || 'the initial repository sync did not complete successfully');
+    console.log(
+      `✓ Repository connected and synced: ${report.books} book(s), ${report.chaptersWritten} chapter(s) written, ` +
+        `${report.chaptersUnchanged} unchanged, ${report.errors.length} error(s).`
+    );
+  } else {
+    console.log(`✓ Content source saved as ${mode}.`);
+  }
+}
+
+/**
  * `quiet` skips the closing "re-run with --deploy" line: --update calls this
  * for its own preflight, and telling an operator mid-update to go run --deploy
  * would be actively wrong advice.
@@ -204,6 +248,29 @@ function verify(quiet = false) {
   if (env.BRAND_ID && !/^[a-z0-9-]{3,24}$/.test(env.BRAND_ID)) {
     console.error('✗ BRAND_ID must be 3-24 lowercase letters, digits, or hyphens.');
     ok = false;
+  }
+
+  const source = contentSource();
+  if (!['portal', 'repo', 'api'].includes(source)) {
+    console.error('✗ CONTENT_SOURCE must be portal, repo, or api.');
+    ok = false;
+  } else if (source === 'repo') {
+    if (!/^https:\/\/github\.com\/[^/]+\/[^/]+(?:\.git)?\/?$/.test((env.CONTENT_REPO_URL || '').trim())) {
+      console.error('✗ CONTENT_REPO_URL must be an HTTPS GitHub repository URL.');
+      ok = false;
+    }
+    const visibility = (env.CONTENT_REPO_VISIBILITY || 'private').trim().toLowerCase();
+    if (!['public', 'private'].includes(visibility)) {
+      console.error('✗ CONTENT_REPO_VISIBILITY must be public or private.');
+      ok = false;
+    } else if (visibility === 'private' && !(env.CONTENT_SYNC_TOKEN || '').trim()) {
+      console.error('✗ A private repository requires CONTENT_SYNC_TOKEN in install.env or the process environment.');
+      ok = false;
+    } else {
+      console.log(`✓ Initial content source: GitHub repository (${visibility})`);
+    }
+  } else {
+    console.log(`✓ Initial content source: ${source}`);
   }
 
   // brands/<id>/ is a monorepo concept — a standalone scaffolded site carries
@@ -802,7 +869,20 @@ async function deploy() {
     cwd: ROOT,
   });
 
-  console.log('\nDeployed. Publish content next: node packages/pipeline/publish.mjs --brand ' + env.BRAND_ID + ' --source <path>.');
+  if (contentSource() === 'repo' && (env.CONTENT_SYNC_TOKEN || '').trim()) {
+    console.log('Setting the repository read credential as CONTENT_SYNC_TOKEN...');
+    run('wrangler', ['secret', 'put', 'CONTENT_SYNC_TOKEN', '--env', deployEnv()], {
+      input: env.CONTENT_SYNC_TOKEN,
+      stdio: ['pipe', 'inherit', 'inherit'],
+      cwd: ROOT,
+    });
+  }
+
+  console.log('\nSaving the initial content source through StoryLark\'s validation gate...');
+  await configureContentSource(env.APP_ORIGIN, adminKey);
+
+  if (contentSource() === 'repo') console.log('\nDeployed. Repository content is connected and the initial sync completed.');
+  else console.log('\nDeployed. Publish content next: node packages/pipeline/publish.mjs --brand ' + env.BRAND_ID + ' --source <path>.');
   if (env.CONTENT_ORIGIN) {
     console.log(
       `\nCONTENT_ORIGIN is ${env.CONTENT_ORIGIN}: attach an R2 custom domain to the\n` +
