@@ -1,6 +1,6 @@
 import type { JSX } from 'preact';
-import { useState } from 'preact/hooks';
-import { manifest, progressMap, progressKey, hasNewContent, markLibrarySeen } from '../lib/state';
+import { useEffect, useState } from 'preact/hooks';
+import { manifest, progressMap, progressKey, hasNewContent, markLibrarySeen, settings } from '../lib/state';
 import { downloadStates } from '../lib/downloads';
 import { DownloadButton } from '../components/DownloadButton';
 import { fmtDuration, isStoryBrand, startPlayback } from '../lib/player';
@@ -9,6 +9,7 @@ import { navigate } from '../router';
 import { BRAND, contentUrl } from '../brand';
 import { NOUNS, PRESENTATION, countUnits, fillCopy } from '../presentation';
 import type { BookEntry, ChapterEntry, LibraryGroup, LibrarySort } from '../lib/types';
+import { librarySortLabel, resolvePersonalLibrarySort } from '../lib/library-order';
 
 export function Library(): JSX.Element {
   const m = manifest.value;
@@ -69,14 +70,6 @@ function parseArrangement(value: string): Arrangement {
     : { kind: 'sort', key: key as LibrarySort };
 }
 
-const SORT_LABELS: Record<LibrarySort, () => string> = {
-  order: () => `${NOUNS.Unit} order`,
-  title: () => 'Title (A–Z)',
-  author: () => 'Author (A–Z)',
-  recent: () => 'Recently released',
-  timeframe: () => 'Chronological',
-};
-
 const GROUP_LABELS: Record<Exclude<LibraryGroup, 'none'>, () => string> = {
   collection: () => `By ${NOUNS.collection ?? 'collection'}`,
   group: () => 'By collection',
@@ -85,8 +78,22 @@ const GROUP_LABELS: Record<Exclude<LibraryGroup, 'none'>, () => string> = {
 
 /** The arrangement this deployment opens in. */
 function initialArrangement(): Arrangement {
-  const { groupBy, defaultSort } = PRESENTATION.library;
-  return groupBy === 'none' ? { kind: 'sort', key: defaultSort } : { kind: 'group', key: groupBy };
+  const { groupBy } = PRESENTATION.library;
+  const preferredSort = resolvePersonalLibrarySort(PRESENTATION.library, settings.value.librarySort);
+  return groupBy === 'none' ? { kind: 'sort', key: preferredSort } : { kind: 'group', key: groupBy };
+}
+
+/**
+ * The app renders before IndexedDB/account preferences finish loading. Keep
+ * the local picker state in sync when that saved default arrives, while still
+ * allowing temporary picker changes for the rest of this Library visit.
+ */
+function useLibraryArrangement(): [Arrangement, (arrangement: Arrangement) => void] {
+  const preferred = initialArrangement();
+  const preferredValue = arrangementValue(preferred);
+  const [arrangement, setArrangement] = useState<Arrangement>(preferred);
+  useEffect(() => setArrangement(parseArrangement(preferredValue)), [preferredValue]);
+  return [arrangement, setArrangement];
 }
 
 /** One section of the shelf. `name` null = the ungrouped whole library. */
@@ -221,7 +228,7 @@ function LibraryControls({
         >
           {sortOptions.map((key) => (
             <option key={`sort:${key}`} value={`sort:${key}`}>
-              {SORT_LABELS[key]()}
+              {librarySortLabel(key, NOUNS.Unit)}
             </option>
           ))}
           {groupOptions.map((key) => (
@@ -287,7 +294,7 @@ function Shelf({
 
 function StoryLibrary({ books }: { books: BookEntry[] }): JSX.Element {
   const [query, setQuery] = useState('');
-  const [arrangement, setArrangement] = useState<Arrangement>(initialArrangement);
+  const [arrangement, setArrangement] = useLibraryArrangement();
 
   const q = query.trim().toLowerCase();
   let list = books.filter((b) => b.chapters.length > 0);
@@ -410,7 +417,7 @@ function GridCard({ book }: { book: BookEntry }): JSX.Element {
 
 function SeriesLibrary({ books }: { books: BookEntry[] }): JSX.Element {
   const [query, setQuery] = useState('');
-  const [arrangement, setArrangement] = useState<Arrangement>(initialArrangement);
+  const [arrangement, setArrangement] = useLibraryArrangement();
 
   const q = query.trim().toLowerCase();
   const list = q ? books.filter((b) => matches(b, q)) : books;

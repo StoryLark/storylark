@@ -413,6 +413,8 @@ export interface Settings {
   readAlong: 'word' | 'block' | 'off';
   /** Default consumption mode when opening an item without a per-item choice. */
   defaultMode: ConsumptionMode;
+  /** Personal default for an ungrouped library shelf; '' follows the deployment default. */
+  librarySort: LibrarySort | '';
   /** Check for + fetch new content when the app opens or regains connectivity. */
   autoSync: boolean;
   /** flat: auto-download new units (incl. audio); series: keep the whole collection downloaded. */

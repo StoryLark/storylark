@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { user, settings, saveSettings, manifest, pullPreferences } from '../lib/state';
-import type { ConsumptionMode, DownloadRecord, VoiceManifestEntry } from '../lib/types';
+import type { ConsumptionMode, DownloadRecord, LibrarySort, VoiceManifestEntry } from '../lib/types';
 import { api, ApiError, type AuthUser, type PasskeySummary } from '../lib/api';
 import { BRAND, contentUrl } from '../brand';
 import { NOUNS, PRESENTATION } from '../presentation';
@@ -14,6 +14,7 @@ import { syncNow, setAutoDownloadBaseline, downloadsNewUnitsOnly } from '../lib/
 import { passkeysSupported, addPasskey, PasskeyCanceledError } from '../lib/webauthn';
 import { BRAND_LOOK, resolveReaderTheme } from '../lib/reader-themes';
 import { syncWakeLock } from '../lib/player';
+import { librarySortLabel, personalLibrarySortOptions } from '../lib/library-order';
 
 /**
  * Which controls this screen offers is presentation `settings.*` (AB#7416 —
@@ -327,6 +328,8 @@ function ThemeControls(): JSX.Element {
 
 function SyncSection(): JSX.Element {
   const s = settings.value;
+  const librarySortOptions = personalLibrarySortOptions(PRESENTATION.library);
+  const savedLibrarySort = librarySortOptions.includes(s.librarySort as LibrarySort) ? s.librarySort : '';
   // What the auto-download toggle MEANS is presentation `download.mode`
   // (AB#7416); its default still follows the layout, so no existing library
   // changes what the switch does or what it is called.
@@ -337,6 +340,28 @@ function SyncSection(): JSX.Element {
   return (
     <section class="settings-section">
       <h2>Library & sync</h2>
+      {librarySortOptions.length > 0 && (
+        <>
+          <label class="settings-row">
+            <span>Default library order</span>
+            <select
+              value={savedLibrarySort}
+              onChange={(e) => void saveSettings({ librarySort: (e.target as HTMLSelectElement).value as LibrarySort | '' })}
+            >
+              <option value="">Site default ({librarySortLabel(PRESENTATION.library.defaultSort, NOUNS.Unit)})</option>
+              {librarySortOptions.map((sort) => (
+                <option key={sort} value={sort}>
+                  {librarySortLabel(sort, NOUNS.Unit)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p class="settings-note">
+            How the library shelf opens for you. This moves whole stories or books; chapters inside a book always stay in
+            the author&rsquo;s reading order.
+          </p>
+        </>
+      )}
       <label class="settings-row">
         <span>Check for new content automatically</span>
         <input
