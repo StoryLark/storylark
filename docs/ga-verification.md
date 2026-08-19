@@ -10,13 +10,14 @@ row is never marked passed from source inspection alone.
 |---|---|---|
 | TypeScript | Pass | `npm run typecheck` across app, core, and Worker |
 | Production PWA build | Pass | `npm run build`; personal PDF and DOCX parsers are lazy chunks |
-| Full automated suite | Pass on the release worktree | `npm test`, including import, persistence, backup safety, accessibility contracts, Worker, pipeline, contracts, and theme packaging |
+| Full automated suite | Pass locally and in PR CI | `npm test`: 291 tests, 290 passed, 1 optional artifact check skipped, 0 failed; includes import, persistence, backup safety, accessibility contracts, Worker, pipeline, contracts, and cross-platform theme-package reproducibility |
 | Dependency audit | Pass with documented upstream exception | `npm audit fix` applied every available non-breaking fix. Three high findings remain in `sharp <0.35.0`, transitively required by the optional Kokoro/Hugging Face narration toolchain; npm reports no fix. The reader import dependencies add no finding. |
 | Built-app HTTP smoke | Pass | Production preview returns HTTP 200 for `/library` |
 
 CI repeats typecheck, production build, and the full suite on Ubuntu with Node
 22 for every pull request and every push to `main`. Release automation runs the
-same gate again before it can publish or package an engine.
+same gate again before it can publish or package an engine. The required
+`Typecheck, build, and test` check passed on PR #29 and is enforced on `main`.
 
 ## Personal-library functional coverage
 
