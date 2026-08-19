@@ -1,5 +1,11 @@
 # storylark-pipeline
 
+## 0.19.5
+
+### Patch Changes
+
+- [#21](https://github.com/StoryLark/storylark/pull/21) [`16f8ff9`](https://github.com/StoryLark/storylark/commit/16f8ff9997c237e85b3145b648c93e11108e1e2a) Thanks [@hcs-platform-app](https://github.com/apps/hcs-platform-app)! - Resolve the publisher project's installed Wrangler CLI directly for R2 uploads, so narration and publishing work from GitHub Actions even when `node_modules/.bin` is not on PATH.
+
 ## 0.19.1
 
 ### Patch Changes
