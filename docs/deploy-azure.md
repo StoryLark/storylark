@@ -4,6 +4,19 @@ StoryLark runs on Azure the same way it runs on Cloudflare: one deployment
 per brand, from the same codebase. This guide provisions a branded site on
 **Azure App Service**, **PostgreSQL Flexible Server**, and **Blob Storage**.
 
+The supported publisher path is the same installer used for Cloudflare:
+
+```text
+npm create storylark my-site -- --deploy
+```
+
+Choose Azure in the wizard. It installs compatible StoryLark packages, writes
+the Azure configuration, verifies your CLI session and template, and asks for
+confirmation before provisioning. Use `npm create storylark my-site` without
+`--deploy`, followed by `npm run doctor` and `npm run setup`, when you want to
+review the project first. The commands below explain and troubleshoot what the
+installer does; cloning the engine is not required.
+
 Full detail (env vars, publishing content, how the Azure path differs
 internally) lives in [`platforms/azure/README.md`](../platforms/azure/README.md)
 — this page is the quick path. For the exhaustive reference — every binding,
@@ -60,7 +73,7 @@ everything else. This template does that by design.
 ## Steps
 
 1. **Fill the installer's env file:**
-   ```
+   ```text
    cp platforms/azure/install.env.example platforms/azure/install.env
    ```
    Set `BRAND_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_LOCATION`, `DB_ADMIN_PASSWORD`,
@@ -72,22 +85,22 @@ everything else. This template does that by design.
 2. **Verify before provisioning anything** (creates nothing — checks your
    values, that you're logged into Azure, and that the infrastructure
    template compiles):
-   ```
-   cd platforms/azure && node install.mjs --verify
+   ```text
+   cd platforms/azure
+   node install.mjs --verify
    ```
 3. **Deploy** (creates real resources and real cost — confirm the plan
    with whoever approves cloud spend before running this). This one command
    does everything: provisions the infrastructure, applies the database
    schema, builds the app for your brand, and deploys the app code to the
    App Service.
-   ```
+   ```text
    node install.mjs --deploy --yes
    ```
    It prints the live URL when done.
 4. **Publish content** through Azure Blob instead of the Cloudflare default:
-   ```
-   node packages/pipeline/publish.mjs --brand <your-id> \
-     --source <path-to-your-content> --storage azure-blob
+   ```text
+   npm run publish -- --storage azure-blob
    ```
    See [`authoring-stories.md`](authoring-stories.md) for the content format.
 

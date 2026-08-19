@@ -11,15 +11,15 @@ This is the default and what most brands should start with.
 
 **Premium, cloud (Azure Speech)** — optional, bring-your-own-key. Set
 `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION` and use an Azure voice id in
-your deployment config's `tts.voice`. Costs per character synthesized.
+`brand.json`'s `tts.voice`. Costs per character synthesized.
 
 Mixing is fine — your primary narrator can be Kokoro while an additional
 voice is Azure, or vice versa; the pipeline handles either per voice id.
 
 ## Picking your brand's narrator
 
-`deployment/<id>/deployment.json` (narration is deployment config, not brand
-identity — see [`build-your-own-theme.md`](build-your-own-theme.md)):
+`deployment/<id>/deployment.json` — TTS config is per-install, not part of the
+portable brand (see [`build-your-own-theme.md`](build-your-own-theme.md)):
 
 ```json
 "tts": {
@@ -62,6 +62,14 @@ voice for **every** chapter — expect proportionally longer publish times
 with more voices. A reader's chosen narrator syncs across their devices and
 stays available offline in their downloads.
 
+### Voice preview samples
+
+StoryLark 0.19+ can publish a short sample sentence for each configured voice.
+When a sample exists in the manifest, Settings shows a preview button beside
+that narrator so readers can listen before choosing. Samples are generated once
+and reused on later publishes. Older manifests without samples remain valid;
+the picker simply omits the preview button.
+
 ## Cost and time expectations
 
 Kokoro voices run locally during `publish.mjs` — the cost is your own
@@ -73,9 +81,8 @@ text-only publish (listen mode falls back to on-device Web Speech).
 
 ## Regenerating narration
 
-Editing a chapter's text and re-publishing automatically re-synthesizes
-just that chapter (content-hash diffing — unchanged chapters are never
-re-narrated). To force a full re-synthesis of everything without changing
-the text, see the pipeline's state file at `.storylark/state/<brand>.json`
-— deleting a chapter's entry there forces a re-publish of just that
-chapter. Full mechanics: [`content-pipeline.md`](content-pipeline.md).
+Editing a chapter and re-publishing re-synthesizes only the blocks whose spoken
+text changed; unchanged blocks and chapters reuse their audio. Use
+`--renarrate-all` when you intentionally need to rebuild every block, such as
+after changing a voice configuration or investigating a bad cached chunk. Full
+mechanics: [`content-pipeline.md`](content-pipeline.md).

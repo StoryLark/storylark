@@ -14,6 +14,45 @@
 
 # Release notes
 
+## 0.19.2 (preview)
+
+Clearer Admin language for every kind of library.
+
+- **Stories & Books** is now the permanent name of the Admin content section, whether a
+  deployment contains standalone stories, multi-chapter books, or both
+- The brand screen now labels its list **Theme version history** and prefixes each entry with
+  **Theme:**, so a theme package version cannot be mistaken for the StoryLark engine version
+
+## 0.19.1 (preview)
+
+A safer default installer and lossless adoption for existing libraries.
+
+- **`npm create storylark` is the supported publisher path** — it installs and locks compatible
+  engine, Worker, and pipeline packages; records project provenance; and includes `npm run
+  doctor` checks for local and live configuration. Cloning the engine remains the advanced path
+  for contributors and forks, and a clone is not installed until `npm install` completes
+- **Existing Cloudflare resources can be adopted safely** without renaming them or changing the
+  deployment's brand identity
+- **Repo adoption is matching-only and atomic** — StoryLark compares the complete chapter set,
+  rendered content, order, visible metadata, and cover identity before changing ownership.
+  Narration, timings, voices, and content objects are preserved; a mismatch writes nothing
+- **No-op syncs are truly no-op** — unchanged content keeps its narration and metadata, and a
+  second identical sync reports zero writes
+- Repository reads now start at the configured path and batch authenticated Markdown requests,
+  keeping large private repositories within the Cloudflare Workers Free subrequest budget
+- Standalone stories and multi-chapter books are both first-class inputs, including legacy
+  single-story chapter ids and root-relative artwork
+
+## 0.19.0 (preview)
+
+Hear a narrator before choosing, and identify every deployed build precisely.
+
+- **Narrator previews** — Settings can play a short sample for each published voice; older
+  manifests without samples continue to work unchanged
+- **Release build numbers** — the reader About screen and Admin System page now show an overall
+  `YYMM.BUILD.PATCH` build number alongside package versions. Admin reports the app bundle and
+  Worker independently so a partial deployment is visible
+
 ## 0.18.0 (preview)
 
 Bring your own repo, and updates that never ask you to redeploy.

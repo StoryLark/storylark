@@ -21,7 +21,7 @@ brands/<your-id>/
 > files, so that updating the StoryLark engine can never touch your brand and
 > your brand can move between deployments without dragging one deployment's
 > URLs along with it. Running an older single-file brand still works — the build
-> warns and tells you to run `npm run migrate-brand`, which splits it for you and
+> warns and tells you to run `npx storylark-migrate-brand`, which splits it for you and
 > keeps a backup.
 
 | File | Holds | Travels with your brand? |
@@ -193,7 +193,7 @@ is how the platform installers configure a deployment they just provisioned.
 | `contractVersion` | integer | Always `1` today. | — |
 | `appOrigin` | string (URL) | Where the app is served. Also the base for admin publish notify, and (with the `app.` label dropped) the marketing origin used to resolve root-relative image `src`s. | `STORYLARK_APP_ORIGIN` |
 | `contentOrigin` | string (URL) | Where published content is served (`contentUrl()` builds asset URLs from this). **Optional:** empty means same-origin — the app serves its own content at `/manifest.json` and `/books/*`, no separate content domain needed. | `STORYLARK_CONTENT_ORIGIN` |
-| `vapidPublicKey` | string | Web-push VAPID **public** key (base64url). Empty disables the push toggle. Generate with `packages/pipeline/gen-vapid.mjs`. | `STORYLARK_VAPID_PUBLIC_KEY` |
+| `vapidPublicKey` | string | Web-push VAPID **public** key (base64url). Empty disables the push toggle. Generate with `npx storylark-gen-vapid`. | `STORYLARK_VAPID_PUBLIC_KEY` |
 | `tts` | object | `{ voice, rate, outputFormat, voices }` used at publish time. `voice` is a Kokoro or Azure Speech voice id; `outputFormat` an Azure output-format enum. | `STORYLARK_TTS_VOICE`, `STORYLARK_TTS_RATE`, `STORYLARK_TTS_OUTPUT_FORMAT`, `STORYLARK_TTS_VOICES` (comma-separated) |
 
 **Keep your VAPID public key.** Every device that has already accepted push
@@ -280,7 +280,7 @@ shipped too. To generate
 neutral placeholders in your accent color:
 
 ```
-node packages/pipeline/gen-icons.mjs --brand <your-id>
+npx storylark-gen-icons --brand <your-id>
 ```
 
 ## Sample themes to start from
@@ -305,7 +305,7 @@ short sample library under `examples/<id>/` so you can see the theme with
 content in it rather than on an empty shelf:
 
 ```
-node packages/pipeline/publish.mjs --brand wireless \
+npx storylark-publish --brand wireless \
   --source examples/wireless --no-audio --local app/dist
 ```
 
@@ -373,9 +373,14 @@ npm run import-theme -- --url https://your.site --key <ADMIN_KEY> --revert
 ```
 
 …or the **Brand & themes** card in `/admin`: upload a package, check it first,
-see the version history, roll back with one click, download any stored version,
+see **Theme version history**, roll back with one click, download any stored version,
 and edit your brand's own details (names, tagline, colours, fonts) with no
 package at all.
+
+The name and version shown there identify the theme package or brand edit. They
+are deliberately separate from the StoryLark engine version shown under
+Platform update / System. For example, `Theme: Holdfast Reader v1.0.0+1` is a
+theme revision, not the site's StoryLark release.
 
 `--key` is the deployment's `ADMIN_KEY` — the same credential the publish
 pipeline uses. `--url`/`--key` fall back to `STORYLARK_URL` /
@@ -408,8 +413,8 @@ If your `brands/<id>/brand.json` is one big file with `appOrigin`, `layout` and
 to convert it:
 
 ```
-npm run migrate-brand              # every brand under brands/
-npm run migrate-brand -- --dry-run # show what would change, write nothing
+npx storylark-migrate-brand              # every brand under brands/
+npx storylark-migrate-brand --dry-run    # show what would change, write nothing
 ```
 
 It rewrites `brand.json` with just the identity fields, creates

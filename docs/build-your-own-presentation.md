@@ -12,7 +12,7 @@ presentation templates live in the
 > their own file, so that updating the StoryLark engine can never touch how your
 > library is arranged, and your arrangement can be shared separately from your
 > branding. An older single-file `brand.json` still works — the build warns and
-> points you at `npm run migrate-brand`, which splits it for you and keeps a
+> points you at `npx storylark-migrate-brand`, which splits it for you and keeps a
 > backup.
 
 ## What ships today

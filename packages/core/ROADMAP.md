@@ -55,14 +55,12 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
   env file, runs that platform's installer. Each installer verifies everything (login state,
   config validity) before creating anything, and only provisions real resources on explicit
   confirmation
-- **Updates you can take in one command** — a Worker or App Service process can't rebuild
-  itself, and shouldn't hold a credential that lets it try: an admin-facing update card shows
-  the current vs. latest engine version and hands you the installer command, which you run from
-  the machine you deploy from with the platform login you already have. It bumps the pinned
-  version, migrates, builds, and redeploys — the updater can only touch the pinned engine
-  version, never a brand's theme or presentation. An optional, off-by-default one-click button
-  does the same thing from `/admin` itself, downloading a checksum-verified prebuilt engine with
-  no build running anywhere
+- **Update now with rollback** — `/admin` checks npm for releases and installs
+  common engine-only updates into the deployment's own storage from a
+  checksum-verified artifact, atomically switching versions without touching
+  brand, theme, presentation, or content. API-server releases use narrowly
+  scoped platform permission provisioned by the installer. Five-version engine
+  history and the installer command remain available for rollback and repair
 - **A lightweight admin portal** (`/admin`) — the update card above, a status view (library
   size, push subscriber count), and a text story-upload form that commits markdown straight to
   the site's repo and publishes through the real, unchanged pipeline (never a second copy of
@@ -105,29 +103,33 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
   the sample themes as a visual look, layered on top of your real brand without ever changing its
   identity. An admin can force one look on every reader from the **Brand & themes** card if they'd
   rather everyone see the theme they designed
+- **Voice previews** — Settings can play a published sample sentence before a
+  reader chooses a narrator
+- **Stories & Books in Admin** — one content manager supports standalone
+  stories, multi-chapter books, and mixed libraries, with typed-confirmation
+  deletion for deployment-owned content
+- **Safe publisher installation and adoption** — `npm create storylark` pins all
+  compatible packages, records provenance, installs dependencies, and ships
+  doctor checks; repo adoption is atomic, matching-only, and preserves existing
+  content objects and narration
 
 ## Now
 
-- Rolling out a second narrator voice on the live demo, and closing out the rest of the M7
-  feature list below
+- Release-1 hardening: keep the npm installer, Admin update path, content
+  ownership, and public documentation aligned across real publisher deployments
+- Expand automated regression coverage for standalone stories, multi-chapter
+  books, mixed narration, updates, rollback, and zero-loss repository adoption
 
 ## Next
 
 - "Listen to anything" — paste text, or bring a PDF, URL, or document, with on-device voices
 - On-device voice & language picker for imported content
-- Voice previews — hear a short sample sentence of each narrator right in Settings before
-  you pick one
 - Social sign-in (Apple, Google, Microsoft)
 - iOS background audio for driving — a research spike
 - A documented AWS recipe (the Postgres + S3-API drivers already make it possible; the
   step-by-step guide and IaC template are the remaining work)
-- The "Publish a story" **upload form** is still text-only — narration still needs either TTS
-  credentials on the publish workflow or a CLI publish to produce audio for a brand-new story.
-  (Editing or reordering a chapter that already exists is a different, already-shipped path: any
-  portal edit or content-API push is queued and narrated automatically by the bulk narration
-  queue's worker — see the Shipped list above.)
-- A delete button in the portal's content manager — removing a book or chapter still needs the
-  CLI or the content API
+- A simpler hosted narration-worker experience for publishers who do not want
+  to run the bundled model on a workstation or CI runner
 
 ## Later
 
