@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0
+
+### Major Changes
+
+- [#29](https://github.com/StoryLark/storylark/pull/29) [`fad5dbf`](https://github.com/StoryLark/storylark/commit/fad5dbf5d3360f5cb31ce5e8a6c7021417c12997) Thanks [@hcs-platform-app](https://github.com/apps/hcs-platform-app)! - Release StoryLark 1.0 with device-local personal document imports, explicit public-contract stability, and the GA quality gate.
+
 ## 0.20.0
 
 ### Minor Changes
