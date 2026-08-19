@@ -571,6 +571,46 @@ test('matching-only adoption migrates an unchanged live book without touching na
   assert.equal((await box.dep.manifest()).libraryVersion, adoptedVersion, 'the second sync is a no-op');
 });
 
+test('matching-only adoption batches a large standalone-story library into one manifest version', async (t) => {
+  const box = await syncDeployment();
+  t.after(() => box.close());
+  const session = await adminSession(box.dep);
+  const entries = {};
+  const count = 42;
+
+  for (let i = 1; i <= count; i++) {
+    const id = `story-${String(i).padStart(2, '0')}`;
+    const title = `Story ${i}`;
+    const legacy = `---\ntitle: ${title}\n---\n\n${PROSE}\n`;
+    const created = await box.dep.call('PUT', `/api/content/v1/books/${id}`, {
+      contractVersion: 1,
+      title,
+      managed: false,
+      chapters: [{ id: 'story', markdown: legacy }],
+    });
+    assert.equal(created.status, 200, created.text);
+    entries[`content/${id}.md`] = withBlock({ type: 'story', title });
+  }
+
+  await box.stage(entries);
+  const connection = { ...CONNECTION, adoptMatchingExisting: true };
+  const connected = await session('PUT', '/api/admin/content-source', { mode: 'repo', repo: connection });
+  assert.equal(connected.status, 200, connected.text);
+  assert.equal(connected.json.report.adoptionCandidates.length, count);
+
+  const before = await box.dep.manifest();
+  const synced = await session('POST', '/api/admin/content-source/sync');
+  assert.equal(synced.status, 200, synced.text);
+  assert.equal(synced.json.report.chaptersWritten, 0);
+  assert.equal(synced.json.report.chaptersUnchanged, count);
+  assert.equal(synced.json.report.adopted.length, count);
+
+  const after = await box.dep.manifest();
+  assert.equal(after.books.length, count);
+  assert.equal(after.libraryVersion, before.libraryVersion + 1, 'all ownership metadata publishes in one manifest version');
+  assert.ok(after.books.every((book) => book.origin === 'sync' && book.chapters[0].origin === 'sync'));
+});
+
 test('§10.6: a declared order colliding with a stored incumbent is the same order_tie through every door', async (t) => {
   const box = await syncDeployment();
   t.after(() => box.close());
