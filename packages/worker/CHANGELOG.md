@@ -1,5 +1,13 @@
 # storylark-worker
 
+## 0.19.6
+
+### Patch Changes
+
+- [#23](https://github.com/StoryLark/storylark/pull/23) [`0704c38`](https://github.com/StoryLark/storylark/commit/0704c381bbfb32b7df9ba3f91343df9c147310a2) Thanks [@hcs-platform-app](https://github.com/apps/hcs-platform-app)! - Keep authenticated GitHub repository sync independent of the user's shared
+  REST API quota by listing content through GraphQL and fetching referenced
+  binary assets from raw content URLs.
+
 ## 0.19.4
 
 ### Patch Changes
