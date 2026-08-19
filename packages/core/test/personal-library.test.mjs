@@ -74,6 +74,30 @@ test('PDF files with selectable text import locally', async () => {
   assert.match(doc.content.blocks[0].text, /Road Trip PDF/);
 });
 
+test('PDF text extraction works when Safari lacks ReadableStream async iteration', async () => {
+  let getTextContentCalled = false;
+  const page = {
+    getTextContent() {
+      getTextContentCalled = true;
+      throw new TypeError("undefined is not a function (near '...t of e...')");
+    },
+    streamTextContent() {
+      return new ReadableStream({
+        start(controller) {
+          controller.enqueue({ items: [{ str: 'First line', hasEOL: true }] });
+          controller.enqueue({ items: [{ type: 'beginMarkedContent' }, { str: 'Second line', hasEOL: false }] });
+          controller.close();
+        },
+      });
+    },
+  };
+
+  const text = await library.extractPdfPageText(page);
+
+  assert.equal(text, 'First line\nSecond line ');
+  assert.equal(getTextContentCalled, false, 'the Safari-incompatible getTextContent path must not run');
+});
+
 test('DOCX files import their readable text locally', async () => {
   const bytes = await minimalDocx('Road Trip Word Document');
   const file = new File([bytes], 'road-trip.docx', {

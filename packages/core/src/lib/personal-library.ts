@@ -208,16 +208,38 @@ async function extractPdf(buffer: ArrayBuffer): Promise<string> {
   const pages: string[] = [];
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
     const page = await pdf.getPage(pageNumber);
-    const content = await page.getTextContent();
-    let pageText = '';
-    for (const item of content.items) {
-      if (!('str' in item)) continue;
-      pageText += `${item.str}${item.hasEOL ? '\n' : ' '}`;
-    }
+    const pageText = await extractPdfPageText(page);
     if (pageText.trim()) pages.push(pageText.trim());
   }
   if (!pages.length) throw new Error('This PDF has no selectable text. Scanned-image PDFs need OCR, which is not included yet.');
   return pages.join('\n\n');
+}
+
+/**
+ * Read PDF.js text chunks through the standard stream reader API.
+ *
+ * Safari exposes ReadableStream#getReader but, in affected WebKit releases,
+ * not the async iterator that PDFPageProxy#getTextContent uses internally.
+ * Reading the same stream explicitly works on Safari and every browser that
+ * PDF.js supports, without user-agent detection or a second extraction path.
+ */
+export async function extractPdfPageText(page: { streamTextContent(): ReadableStream<unknown> }): Promise<string> {
+  const reader = page.streamTextContent().getReader();
+  let pageText = '';
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const items = value && typeof value === 'object' && 'items' in value && Array.isArray(value.items) ? value.items : [];
+      for (const item of items) {
+        if (!item || typeof item !== 'object' || !('str' in item) || typeof item.str !== 'string') continue;
+        pageText += `${item.str}${'hasEOL' in item && item.hasEOL ? '\n' : ' '}`;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return pageText;
 }
 
 function validDocument(value: unknown): value is PersonalDocument {
