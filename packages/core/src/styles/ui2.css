@@ -495,6 +495,356 @@ body:has(.tab-bar-side) .screen {
 
 /* ---- Library v2 ---- */
 
+.library-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.library-add {
+  position: absolute;
+  right: 0;
+  min-height: 44px;
+}
+
+.library-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 0.25rem 0 1rem;
+}
+
+.library-tabs button {
+  min-height: 44px;
+  border: 0;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-headers);
+}
+
+.library-tabs button + button {
+  border-left: 1px solid var(--rule);
+}
+
+.library-tabs button.active {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.personal-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 2.5rem 1rem;
+  border: 1px dashed var(--rule);
+  border-radius: 16px;
+}
+
+.personal-empty h2,
+.personal-empty p {
+  margin: 0.35rem 0;
+}
+
+.personal-empty p {
+  color: var(--text-muted);
+  max-width: 30rem;
+}
+
+.personal-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  background: var(--bg-raised);
+  color: var(--accent);
+  font-size: 2rem;
+}
+
+.personal-empty-add {
+  min-height: 44px;
+  margin-top: 1rem;
+}
+
+.personal-restore {
+  min-height: 44px;
+}
+
+.personal-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.personal-toolbar p {
+  margin: 0;
+}
+
+.personal-toolbar > div {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.personal-toolbar button {
+  min-height: 44px;
+}
+
+.personal-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.personal-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 0.5rem;
+  align-items: center;
+  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 0.65rem;
+}
+
+.personal-main {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.personal-cover {
+  display: grid;
+  place-items: center;
+  flex: 0 0 54px;
+  width: 54px;
+  height: 68px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.personal-card-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.personal-card-body strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+}
+
+.personal-card-body span {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.personal-card-body .chapter-progress {
+  height: 4px;
+  background: var(--bg-sunken);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.personal-delete {
+  grid-column: 1 / -1;
+  justify-self: end;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 0.5rem;
+}
+
+.personal-dialog {
+  width: min(calc(100% - 2rem), 36rem);
+  max-height: min(90vh, 48rem);
+  overflow: auto;
+  padding: 1.25rem;
+  border: 1px solid var(--rule);
+  border-radius: 18px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 18px 80px rgba(0, 0, 0, 0.5);
+}
+
+.personal-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.68);
+}
+
+.personal-dialog-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.personal-dialog-head h2,
+.personal-dialog-head p {
+  margin: 0;
+}
+
+.personal-dialog-head p {
+  margin-top: 0.25rem;
+  color: var(--text-muted);
+}
+
+.personal-dialog-head .icon-btn {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 1.5rem;
+}
+
+.personal-source-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.personal-source {
+  position: relative;
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 0.8rem;
+  width: 100%;
+  min-height: 72px;
+  padding: 0.7rem;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--bg-raised);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.personal-source:focus-visible,
+.personal-source:focus-within {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.personal-source > span {
+  grid-row: 1 / 3;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--bg-sunken);
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+
+.personal-source small {
+  color: var(--text-muted);
+}
+
+.personal-source input[type='file'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.personal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.75rem 0;
+}
+
+.personal-field input,
+.personal-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-sunken);
+  color: var(--text);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+}
+
+.personal-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.personal-dialog-actions button {
+  min-height: 44px;
+}
+
+.personal-added {
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.personal-added > span {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 1.5rem;
+}
+
+.personal-import-status {
+  color: var(--text-muted);
+}
+
+.personal-import-error {
+  color: #e27676;
+}
+
+@media (max-width: 420px) {
+  .library-header {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .library-header .app-tagline {
+    max-width: 12rem;
+  }
+
+  .personal-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .library-controls {
   display: flex;
   gap: 0.5rem;

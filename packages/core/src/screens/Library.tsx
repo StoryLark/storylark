@@ -10,25 +10,90 @@ import { BRAND, contentUrl } from '../brand';
 import { NOUNS, PRESENTATION, countUnits, fillCopy } from '../presentation';
 import type { BookEntry, ChapterEntry, LibraryGroup, LibrarySort } from '../lib/types';
 import { librarySortLabel, resolvePersonalLibrarySort } from '../lib/library-order';
+import { feature } from '../presentation';
+import { PersonalImporter, PersonalLibraryShelf } from './PersonalLibrary';
 
 export function Library(): JSX.Element {
   const m = manifest.value;
+  const personalEnabled = feature('personalImports', false);
+  const requestedPersonal = new URLSearchParams(location.search).get('view') === 'personal';
+  const [view, setView] = useState<'published' | 'personal'>(requestedPersonal ? 'personal' : 'published');
+  const [adding, setAdding] = useState(false);
   return (
     <div class="screen library">
-      <header class="screen-header">
-        <h1 class="screen-title">Library</h1>
-        <p class="app-tagline">{BRAND.tagline}</p>
+      <header class="screen-header library-header">
+        <div>
+          <h1 class="screen-title">Library</h1>
+          <p class="app-tagline">{BRAND.tagline}</p>
+        </div>
+        {personalEnabled && view === 'personal' && (
+          <button class="btn library-add" onClick={() => setAdding(true)}>
+            + Add
+          </button>
+        )}
       </header>
 
-      {hasNewContent.value && (
-        <div class="new-banner" onClick={() => void markLibrarySeen()}>
-          New content in the library
+      {personalEnabled && (
+        <div
+          class="library-tabs"
+          role="tablist"
+          aria-label="Library shelves"
+          onKeyDown={(event) => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const next = event.key === 'ArrowLeft' || event.key === 'Home' ? 'published' : 'personal';
+            setView(next);
+            (event.currentTarget.querySelector(`#library-tab-${next}`) as HTMLButtonElement | null)?.focus();
+          }}
+        >
+          <button
+            id="library-tab-published"
+            role="tab"
+            aria-selected={view === 'published'}
+            aria-controls="library-panel-published"
+            tabIndex={view === 'published' ? 0 : -1}
+            class={view === 'published' ? 'active' : ''}
+            onClick={() => setView('published')}
+          >
+            Published
+          </button>
+          <button
+            id="library-tab-personal"
+            role="tab"
+            aria-selected={view === 'personal'}
+            aria-controls="library-panel-personal"
+            tabIndex={view === 'personal' ? 0 : -1}
+            class={view === 'personal' ? 'active' : ''}
+            onClick={() => setView('personal')}
+          >
+            My Library
+          </button>
         </div>
       )}
 
-      {!m && <p class="empty-state">{fillCopy(PRESENTATION.emptyState.home)}</p>}
-      {m && m.books.length === 0 && <p class="empty-state">{fillCopy(PRESENTATION.emptyState.library)}</p>}
-      {m && m.books.length > 0 && (isStoryBrand() ? <StoryLibrary books={m.books} /> : <SeriesLibrary books={m.books} />)}
+      {personalEnabled && view === 'personal' ? (
+        <div id="library-panel-personal" role="tabpanel" aria-labelledby="library-tab-personal">
+          <PersonalLibraryShelf onAdd={() => setAdding(true)} />
+        </div>
+      ) : (
+        <div
+          id={personalEnabled ? 'library-panel-published' : undefined}
+          role={personalEnabled ? 'tabpanel' : undefined}
+          aria-labelledby={personalEnabled ? 'library-tab-published' : undefined}
+        >
+
+          {hasNewContent.value && (
+            <button class="new-banner" onClick={() => void markLibrarySeen()}>
+              New content in the library
+            </button>
+          )}
+
+          {!m && <p class="empty-state">{fillCopy(PRESENTATION.emptyState.home)}</p>}
+          {m && m.books.length === 0 && <p class="empty-state">{fillCopy(PRESENTATION.emptyState.library)}</p>}
+          {m && m.books.length > 0 && (isStoryBrand() ? <StoryLibrary books={m.books} /> : <SeriesLibrary books={m.books} />)}
+        </div>
+      )}
+      {adding && <PersonalImporter onClose={() => setAdding(false)} />}
     </div>
   );
 }

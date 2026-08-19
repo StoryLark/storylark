@@ -15,10 +15,12 @@ export function navigate(path: string, replace = false): void {
   if (replace) history.replaceState(null, '', path);
   else history.pushState(null, '', path);
   route.value = parse(path);
+  requestAnimationFrame(() => document.getElementById('main-content')?.focus());
 }
 
 window.addEventListener('popstate', () => {
   route.value = parse(location.pathname + location.search);
+  requestAnimationFrame(() => document.getElementById('main-content')?.focus());
 });
 
 function parse(path: string): Route {

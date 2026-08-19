@@ -188,7 +188,7 @@ function PlaybackSection(): JSX.Element {
               }}
             />
           </label>
-          <p class="settings-note">While read-along is playing, the screen won't dim or lock mid-{NOUNS.unit}.</p>
+          <p class="settings-note">While read-along or a device voice is playing, the visible screen won't dim or lock mid-{NOUNS.unit}.</p>
         </>
       )}
       {/*

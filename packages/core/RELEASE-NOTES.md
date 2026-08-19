@@ -14,6 +14,22 @@
 
 # Release notes
 
+## 1.0.0
+
+StoryLark's stable foundation, plus a private shelf for documents you bring yourself.
+
+- **My Library** — on presentations that enable it, add PDF, DOCX, text, pasted text, or an
+  accessible web page from Library. Personal documents stay on that device and never enter a
+  publisher's content store or account sync
+- **Read or listen** — imports use the normal Reader and the browser's device voice; Keep screen
+  awake now also covers visible device-voice playback
+- **Portable by choice** — export and restore a personal-library JSON backup without silently
+  enabling cloud sync
+- **Stable 1.0 contracts** — the supported brand, presentation, deployment, content, package,
+  and adapter surfaces now have an explicit compatibility policy
+- **Release gate** — every pull request and main-branch change must typecheck, build, and pass the
+  automated suite before release
+
 ## 0.20.0 (preview)
 
 Let each reader choose how an ungrouped library opens without changing the publisher's structure.

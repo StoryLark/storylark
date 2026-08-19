@@ -58,6 +58,30 @@ test('build → read → build is a fixed point, so a theme survives being moved
   }
 });
 
+test('theme packages are byte-for-byte identical across platform line endings', async () => {
+  const lf = loadBrand('storylark');
+  lf.themeCss = lf.themeCss.replace(/\r\n?/g, '\n');
+  for (const [name, bytes] of lf.icons) {
+    if (!name.endsWith('.svg')) continue;
+    const text = new TextDecoder().decode(bytes).replace(/\r\n?/g, '\n');
+    lf.icons.set(name, new TextEncoder().encode(text));
+  }
+
+  const crlf = {
+    ...lf,
+    themeCss: lf.themeCss.replace(/\n/g, '\r\n'),
+    icons: new Map(lf.icons),
+  };
+  for (const [name, bytes] of crlf.icons) {
+    if (!name.endsWith('.svg')) continue;
+    const text = new TextDecoder().decode(bytes).replace(/\n/g, '\r\n');
+    crlf.icons.set(name, new TextEncoder().encode(text));
+  }
+
+  const [fromLf, fromCrlf] = await Promise.all([buildThemePackage(lf), buildThemePackage(crlf)]);
+  assert.deepEqual(Buffer.from(fromCrlf.bytes), Buffer.from(fromLf.bytes));
+});
+
 test('the archive contains exactly the format §0c describes', async () => {
   const { bytes } = await buildThemePackage(loadBrand('wireless'));
   const entries = [...(await unzip(bytes)).keys()].sort();

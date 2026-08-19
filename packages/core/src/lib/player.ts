@@ -16,6 +16,8 @@ import { audioController } from '../reader/AudioController';
 import { speechFallback } from '../reader/SpeechFallback';
 import { setupMediaSession, updatePlaybackState } from './mediasession';
 import { setWakeLock } from './wakelock';
+import { findPersonalEntry, isPersonalBook, personalDocuments } from './personal-library';
+import { loadChapterContent, loadChapterTimings } from './content-loader';
 
 /** Audio + timings for the user's chosen narrator; the chapter's base
  *  `audio`/`timings` are the library default voice. Applies on next load. */
@@ -53,11 +55,12 @@ let attachedContainer: HTMLElement | null = null;
 export function findEntry(bookId: string, chapterId: string): { book: BookEntry; chapter: ChapterEntry } | null {
   const book = manifest.value?.books.find((b) => b.id === bookId);
   const chapter = book?.chapters.find((c) => c.id === chapterId);
-  return book && chapter ? { book, chapter } : null;
+  return book && chapter ? { book, chapter } : findPersonalEntry(bookId, chapterId);
 }
 
 /** Next chapter in the book; for one-chapter (flat-library) books, the next book's unit. */
 export function nextItem(bookId: string, chapterId: string): { bookId: string; chapterId: string } | null {
+  if (isPersonalBook(bookId)) return adjacentPersonalItem(bookId, 1);
   const m = manifest.value;
   if (!m) return null;
   const bookIndex = m.books.findIndex((b) => b.id === bookId);
@@ -73,6 +76,7 @@ export function nextItem(bookId: string, chapterId: string): { bookId: string; c
 }
 
 function prevItem(bookId: string, chapterId: string): { bookId: string; chapterId: string } | null {
+  if (isPersonalBook(bookId)) return adjacentPersonalItem(bookId, -1);
   const m = manifest.value;
   if (!m) return null;
   const bookIndex = m.books.findIndex((b) => b.id === bookId);
@@ -126,14 +130,9 @@ export async function startPlayback(bookId: string, chapterId: string, opts: { a
   let content: ChapterContent;
   let timings: ChapterTimings | null = null;
   try {
-    const res = await fetch(contentUrl(chapter.content));
-    if (!res.ok) throw new Error(`content ${res.status}`);
-    content = (await res.json()) as ChapterContent;
+    content = await loadChapterContent(chapter);
     const track = chapterTrack(chapter);
-    if (track.timings) {
-      const tRes = await fetch(contentUrl(track.timings)).catch(() => null);
-      if (tRes?.ok) timings = (await tRes.json()) as ChapterTimings;
-    }
+    timings = await loadChapterTimings(track.timings).catch(() => null);
   } catch {
     playerLoading.value = false;
     return;
@@ -312,7 +311,19 @@ export function attachContainer(el: HTMLElement | null): void {
  *  narration playing AND the Reader's text attached for highlighting AND the
  *  Keep-screen-awake setting on. Exported so Settings can re-sync on toggle. */
 export function syncWakeLock(): void {
-  setWakeLock(settings.value.keepAwake && playerPlaying.value && attachedContainer !== null);
+  // Prerecorded audio can continue with the screen locked. Device speech
+  // cannot reliably do that on iOS, so keep the visible app awake even from
+  // Now Playing; read-along retains the original attached-container rule.
+  const deviceVoice = nowPlaying.value !== null && !nowPlaying.value.hasAudio;
+  setWakeLock(settings.value.keepAwake && playerPlaying.value && (attachedContainer !== null || deviceVoice));
+}
+
+function adjacentPersonalItem(bookId: string, delta: -1 | 1): { bookId: string; chapterId: string } | null {
+  const docs = personalDocuments.value;
+  const index = docs.findIndex((doc) => doc.book.id === bookId);
+  const target = docs[index + delta];
+  const chapter = target?.book.chapters[0];
+  return target && chapter ? { bookId: target.book.id, chapterId: chapter.id } : null;
 }
 
 async function persistListen(ms?: number, dur?: number): Promise<void> {

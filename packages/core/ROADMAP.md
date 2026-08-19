@@ -2,8 +2,8 @@
 
 <!-- Rendered on the in-app About screen and on storylark.org. Keep the format to ## headings, short paragraphs, and - bullets only. HTML comments are not rendered. -->
 
-The path to 1.0, milestone by milestone. `0.x` means evolving preview — breaking changes are
-still allowed. `1.0.0` means the core API is stable and the milestones below are complete.
+StoryLark's shipped foundation and post-1.0 direction. The contracts named in
+the stability policy are frozen from 1.0.0 onward.
 
 ## Shipped
 
@@ -112,29 +112,24 @@ still allowed. `1.0.0` means the core API is stable and the milestones below are
   compatible packages, records provenance, installs dependencies, and ships
   doctor checks; repo adoption is atomic, matching-only, and preserves existing
   content objects and narration
+- **My Library: listen to your own document** — an enabled presentation can let
+  a reader add PDF, DOCX, text, pasted text, or a permitted web page from the
+  Library. The document stays on that device, reads in the normal Reader, and
+  listens through the browser's device voice while the wake lock keeps the
+  visible PWA awake. JSON backup and restore move the library deliberately.
+- **1.0 quality gate** — pull requests and `main` run typecheck, production
+  build, and the complete automated test suite before release.
+- **1.0 contract freeze** — brand, presentation, deployment, content manifest,
+  content API v1, theme/engine package, and storage/database adapter contracts
+  now carry an explicit compatibility policy.
 
-## Now
+## Post-1.0 roadmap
 
-- Release-1 hardening: keep the npm installer, Admin update path, content
-  ownership, and public documentation aligned across real publisher deployments
-- Expand automated regression coverage for standalone stories, multi-chapter
-  books, mixed narration, updates, rollback, and zero-loss repository adoption
-
-## Next
-
-- "Listen to anything" — paste text, or bring a PDF, URL, or document, with on-device voices
 - On-device voice & language picker for imported content
 - Social sign-in (Apple, Google, Microsoft)
 - iOS background audio for driving — a research spike
+- Opt-in cross-device sync for personal libraries; device-local remains the default
 - A documented AWS recipe (the Postgres + S3-API drivers already make it possible; the
   step-by-step guide and IaC template are the remaining work)
 - A simpler hosted narration-worker experience for publishers who do not want
   to run the bundled model on a workstation or CI runner
-
-## Later
-
-Hardening toward 1.0: an automated test suite and CI quality gate, a full device/browser QA
-pass, an accessibility audit, rate-limiting across every auth endpoint, complete API
-documentation, and a final API-stability review that freezes the config, theme, presentation,
-deployment, and manifest contracts for 1.0.0 — including the database/storage adapter interfaces
-and the update mechanism's own contract.

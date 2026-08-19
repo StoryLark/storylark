@@ -1,7 +1,7 @@
-// Screen wake lock for read-along: while narration is playing with the
-// Reader's text on screen (word-sync highlighting attached), the device must
-// not dim or lock mid-story. The lock is released the moment playback pauses
-// or the Reader detaches, so plain listening with the screen off is untouched.
+// Screen wake lock for read-along or device-voice playback: while narration is
+// playing with text on screen, or the visible PWA is supplying speech itself,
+// the device must not dim or lock mid-story. Pre-recorded audio-only playback
+// remains untouched when the Reader is not attached.
 //
 // Wake locks are auto-released by the browser whenever the page is hidden;
 // the visibilitychange listener re-acquires on return if still wanted.

@@ -362,6 +362,29 @@ export interface ChapterContent {
   charLength: number;
 }
 
+/** A reader-owned document that never enters the publisher manifest or API. */
+export interface PersonalDocument {
+  schemaVersion: 1;
+  id: string;
+  title: string;
+  author?: string;
+  source: {
+    kind: 'paste' | 'txt' | 'pdf' | 'docx' | 'url';
+    name?: string;
+    url?: string;
+  };
+  importedAt: string;
+  updatedAt: string;
+  book: BookEntry;
+  content: ChapterContent;
+}
+
+export interface PersonalLibraryBackup {
+  schemaVersion: 1;
+  exportedAt: string;
+  documents: PersonalDocument[];
+}
+
 export interface ChapterTimings {
   schemaVersion: number;
   durationMs: number;

@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout storylark (source of truth)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           sparse-checkout: |
             packages/core/RELEASE-NOTES.md
@@ -54,7 +54,7 @@ jobs:
           permission-contents: write
 
       - name: Checkout storylark-org (generated copy)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: StoryLark/storylark-org
           token: ${{ steps.app-token.outputs.token }}
