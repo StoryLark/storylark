@@ -122,6 +122,8 @@ const github: SyncProviderDriver = {
     const headers = this.archiveHeaders(token);
     const root = normaliseRepoPath(path);
     const names: string[] = [];
+    const graphql = baseOverride ? `${base}/graphql` : 'https://api.github.com/graphql';
+    let commitOid: string | undefined;
 
     const endpoint = (file: string): string => {
       const encoded = normaliseRepoPath(file)
@@ -133,24 +135,83 @@ const github: SyncProviderDriver = {
       return `${base}/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}${suffix}?ref=${encodeURIComponent(ref)}`;
     };
 
-    const walk = async (dir: string): Promise<void> => {
+    const walkContentsApi = async (dir: string): Promise<void> => {
       const res = await fetch(endpoint(dir), { headers, redirect: 'follow' });
       if (!res.ok) throw new Error(`GitHub answered ${res.status} while listing "${dir || '/'}".`);
       const entries = (await res.json()) as { type?: unknown; path?: unknown }[];
       if (!Array.isArray(entries)) throw new Error(`GitHub did not return a directory listing for "${dir || '/'}".`);
       for (const entry of entries) {
         if (typeof entry.path !== 'string') continue;
-        if (entry.type === 'dir') await walk(entry.path);
+        if (entry.type === 'dir') await walkContentsApi(entry.path);
         else if (entry.type === 'file' && entry.path.toLowerCase().endsWith('.md')) names.push(entry.path);
       }
     };
 
-    await walk(root);
+    const walkGraphql = async (dir: string): Promise<void> => {
+      // The trailing colon matters for a root-path connection: `main` resolves
+      // to the commit object, while `main:` resolves to its root tree.
+      const expression = `${ref}:${dir}`;
+      const query = `query {
+        repository(owner: ${JSON.stringify(repo.owner)}, name: ${JSON.stringify(repo.repo)}) {
+          ref(qualifiedName: ${JSON.stringify(`refs/heads/${ref}`)}) { target { oid } }
+          object(expression: ${JSON.stringify(expression)}) {
+            ... on Tree { entries { name type } }
+          }
+        }
+      }`;
+      const res = await fetch(graphql, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+      if (!res.ok) throw new Error(`GitHub answered ${res.status} while listing "${dir || '/'}".`);
+      const payload = (await res.json()) as {
+        data?: {
+          repository?: {
+            ref?: { target?: { oid?: unknown } | null } | null;
+            object?: { entries?: { name?: unknown; type?: unknown }[] | null } | null;
+          } | null;
+        };
+        errors?: { message?: unknown }[];
+      };
+      if (payload.errors?.length) {
+        throw new Error(`GitHub could not list "${dir || '/'}": ${String(payload.errors[0].message ?? 'unknown GraphQL error')}`);
+      }
+      const repository = payload.data?.repository;
+      const entries = repository?.object?.entries;
+      if (!repository || !Array.isArray(entries)) throw new Error(`GitHub did not return a directory listing for "${dir || '/'}".`);
+      const oid = repository.ref?.target?.oid;
+      if (typeof oid === 'string') commitOid = oid;
+      for (const entry of entries) {
+        if (typeof entry.name !== 'string') continue;
+        const full = dir ? `${dir}/${entry.name}` : entry.name;
+        if (entry.type === 'tree') await walkGraphql(full);
+        else if (entry.type === 'blob' && full.toLowerCase().endsWith('.md')) names.push(full);
+      }
+    };
+
+    // Authenticated repository pulls stay entirely off GitHub's shared REST
+    // core bucket. A publisher's unrelated API traffic can exhaust that bucket
+    // while GraphQL and raw-content reads remain healthy; one REST directory
+    // listing must not take production content sync down with it.
+    if (token) await walkGraphql(root);
+    else await walkContentsApi(root);
     names.sort();
     const read = async (file: string): Promise<Uint8Array | undefined> => {
       const safe = normaliseRepoPath(file);
-      const res = await fetch(endpoint(safe), {
-        headers: { ...headers, Accept: 'application/vnd.github.raw+json' },
+      const rawUrl = token
+        ? baseOverride
+          ? `${base}/raw/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/${encodeURIComponent(commitOid ?? ref)}/${safe
+              .split('/')
+              .map((part) => encodeURIComponent(part))
+              .join('/')}`
+          : `https://raw.githubusercontent.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/${encodeURIComponent(commitOid ?? ref)}/${safe
+              .split('/')
+              .map((part) => encodeURIComponent(part))
+              .join('/')}`
+        : endpoint(safe);
+      const res = await fetch(rawUrl, {
+        headers: token ? headers : { ...headers, Accept: 'application/vnd.github.raw+json' },
         redirect: 'follow',
       });
       if (res.status === 404) return undefined;
@@ -165,7 +226,6 @@ const github: SyncProviderDriver = {
       // external-subrequest ceiling.
       ...(token ? { async readMany(files: string[]) {
         const found = new Map<string, Uint8Array>();
-        const graphql = baseOverride ? `${base}/graphql` : 'https://api.github.com/graphql';
         // Fifty aliases keeps GitHub query cost and response size modest while
         // turning a 42-story library from 42 external subrequests into one.
         for (let offset = 0; offset < files.length; offset += 50) {

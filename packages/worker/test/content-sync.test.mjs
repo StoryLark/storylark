@@ -90,37 +90,100 @@ async function syncDeployment() {
   };
 }
 
-/** GitHub Contents API-shaped source: path-first, individual files on demand. */
+/** Authenticated GitHub-shaped source: GraphQL listing/batching plus raw assets. */
 async function contentsDeployment() {
-  const story = withBlock({ type: 'story', title: 'Path First' });
+  const story = withBlock({ type: 'story', title: 'Path First' }, `${PROSE}\n\n![A small cover](path-first.png)`);
   const requests = [];
   const server = createServer((req, res) => {
     requests.push(`${req.method} ${req.url}`);
     const url = new URL(req.url, 'http://127.0.0.1');
-    if (url.pathname === '/repos/acme/stories/contents/content') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(
-        JSON.stringify([
-          { type: 'file', path: 'content/path-first.md', size: Buffer.byteLength(story) },
-          { type: 'file', path: 'content/unrelated-250mb.bin', size: 250 * 1024 * 1024 },
-        ])
-      );
-      return;
-    }
     if (req.method === 'POST' && url.pathname === '/graphql') {
       let body = '';
       req.setEncoding('utf8');
       req.on('data', (chunk) => (body += chunk));
       req.on('end', () => {
+        if (body.includes('entries { name type }')) {
+          assert.match(body, /main:content/, 'the listing starts at the configured content path');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              data: {
+                repository: {
+                  ref: { target: { oid: 'abc123' } },
+                  object: {
+                    entries: [
+                      { type: 'blob', name: 'path-first.md' },
+                      { type: 'blob', name: 'path-first.png' },
+                      { type: 'blob', name: 'unrelated-250mb.bin' },
+                    ],
+                  },
+                },
+              },
+            })
+          );
+          return;
+        }
         assert.match(body, /content\/path-first\.md/, 'the batch asks only for the in-scope Markdown candidate');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ data: { repository: { f0: { text: story, isTruncated: false } } } }));
       });
       return;
     }
-    if (url.pathname === '/repos/acme/stories/contents/content/path-first.md') {
-      res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
-      res.end(story);
+    if (url.pathname === '/raw/acme/stories/abc123/content/path-first.png') {
+      res.writeHead(200, { 'Content-Type': 'image/png' });
+      res.end(Buffer.from(PNG));
+      return;
+    }
+    if (url.pathname.includes('/contents/')) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ message: 'API rate limit exceeded' }));
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const dep = await testDeployment({ CONTENT_SYNC_GITHUB_API_BASE: base, CONTENT_SYNC_TOKEN: 'github-app-test-token' });
+  return {
+    dep,
+    requests,
+    close: async () => {
+      server.close();
+      await dep.close();
+    },
+  };
+}
+
+/** A token-authenticated root connection must ask GraphQL for `main:`. */
+async function rootContentsDeployment() {
+  const requests = [];
+  const server = createServer((req, res) => {
+    requests.push(`${req.method} ${req.url}`);
+    const url = new URL(req.url, 'http://127.0.0.1');
+    if (req.method === 'POST' && url.pathname === '/graphql') {
+      let body = '';
+      req.setEncoding('utf8');
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', () => {
+        if (body.includes('entries { name type }')) {
+          assert.match(body, /main:/, 'a root connection queries the root tree, not the commit object');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              data: {
+                repository: {
+                  ref: { target: { oid: 'root123' } },
+                  object: { entries: [{ type: 'blob', name: 'root-story.md' }] },
+                },
+              },
+            })
+          );
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: { repository: { f0: { text: withBlock({ type: 'story', title: 'Root Story' }), isTruncated: false } } } }));
+      });
       return;
     }
     res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -480,7 +543,7 @@ test('a cross-source collision is book_owned_elsewhere, naming the owner; same s
   }
 });
 
-test('GitHub reads only the configured content path and never downloads an unrelated large repository archive', async (t) => {
+test('authenticated GitHub sync avoids an exhausted REST bucket and reads only the configured content path', async (t) => {
   const box = await contentsDeployment();
   t.after(() => box.close());
   const session = await adminSession(box.dep);
@@ -493,7 +556,20 @@ test('GitHub reads only the configured content path and never downloads an unrel
   assert.equal((await box.dep.manifest()).books[0].id, 'path-first');
   assert.equal(box.requests.some((path) => path.includes('zipball')), false, 'the whole archive was never requested');
   assert.equal(box.requests.some((path) => path.includes('unrelated-250mb.bin')), false, 'an unrelated large file was never requested');
-  assert.equal(box.requests.some((path) => path.includes('/contents/content/path-first.md')), false, 'Markdown bodies were batch-read');
+  assert.equal(box.requests.some((path) => path.includes('/contents/')), false, 'the exhausted REST core bucket was never used');
+  assert.equal(box.requests.some((path) => path.includes('/raw/acme/stories/abc123/content/path-first.png')), true, 'referenced binary assets use raw content');
+});
+
+test('authenticated GitHub sync resolves a repository-root connection as the root tree', async (t) => {
+  const box = await rootContentsDeployment();
+  t.after(() => box.close());
+  const session = await adminSession(box.dep);
+  const rootConnection = { ...CONNECTION, path: '' };
+
+  const connected = await session('PUT', '/api/admin/content-source', { mode: 'repo', repo: rootConnection });
+  assert.equal(connected.status, 200, connected.text);
+  assert.equal(connected.json.report.candidates, 1);
+  assert.equal(box.requests.some((request) => request.includes('/contents/')), false);
 });
 
 test('matching-only adoption migrates an unchanged live book without touching narration; mismatches remain blocked', async (t) => {
